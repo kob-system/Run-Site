@@ -13,33 +13,57 @@ function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session) fetchProfile(session.user.id)
-      else setLoading(false)
+      if (session) {
+        fetchProfile(session.user.id)
+      } else {
+        setLoading(false)
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      if (session) fetchProfile(session.user.id)
-      else { setProfile(null); setLoading(false) }
+      if (session) {
+        fetchProfile(session.user.id)
+      } else {
+        setProfile(null)
+        setLoading(false)
+      }
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
   const fetchProfile = async (userId) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    setProfile(data)
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      setProfile(data)
+    } catch (e) {
+      console.log('Profile error:', e)
+    }
     setLoading(false)
   }
 
-  if (loading) return <div className="loading">Loading Run-Site...</div>
-  if (!session) return <Login />
-  if (profile?.role === 'worker') return <WorkerDashboard profile={profile} />
-  return <OwnerDashboard profile={profile} />
+  if (loading) {
+    return <div className="loading">Loading Run-Site...</div>
+  }
+
+  if (!session) {
+    return <Login />
+  }
+
+  if (profile && profile.role === 'worker') {
+    return <WorkerDashboard profile={profile} />
+  }
+
+  if (profile) {
+    return <OwnerDashboard profile={profile} />
+  }
+
+  return <Login />
 }
 
 export default App
