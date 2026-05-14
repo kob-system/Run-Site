@@ -198,6 +198,7 @@ function OwnerDashboard({ profile }) {
   const [showNewWorker, setShowNewWorker] = useState(false)
   const [showNewSchedule, setShowNewSchedule] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', category: 'materials' })
   const [workerForm, setWorkerForm] = useState({ email: '', full_name: '', hourly_rate: '' })
@@ -235,6 +236,48 @@ function OwnerDashboard({ profile }) {
     setJobForm({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
     await fetchProjects()
     setLoading(false)
+  }
+
+  const scanReceipt = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setScanning(true)
+    const reader = new FileReader()
+    reader.onload = async (event) => {
+      const base64 = event.target.result.split(',')[1]
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 200,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: file.type, data: base64 } },
+                { type: 'text', text: 'Look at this receipt and extract: 1) store name, 2) total amount. Reply in this exact format only: STORE: [store name] AMOUNT: [number only, no $ sign]' }
+              ]
+            }]
+          })
+        })
+        const data = await response.json()
+        const text = data.content[0].text
+        const storeMatch = text.match(/STORE:\s*(.+?)(?:\s+AMOUNT|$)/i)
+        const amountMatch = text.match(/AMOUNT:\s*([\d.]+)/i)
+        if (storeMatch) setReceiptForm(f => ({ ...f, store: storeMatch[1].trim() }))
+        if (amountMatch) setReceiptForm(f => ({ ...f, amount: amountMatch[1] }))
+      } catch (err) {
+        console.log('Scan error:', err)
+      }
+      setScanning(false)
+    }
+    reader.readAsDataURL(file)
   }
 
   const addReceipt = async () => {
@@ -374,6 +417,11 @@ function OwnerDashboard({ profile }) {
           <div className="modal-overlay" onClick={() => setShowNewReceipt(false)}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
               <h2>Add Receipt</h2>
+              <div className="input-group">
+                <label>📷 Scan Receipt Photo</label>
+                <input type="file" accept="image/*" capture="environment" onChange={scanReceipt} style={{ padding: '8px 0' }} />
+                {scanning && <p style={{ color: '#E07B2A', fontSize: '13px', marginTop: '6px' }}>🔍 Scanning receipt...</p>}
+              </div>
               <div className="input-group"><label>Description</label><input value={receiptForm.description} onChange={e => setReceiptForm({ ...receiptForm, description: e.target.value })} placeholder="Concrete mix" /></div>
               <div className="input-group"><label>Store</label><input value={receiptForm.store} onChange={e => setReceiptForm({ ...receiptForm, store: e.target.value })} placeholder="Home Depot" /></div>
               <div className="input-group"><label>Amount ($)</label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
