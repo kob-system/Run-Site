@@ -20,16 +20,17 @@ function Login() {
     setLoading(false)
   }
 
-  const handleSignup = async (e) => {
+const handleSignup = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) { setError(error.message); setLoading(false); return }
     if (data.user) {
-      await supabase.from('profiles').insert({
+      const { error: profileError } = await supabase.from('profiles').insert({
         id: data.user.id, email, full_name: name, company_name: company, role: 'owner'
       })
+      if (profileError) { setError('Account created but profile failed: ' + profileError.message); setLoading(false); return }
     }
     setLoading(false)
   }
