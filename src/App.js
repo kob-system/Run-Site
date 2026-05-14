@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
-import Login from './pages/Login'
-import OwnerDashboard from './pages/OwnerDashboard'
-import WorkerDashboard from './pages/WorkerDashboard'
 import './App.css'
+
+const Login = React.lazy(() => import('./pages/Login'))
+const OwnerDashboard = React.lazy(() => import('./pages/OwnerDashboard'))
+const WorkerDashboard = React.lazy(() => import('./pages/WorkerDashboard'))
 
 function App() {
   const [session, setSession] = useState(null)
@@ -52,18 +53,30 @@ function App() {
   }
 
   if (!session) {
-    return <Login />
+    return (
+      <React.Suspense fallback={<div className="loading">Loading...</div>}>
+        <Login />
+      </React.Suspense>
+    )
   }
 
   if (profile && profile.role === 'worker') {
-    return <WorkerDashboard profile={profile} />
+    return (
+      <React.Suspense fallback={<div className="loading">Loading...</div>}>
+        <WorkerDashboard profile={profile} />
+      </React.Suspense>
+    )
   }
 
   if (profile) {
-    return <OwnerDashboard profile={profile} />
+    return (
+      <React.Suspense fallback={<div className="loading">Loading...</div>}>
+        <OwnerDashboard profile={profile} />
+      </React.Suspense>
+    )
   }
 
-  return <Login />
+  return <div className="loading">Loading Run-Site...</div>
 }
 
 export default App
