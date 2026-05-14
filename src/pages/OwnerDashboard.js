@@ -15,7 +15,6 @@ export default function OwnerDashboard({ profile }) {
   const [showNewWorker, setShowNewWorker] = useState(false)
   const [showNewSchedule, setShowNewSchedule] = useState(false)
   const [loading, setLoading] = useState(false)
-
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', category: 'materials' })
   const [workerForm, setWorkerForm] = useState({ email: '', full_name: '', hourly_rate: '' })
@@ -86,10 +85,8 @@ export default function OwnerDashboard({ profile }) {
 
   const addWorker = async () => {
     setLoading(true)
-    const { data, error } = await supabase.auth.admin ? 
-      { data: null, error: 'use signup' } : 
-      await supabase.auth.signUp({ email: workerForm.email, password: 'RunSite2024!' })
-    if (data?.user) {
+    const { data } = await supabase.auth.signUp({ email: workerForm.email, password: 'RunSite2024!' })
+    if (data && data.user) {
       await supabase.from('profiles').insert({
         id: data.user.id,
         email: workerForm.email,
@@ -135,9 +132,8 @@ export default function OwnerDashboard({ profile }) {
 
   const getBudgetPct = (spent, budget) => budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
   const getBudgetClass = (pct) => pct >= 100 ? 'danger' : pct >= 80 ? 'warning' : ''
-  const formatCurrency = (n) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 0 })}`
-  const formatTime = (mins) => { const h = Math.floor((mins || 0) / 60); const m = (mins || 0) % 60; return `${h}h ${m}m` }
-
+  const formatCurrency = (n) => '$' + (n || 0).toLocaleString('en-US', { minimumFractionDigits: 0 })
+  const formatTime = (mins) => { const h = Math.floor((mins || 0) / 60); const m = (mins || 0) % 60; return h + 'h ' + m + 'm' }
   const handleSignOut = async () => { await supabase.auth.signOut() }
 
   if (selectedProject) {
@@ -148,49 +144,37 @@ export default function OwnerDashboard({ profile }) {
         <div className="topbar">
           <button onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
-          <span className={`status-pill status-${selectedProject.stage}`}>{selectedProject.stage}</span>
+          <span className={'status-pill status-' + selectedProject.stage}>{selectedProject.stage}</span>
         </div>
-
-        {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>
-          {matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '% of budget'}
-        </div>}
-        {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>
-          {labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '% of budget'}
-        </div>}
-
+        {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '% of budget'}</div>}
+        {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '% of budget'}</div>}
         <div className="tabs" style={{ margin: '16px 16px 0' }}>
-          {['receipts','time','budget','schedule'].map(t => (
-            <button key={t} className={`tab ${projectTab === t ? 'active' : ''}`} onClick={() => setProjectTab(t)}>
-              {t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
+          {['receipts', 'time', 'budget', 'schedule'].map(t => (
+            <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
           ))}
         </div>
-
         <div className="page">
           {projectTab === 'budget' && (
             <div>
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>MATERIALS</p>
                 <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(selectedProject.materials_spent)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.materials_budget)}</span></p>
-                <div className="budget-bar"><div className={`budget-bar-fill ${getBudgetClass(matPct)}`} style={{ width: matPct + '%' }} /></div>
+                <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(matPct)} style={{ width: matPct + '%' }} /></div>
               </div>
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>LABOR</p>
                 <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(selectedProject.labor_spent)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.labor_budget)}</span></p>
-                <div className="budget-bar"><div className={`budget-bar-fill ${getBudgetClass(labPct)}`} style={{ width: labPct + '%' }} /></div>
+                <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(labPct)} style={{ width: labPct + '%' }} /></div>
               </div>
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>PROJECTED PROFIT</p>
-                <p style={{ fontWeight: '700', fontSize: '22px', color: '#16A34A' }}>{formatCurrency(selectedProject.profit_target - (selectedProject.materials_spent - selectedProject.materials_budget > 0 ? selectedProject.materials_spent - selectedProject.materials_budget : 0))}</p>
+                <p style={{ fontWeight: '700', fontSize: '22px', color: '#16A34A' }}>{formatCurrency(selectedProject.profit_target)}</p>
               </div>
               {selectedProject.stage !== 'end' && (
-                <button className="btn-secondary" onClick={() => advanceStage(selectedProject)}>
-                  {selectedProject.stage === 'start' ? 'Advance to Mid →' : 'Mark as Complete ✓'}
-                </button>
+                <button className="btn-secondary" onClick={() => advanceStage(selectedProject)}>{selectedProject.stage === 'start' ? 'Advance to Mid →' : 'Mark as Complete ✓'}</button>
               )}
             </div>
           )}
-
           {projectTab === 'receipts' && (
             <div>
               <button className="btn-primary" onClick={() => setShowNewReceipt(true)}>+ Add Receipt</button>
@@ -209,14 +193,13 @@ export default function OwnerDashboard({ profile }) {
               {receipts.length === 0 && <div className="empty-state"><p>No receipts yet</p></div>}
             </div>
           )}
-
           {projectTab === 'time' && (
             <div>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
-                      <h3>{t.profiles?.full_name || 'Worker'}</h3>
+                      <h3>{t.profiles ? t.profiles.full_name : 'Worker'}</h3>
                       <p>{new Date(t.clocked_in_at).toLocaleDateString()}</p>
                       <p>{t.total_minutes ? formatTime(t.total_minutes) : 'Still clocked in'}</p>
                     </div>
@@ -227,14 +210,13 @@ export default function OwnerDashboard({ profile }) {
               {timeEntries.length === 0 && <div className="empty-state"><p>No time entries yet</p></div>}
             </div>
           )}
-
           {projectTab === 'schedule' && (
             <div>
               <button className="btn-primary" onClick={() => setShowNewSchedule(true)}>+ Schedule Worker</button>
               {scheduleEntries.map(s => (
                 <div key={s.id} className="card">
                   <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                  <h3>{s.profiles?.full_name}</h3>
+                  <h3>{s.profiles ? s.profiles.full_name : 'Worker'}</h3>
                   <p>{s.task_description}</p>
                   {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
                 </div>
@@ -243,30 +225,28 @@ export default function OwnerDashboard({ profile }) {
             </div>
           )}
         </div>
-
         {showNewReceipt && (
           <div className="modal-overlay" onClick={() => setShowNewReceipt(false)}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
               <h2>Add Receipt</h2>
-              <div className="input-group"><label>Description</label><input value={receiptForm.description} onChange={e => setReceiptForm({...receiptForm, description: e.target.value})} placeholder="Concrete mix" /></div>
-              <div className="input-group"><label>Store</label><input value={receiptForm.store} onChange={e => setReceiptForm({...receiptForm, store: e.target.value})} placeholder="Home Depot" /></div>
-              <div className="input-group"><label>Amount ($)</label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({...receiptForm, amount: e.target.value})} placeholder="0.00" /></div>
-              <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({...receiptForm, category: e.target.value})}><option value="materials">Materials</option><option value="other">Other</option></select></div>
+              <div className="input-group"><label>Description</label><input value={receiptForm.description} onChange={e => setReceiptForm({ ...receiptForm, description: e.target.value })} placeholder="Concrete mix" /></div>
+              <div className="input-group"><label>Store</label><input value={receiptForm.store} onChange={e => setReceiptForm({ ...receiptForm, store: e.target.value })} placeholder="Home Depot" /></div>
+              <div className="input-group"><label>Amount ($)</label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
+              <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({ ...receiptForm, category: e.target.value })}><option value="materials">Materials</option><option value="other">Other</option></select></div>
               <button className="btn-primary" onClick={addReceipt} disabled={loading}>{loading ? 'Saving...' : 'Add Receipt'}</button>
               <button className="btn-secondary" onClick={() => setShowNewReceipt(false)}>Cancel</button>
             </div>
           </div>
         )}
-
         {showNewSchedule && (
           <div className="modal-overlay" onClick={() => setShowNewSchedule(false)}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
               <h2>Schedule Worker</h2>
-              <div className="input-group"><label>Worker</label><select value={scheduleForm.worker_id} onChange={e => setScheduleForm({...scheduleForm, worker_id: e.target.value})}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
-              <div className="input-group"><label>Task</label><input value={scheduleForm.task_description} onChange={e => setScheduleForm({...scheduleForm, task_description: e.target.value})} placeholder="Pour foundation" /></div>
-              <div className="input-group"><label>Date</label><input type="date" value={scheduleForm.scheduled_date} onChange={e => setScheduleForm({...scheduleForm, scheduled_date: e.target.value})} /></div>
-              <div className="input-group"><label>Start Time</label><input type="time" value={scheduleForm.start_time} onChange={e => setScheduleForm({...scheduleForm, start_time: e.target.value})} /></div>
-              <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({...scheduleForm, end_time: e.target.value})} /></div>
+              <div className="input-group"><label>Worker</label><select value={scheduleForm.worker_id} onChange={e => setScheduleForm({ ...scheduleForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
+              <div className="input-group"><label>Task</label><input value={scheduleForm.task_description} onChange={e => setScheduleForm({ ...scheduleForm, task_description: e.target.value })} placeholder="Pour foundation" /></div>
+              <div className="input-group"><label>Date</label><input type="date" value={scheduleForm.scheduled_date} onChange={e => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })} /></div>
+              <div className="input-group"><label>Start Time</label><input type="time" value={scheduleForm.start_time} onChange={e => setScheduleForm({ ...scheduleForm, start_time: e.target.value })} /></div>
+              <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} /></div>
               <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving...' : 'Schedule'}</button>
               <button className="btn-secondary" onClick={() => setShowNewSchedule(false)}>Cancel</button>
             </div>
@@ -282,15 +262,11 @@ export default function OwnerDashboard({ profile }) {
         <h1>RUN-SITE</h1>
         <button onClick={handleSignOut}>Sign Out</button>
       </div>
-
       <div className="tabs" style={{ margin: '16px 16px 0' }}>
-        {['jobs','workers','reports'].map(t => (
-          <button key={t} className={`tab ${activeTab === t ? 'active' : ''}`} onClick={() => setActiveTab(t)}>
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
+        {['jobs', 'workers', 'reports'].map(t => (
+          <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
-
       <div className="page">
         {activeTab === 'jobs' && (
           <div>
@@ -306,25 +282,16 @@ export default function OwnerDashboard({ profile }) {
                 return (
                   <div key={p.id} className="card" onClick={() => fetchProjectDetails(p)} style={{ cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <div>
-                        <h3>{p.name}</h3>
-                        <p>{p.client_name}</p>
-                      </div>
-                      <span className={`status-pill status-${p.stage}`}>{p.stage}</span>
+                      <div><h3>{p.name}</h3><p>{p.client_name}</p></div>
+                      <span className={'status-pill status-' + p.stage}>{p.stage}</span>
                     </div>
                     {(matPct >= 80 || labPct >= 80) && (
-                      <div className={matPct >= 100 || labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ marginBottom: '8px' }}>
-                        {matPct >= 100 || labPct >= 100 ? '🔴 Over budget' : '⚠️ Approaching budget limit'}
-                      </div>
+                      <div className={matPct >= 100 || labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ marginBottom: '8px' }}>{matPct >= 100 || labPct >= 100 ? '🔴 Over budget' : '⚠️ Approaching budget limit'}</div>
                     )}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', marginBottom: '4px' }}>
-                      <span>Materials</span><span>{formatCurrency(p.materials_spent)} / {formatCurrency(p.materials_budget)}</span>
-                    </div>
-                    <div className="budget-bar"><div className={`budget-bar-fill ${getBudgetClass(matPct)}`} style={{ width: matPct + '%' }} /></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', margin: '6px 0 4px' }}>
-                      <span>Labor</span><span>{formatCurrency(p.labor_spent)} / {formatCurrency(p.labor_budget)}</span>
-                    </div>
-                    <div className="budget-bar"><div className={`budget-bar-fill ${getBudgetClass(labPct)}`} style={{ width: labPct + '%' }} /></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', marginBottom: '4px' }}><span>Materials</span><span>{formatCurrency(p.materials_spent)} / {formatCurrency(p.materials_budget)}</span></div>
+                    <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(matPct)} style={{ width: matPct + '%' }} /></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', margin: '6px 0 4px' }}><span>Labor</span><span>{formatCurrency(p.labor_spent)} / {formatCurrency(p.labor_budget)}</span></div>
+                    <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(labPct)} style={{ width: labPct + '%' }} /></div>
                   </div>
                 )
               })}
@@ -332,7 +299,6 @@ export default function OwnerDashboard({ profile }) {
             </div>
           </div>
         )}
-
         {activeTab === 'workers' && (
           <div>
             <button className="btn-primary" onClick={() => setShowNewWorker(true)}>+ Add Worker</button>
@@ -348,7 +314,6 @@ export default function OwnerDashboard({ profile }) {
             </div>
           </div>
         )}
-
         {activeTab === 'reports' && (
           <div>
             <div className="card">
@@ -370,29 +335,27 @@ export default function OwnerDashboard({ profile }) {
           </div>
         )}
       </div>
-
       {showNewJob && (
         <div className="modal-overlay" onClick={() => setShowNewJob(false)}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>New Job</h2>
-            <div className="input-group"><label>Job Name</label><input value={jobForm.name} onChange={e => setJobForm({...jobForm, name: e.target.value})} placeholder="18 Dutch Village" /></div>
-            <div className="input-group"><label>Client Name</label><input value={jobForm.client_name} onChange={e => setJobForm({...jobForm, client_name: e.target.value})} placeholder="John Smith" /></div>
-            <div className="input-group"><label>Materials Budget ($)</label><input type="number" value={jobForm.materials_budget} onChange={e => setJobForm({...jobForm, materials_budget: e.target.value})} placeholder="3000" /></div>
-            <div className="input-group"><label>Labor Budget ($)</label><input type="number" value={jobForm.labor_budget} onChange={e => setJobForm({...jobForm, labor_budget: e.target.value})} placeholder="1000" /></div>
-            <div className="input-group"><label>Profit Target ($)</label><input type="number" value={jobForm.profit_target} onChange={e => setJobForm({...jobForm, profit_target: e.target.value})} placeholder="1000" /></div>
+            <div className="input-group"><label>Job Name</label><input value={jobForm.name} onChange={e => setJobForm({ ...jobForm, name: e.target.value })} placeholder="18 Dutch Village" /></div>
+            <div className="input-group"><label>Client Name</label><input value={jobForm.client_name} onChange={e => setJobForm({ ...jobForm, client_name: e.target.value })} placeholder="John Smith" /></div>
+            <div className="input-group"><label>Materials Budget ($)</label><input type="number" value={jobForm.materials_budget} onChange={e => setJobForm({ ...jobForm, materials_budget: e.target.value })} placeholder="3000" /></div>
+            <div className="input-group"><label>Labor Budget ($)</label><input type="number" value={jobForm.labor_budget} onChange={e => setJobForm({ ...jobForm, labor_budget: e.target.value })} placeholder="1000" /></div>
+            <div className="input-group"><label>Profit Target ($)</label><input type="number" value={jobForm.profit_target} onChange={e => setJobForm({ ...jobForm, profit_target: e.target.value })} placeholder="1000" /></div>
             <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</button>
             <button className="btn-secondary" onClick={() => setShowNewJob(false)}>Cancel</button>
           </div>
         </div>
       )}
-
       {showNewWorker && (
         <div className="modal-overlay" onClick={() => setShowNewWorker(false)}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>Add Worker</h2>
-            <div className="input-group"><label>Full Name</label><input value={workerForm.full_name} onChange={e => setWorkerForm({...workerForm, full_name: e.target.value})} placeholder="Mike Johnson" /></div>
-            <div className="input-group"><label>Email</label><input type="email" value={workerForm.email} onChange={e => setWorkerForm({...workerForm, email: e.target.value})} placeholder="mike@email.com" /></div>
-            <div className="input-group"><label>Hourly Rate ($)</label><input type="number" value={workerForm.hourly_rate} onChange={e => setWorkerForm({...workerForm, hourly_rate: e.target.value})} placeholder="22" /></div>
+            <div className="input-group"><label>Full Name</label><input value={workerForm.full_name} onChange={e => setWorkerForm({ ...workerForm, full_name: e.target.value })} placeholder="Mike Johnson" /></div>
+            <div className="input-group"><label>Email</label><input type="email" value={workerForm.email} onChange={e => setWorkerForm({ ...workerForm, email: e.target.value })} placeholder="mike@email.com" /></div>
+            <div className="input-group"><label>Hourly Rate ($)</label><input type="number" value={workerForm.hourly_rate} onChange={e => setWorkerForm({ ...workerForm, hourly_rate: e.target.value })} placeholder="22" /></div>
             <button className="btn-primary" onClick={addWorker} disabled={loading}>{loading ? 'Adding...' : 'Add Worker'}</button>
             <button className="btn-secondary" onClick={() => setShowNewWorker(false)}>Cancel</button>
           </div>
