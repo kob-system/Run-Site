@@ -300,10 +300,21 @@ function OwnerDashboard({ profile }) {
 
   const addWorker = async () => {
     setLoading(true)
-    const { data } = await supabase.auth.signUp({ email: workerForm.email, password: 'RunSite2024!' })
-    if (data && data.user) {
-      await supabase.from('profiles').insert({ id: data.user.id, email: workerForm.email, full_name: workerForm.full_name, role: 'worker', owner_id: profile.id, hourly_rate: parseFloat(workerForm.hourly_rate || 0) })
-    }
+    const { data, error } = await supabase.auth.admin?.createUser({
+      email: workerForm.email,
+      password: 'RunSite2024!',
+      email_confirm: true
+    }) 
+    const workerId = data?.user?.id || crypto.randomUUID()
+    const { error: insertError } = await supabase.from('profiles').insert({ 
+      id: workerId, 
+      email: workerForm.email, 
+      full_name: workerForm.full_name, 
+      role: 'worker', 
+      owner_id: profile.id, 
+      hourly_rate: parseFloat(workerForm.hourly_rate || 0) 
+    })
+    if (insertError) console.log('Worker insert error:', insertError)
     setShowNewWorker(false)
     setWorkerForm({ email: '', full_name: '', hourly_rate: '' })
     fetchWorkers()
