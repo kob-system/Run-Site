@@ -31,6 +31,8 @@ const handleSignup = async (e) => {
         id: data.user.id, email, full_name: name, company_name: company, role: 'owner'
       })
       if (profileError) { setError('Account created but profile failed: ' + profileError.message); setLoading(false); return }
+      const { data: profileData } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
+      setLoading(false)
     }
     setLoading(false)
   }
@@ -565,6 +567,14 @@ function App() {
   const fetchProfile = async (userId) => {
     try {
       const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
+      if (!data) {
+        setTimeout(async () => {
+          const { data: retryData } = await supabase.from('profiles').select('*').eq('id', userId).single()
+          setProfile(retryData)
+          setLoading(false)
+        }, 2000)
+        return
+      }
       setProfile(data)
     } catch (e) {
       console.log('Profile error:', e)
