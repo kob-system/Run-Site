@@ -300,12 +300,7 @@ function OwnerDashboard({ profile }) {
 
   const addWorker = async () => {
     setLoading(true)
-    const { data, error } = await supabase.auth.admin?.createUser({
-      email: workerForm.email,
-      password: 'RunSite2024!',
-      email_confirm: true
-    }) 
-    const workerId = data?.user?.id || crypto.randomUUID()
+    const workerId = crypto.randomUUID()
     const { error: insertError } = await supabase.from('profiles').insert({ 
       id: workerId, 
       email: workerForm.email, 
