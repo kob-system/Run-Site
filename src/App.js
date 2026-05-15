@@ -10,6 +10,8 @@ function Login() {
   const [error, setError] = useState('')
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
+  const [role, setRole] = useState('owner')
+  const [ownerEmail, setOwnerEmail] = useState('')
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -20,19 +22,39 @@ function Login() {
     setLoading(false)
   }
 
-const handleSignup = async (e) => {
+  const handleSignup = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
+
+    let ownerId = null
+    if (role === 'worker') {
+      const { data: ownerData } = await supabase.from('profiles').select('id').eq('email', ownerEmail).eq('role', 'owner').single()
+      if (!ownerData) {
+        setError("Could not find an owner account with that email. Ask your boss to sign up first.")
+        setLoading(false)
+        return
+      }
+      ownerId = ownerData.id
+    }
+
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) { setError(error.message); setLoading(false); return }
+
     if (data.user) {
       const { error: profileError } = await supabase.from('profiles').insert({
-        id: data.user.id, email, full_name: name, company_name: company, role: 'owner'
+        id: data.user.id,
+        email,
+        full_name: name,
+        company_name: role === 'owner' ? company : null,
+        role,
+        owner_id: ownerId
       })
-      if (profileError) { setError('Account created but profile failed: ' + profileError.message); setLoading(false); return }
-      const { data: profileData } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
-      setLoading(false)
+      if (profileError) {
+        setError('Account created but profile setup failed: ' + profileError.message)
+        setLoading(false)
+        return
+      }
     }
     setLoading(false)
   }
@@ -49,11 +71,23 @@ const handleSignup = async (e) => {
         <form onSubmit={isSignup ? handleSignup : handleLogin}>
           {isSignup && (
             <>
+              <div className="input-group">
+                <label>I am a...</label>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                  <button type="button" onClick={() => setRole('owner')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'owner' ? '#E07B2A' : '#ddd'), background: role === 'owner' ? '#FFF4ED' : 'white', color: role === 'owner' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Contractor / Owner</button>
+                  <button type="button" onClick={() => setRole('worker')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'worker' ? '#E07B2A' : '#ddd'), background: role === 'worker' ? '#FFF4ED' : 'white', color: role === 'worker' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Worker</button>
+                </div>
+              </div>
               <div className="input-group"><label>Full Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
-              <div className="input-group"><label>Company Name</label><input type="text" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
+              {role === 'owner' && (
+                <div className="input-group"><label>Company Name</label><input type="text" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
+              )}
+              {role === 'worker' && (
+                <div className="input-group"><label>Your Boss's Email</label><input type="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
+              )}
             </>
           )}
-          <div className="input-group"><label>Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
+          <div className="input-group"><label>Your Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
           <div className="input-group"><label>Password</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required /></div>
           <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Loading...' : isSignup ? 'Create Account' : 'Sign In'}</button>
         </form>
@@ -198,13 +232,13 @@ function OwnerDashboard({ profile }) {
   const [scheduleEntries, setScheduleEntries] = useState([])
   const [showNewJob, setShowNewJob] = useState(false)
   const [showNewReceipt, setShowNewReceipt] = useState(false)
-  const [showNewWorker, setShowNewWorker] = useState(false)
   const [showNewSchedule, setShowNewSchedule] = useState(false)
+  const [showAssignWorker, setShowAssignWorker] = useState(false)
+  const [assignProjectId, setAssignProjectId] = useState('')
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', category: 'materials' })
-  const [workerForm, setWorkerForm] = useState({ email: '', full_name: '', hourly_rate: '' })
   const [scheduleForm, setScheduleForm] = useState({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
 
   useEffect(() => { fetchProjects(); fetchWorkers() }, [])
@@ -216,7 +250,7 @@ function OwnerDashboard({ profile }) {
   }
 
   const fetchWorkers = async () => {
-    const { data } = await supabase.from('profiles').select('*').eq('owner_id', profile.id)
+    const { data } = await supabase.from('profiles').select('*').eq('owner_id', profile.id).eq('role', 'worker')
     setWorkers(data || [])
   }
 
@@ -298,24 +332,6 @@ function OwnerDashboard({ profile }) {
     setLoading(false)
   }
 
-  const addWorker = async () => {
-    setLoading(true)
-    const workerId = crypto.randomUUID()
-    const { error: insertError } = await supabase.from('profiles').insert({ 
-      id: workerId, 
-      email: workerForm.email, 
-      full_name: workerForm.full_name, 
-      role: 'worker', 
-      owner_id: profile.id, 
-      hourly_rate: parseFloat(workerForm.hourly_rate || 0) 
-    })
-    if (insertError) console.log('Worker insert error:', insertError)
-    setShowNewWorker(false)
-    setWorkerForm({ email: '', full_name: '', hourly_rate: '' })
-    fetchWorkers()
-    setLoading(false)
-  }
-
   const addSchedule = async () => {
     setLoading(true)
     await supabase.from('schedule_entries').insert({ owner_id: profile.id, worker_id: scheduleForm.worker_id, project_id: selectedProject.id, task_description: scheduleForm.task_description, scheduled_date: scheduleForm.scheduled_date, start_time: scheduleForm.start_time, end_time: scheduleForm.end_time })
@@ -323,6 +339,12 @@ function OwnerDashboard({ profile }) {
     setScheduleForm({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
     fetchProjectDetails(selectedProject)
     setLoading(false)
+  }
+
+  const assignWorkerToProject = async (workerId) => {
+    await supabase.from('project_workers').insert({ worker_id: workerId, project_id: assignProjectId })
+    setShowAssignWorker(false)
+    setAssignProjectId('')
   }
 
   const advanceStage = async (project) => {
@@ -498,12 +520,31 @@ function OwnerDashboard({ profile }) {
         )}
         {activeTab === 'workers' && (
           <div>
-            <button className="btn-primary" onClick={() => setShowNewWorker(true)}>+ Add Worker</button>
-            <div style={{ marginTop: '12px' }}>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Workers sign up at the app and enter your email to link to your account.</p>
+            <div style={{ marginTop: '4px' }}>
               {workers.map(w => (
-                <div key={w.id} className="card"><h3>{w.full_name}</h3><p>{w.email}</p><p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate || 0}/hr</p></div>
+                <div key={w.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <h3>{w.full_name}</h3>
+                      <p>{w.email}</p>
+                      <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate || 0}/hr</p>
+                    </div>
+                    <button onClick={() => { setShowAssignWorker(true) }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign to Job</button>
+                  </div>
+                  {showAssignWorker && (
+                    <div style={{ marginTop: '12px', borderTop: '1px solid #eee', paddingTop: '12px' }}>
+                      <select value={assignProjectId} onChange={e => setAssignProjectId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '8px' }}>
+                        <option value="">Select a job</option>
+                        {projects.filter(p => p.stage !== 'end').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                      <button className="btn-primary" onClick={() => assignWorkerToProject(w.id)} style={{ marginBottom: '6px' }}>Assign</button>
+                      <button className="btn-secondary" onClick={() => setShowAssignWorker(false)}>Cancel</button>
+                    </div>
+                  )}
+                </div>
               ))}
-              {workers.length === 0 && <div className="empty-state"><p>No workers yet</p></div>}
+              {workers.length === 0 && <div className="empty-state"><p>No workers yet. Ask your crew to sign up and enter your email (kobrossisystems@gmail.com) to link up.</p></div>}
             </div>
           </div>
         )}
@@ -530,18 +571,6 @@ function OwnerDashboard({ profile }) {
             <div className="input-group"><label>Profit Target ($)</label><input type="number" value={jobForm.profit_target} onChange={e => setJobForm({ ...jobForm, profit_target: e.target.value })} placeholder="1000" /></div>
             <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</button>
             <button className="btn-secondary" onClick={() => setShowNewJob(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-      {showNewWorker && (
-        <div className="modal-overlay" onClick={() => setShowNewWorker(false)}>
-          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-            <h2>Add Worker</h2>
-            <div className="input-group"><label>Full Name</label><input value={workerForm.full_name} onChange={e => setWorkerForm({ ...workerForm, full_name: e.target.value })} placeholder="Mike Johnson" /></div>
-            <div className="input-group"><label>Email</label><input type="email" value={workerForm.email} onChange={e => setWorkerForm({ ...workerForm, email: e.target.value })} placeholder="mike@email.com" /></div>
-            <div className="input-group"><label>Hourly Rate ($)</label><input type="number" value={workerForm.hourly_rate} onChange={e => setWorkerForm({ ...workerForm, hourly_rate: e.target.value })} placeholder="22" /></div>
-            <button className="btn-primary" onClick={addWorker} disabled={loading}>{loading ? 'Adding...' : 'Add Worker'}</button>
-            <button className="btn-secondary" onClick={() => setShowNewWorker(false)}>Cancel</button>
           </div>
         </div>
       )}
