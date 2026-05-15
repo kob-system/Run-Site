@@ -159,9 +159,13 @@ function WorkerDashboard({ profile }) {
     const clockedIn = new Date(activeEntry.clocked_in_at)
     const totalMinutes = Math.floor((now - clockedIn) / 60000)
     const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
-    await supabase.from('time_entries').update({ clocked_out_at: now.toISOString(), total_minutes: totalMinutes, labor_cost: laborCost }).eq('id', activeEntry.id)
-    const { data: project } = await supabase.from('projects').select('labor_spent').eq('id', activeEntry.project_id).single()
-    await supabase.from('projects').update({ labor_spent: (project?.labor_spent || 0) + laborCost }).eq('id', activeEntry.project_id)
+    console.log('Clocking out entry:', activeEntry.id, 'minutes:', totalMinutes, 'cost:', laborCost)
+    const { error: timeError } = await supabase.from('time_entries').update({ clocked_out_at: now.toISOString(), total_minutes: totalMinutes, labor_cost: laborCost }).eq('id', activeEntry.id)
+    console.log('Time update error:', timeError)
+    const { data: project, error: projFetchError } = await supabase.from('projects').select('labor_spent').eq('id', activeEntry.project_id).single()
+    console.log('Project fetch error:', projFetchError)
+    const { error: projUpdateError } = await supabase.from('projects').update({ labor_spent: (project?.labor_spent || 0) + laborCost }).eq('id', activeEntry.project_id)
+    console.log('Project update error:', projUpdateError)
     setActiveEntry(null)
     setTimer(0)
     setLoading(false)
@@ -235,6 +239,8 @@ function OwnerDashboard({ profile }) {
   const [showNewSchedule, setShowNewSchedule] = useState(false)
   const [showAssignWorker, setShowAssignWorker] = useState(false)
   const [assignProjectId, setAssignProjectId] = useState('')
+  const [editingWorker, setEditingWorker] = useState(null)
+  const [editRate, setEditRate] = useState('')
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
@@ -345,6 +351,13 @@ function OwnerDashboard({ profile }) {
     await supabase.from('project_workers').insert({ worker_id: workerId, project_id: assignProjectId })
     setShowAssignWorker(false)
     setAssignProjectId('')
+  }
+
+  const saveWorkerRate = async () => {
+    await supabase.from('profiles').update({ hourly_rate: parseFloat(editRate || 0) }).eq('id', editingWorker.id)
+    setEditingWorker(null)
+    setEditRate('')
+    fetchWorkers()
   }
 
   const advanceStage = async (project) => {
@@ -530,9 +543,12 @@ function OwnerDashboard({ profile }) {
                       <p>{w.email}</p>
                       <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate || 0}/hr</p>
                     </div>
-                    <button onClick={() => { setShowAssignWorker(true) }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign to Job</button>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button onClick={() => { setEditingWorker(w); setEditRate(w.hourly_rate || '') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Edit Rate</button>
+                      <button onClick={() => { setShowAssignWorker(w.id) }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign</button>
+                    </div>
                   </div>
-                  {showAssignWorker && (
+                  {showAssignWorker === w.id && (
                     <div style={{ marginTop: '12px', borderTop: '1px solid #eee', paddingTop: '12px' }}>
                       <select value={assignProjectId} onChange={e => setAssignProjectId(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '8px' }}>
                         <option value="">Select a job</option>
@@ -560,6 +576,19 @@ function OwnerDashboard({ profile }) {
           </div>
         )}
       </div>
+      {editingWorker && (
+        <div className="modal-overlay" onClick={() => setEditingWorker(null)}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+            <h2>Edit {editingWorker.full_name}</h2>
+            <div className="input-group">
+              <label>Hourly Rate ($)</label>
+              <input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} placeholder="22" />
+            </div>
+            <button className="btn-primary" onClick={saveWorkerRate}>Save</button>
+            <button className="btn-secondary" onClick={() => setEditingWorker(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
       {showNewJob && (
         <div className="modal-overlay" onClick={() => setShowNewJob(false)}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
