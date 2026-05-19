@@ -1,0 +1,1 @@
+export const formatCurrency = (n) => '$' + (n || 0).toLocaleString('en-US', { minimumFractionDigits: 0 })
