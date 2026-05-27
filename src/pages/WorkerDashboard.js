@@ -37,6 +37,7 @@ export default function WorkerDashboard({ profile }) {
   const [showEditOffline, setShowEditOffline] = useState(false)
   const [editClockIn, setEditClockIn] = useState('')
   const [editClockOut, setEditClockOut] = useState('')
+const [history, setHistory] = useState([])
 
   // Track online/offline status
   useEffect(() => {
@@ -67,7 +68,19 @@ export default function WorkerDashboard({ profile }) {
     fetchAssignedProjects()
     fetchSchedule()
     checkActiveEntry()
-  }, [])
+  }, [])const fetchHistory = async () => {
+  try {
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const { data } = await supabase
+      .from('time_entries')
+      .select('*, projects(name)')
+      .eq('worker_id', profile.id)
+      .gte('clocked_in_at', thirtyDaysAgo.toISOString())
+      .order('clocked_in_at', { ascending: false })
+    setHistory(data || [])
+  } catch (e) {}
+}
 
   // Timer — runs off whichever entry is active
   useEffect(() => {
@@ -367,6 +380,7 @@ export default function WorkerDashboard({ profile }) {
       <div className="tabs" style={{ margin: '16px 16px 0' }}>
         <button className={'tab ' + (activeTab === 'clock' ? 'active' : '')} onClick={() => setActiveTab('clock')}>Clock In/Out</button>
         <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>My Schedule</button>
+<button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => { setActiveTab('history'); fetchHistory() }}>History</button>
       </div>
 
       <div className="page">
