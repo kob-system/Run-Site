@@ -265,13 +265,15 @@ export default function WorkerDashboard({ profile }) {
     const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
 
     if (offlineEntry && !activeEntry) {
-      // Still offline — save full entry locally including clock-out
       const fullEntry = { ...offlineEntry, clocked_out_at: now.toISOString(), total_minutes: totalMinutes, labor_cost: laborCost }
       saveOfflineEntry(fullEntry)
-      setOfflineEntry(fullEntry)
+      setOfflineEntry(null)
+      clearOfflineEntry()
       setTimer(0)
-      showToast('📶 Saved offline — will sync when connected')
+      showToast('📶 Clocked out — will sync when connected')
       setLoading(false)
+      // Attempt sync immediately if online
+      if (isOnline) attemptSync(fullEntry)
       return
     }
 
