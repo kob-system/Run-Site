@@ -51,6 +51,7 @@ export default function OwnerDashboard({ profile }) {
   const [activeTab, setActiveTab] = useState('jobs')
   const [projects, setProjects] = useState([])
   const [workers, setWorkers] = useState([])
+  const [workerStats, setWorkerStats] = useState({}) // keyed by worker id
   const [selectedProject, setSelectedProject] = useState(null)
   const [projectTab, setProjectTab] = useState('receipts')
   const [receipts, setReceipts] = useState([])
@@ -98,7 +99,46 @@ export default function OwnerDashboard({ profile }) {
     }
   }, [profile.id])
 
-  useEffect(() => { fetchProjects(); fetchWorkers() }, [fetchProjects, fetchWorkers])
+  const fetchWorkerStats = useCallback(async (workerList) => {
+    if (!workerList?.length) return
+    try {
+      const workerIds = workerList.map(w => w.id)
+      const { data, error } = await supabase
+        .from('time_entries')
+        .select('worker_id, total_minutes, labor_cost, clocked_in_at')
+        .in('worker_id', workerIds)
+        .not('clocked_out_at', 'is', null)
+
+      if (error) throw error
+
+      const now = new Date()
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+      const stats = {}
+      workerIds.forEach(id => {
+        const entries = (data || []).filter(e => e.worker_id === id)
+        const monthEntries = entries.filter(e => e.clocked_in_at >= monthStart)
+        stats[id] = {
+          totalMinutes: entries.reduce((s, e) => s + (e.total_minutes || 0), 0),
+          totalCost: entries.reduce((s, e) => s + (e.labor_cost || 0), 0),
+          monthMinutes: monthEntries.reduce((s, e) => s + (e.total_minutes || 0), 0),
+          monthCost: monthEntries.reduce((s, e) => s + (e.labor_cost || 0), 0),
+        }
+      })
+      setWorkerStats(stats)
+    } catch (e) {
+      console.error('Worker stats fetch failed:', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchProjects()
+    fetchWorkers()
+  }, [fetchProjects, fetchWorkers])
+
+  useEffect(() => {
+    if (workers.length) fetchWorkerStats(workers)
+  }, [workers, fetchWorkerStats])
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
@@ -121,13 +161,9 @@ export default function OwnerDashboard({ profile }) {
     try {
       const total = parseFloat(jobForm.materials_budget || 0) + parseFloat(jobForm.labor_budget || 0) + parseFloat(jobForm.profit_target || 0)
       const { error } = await supabase.from('projects').insert({
-        owner_id: profile.id,
-        name: jobForm.name,
-        client_name: jobForm.client_name,
-        budget: total,
-        materials_budget: parseFloat(jobForm.materials_budget || 0),
-        labor_budget: parseFloat(jobForm.labor_budget || 0),
-        profit_target: parseFloat(jobForm.profit_target || 0),
+        owner_id: profile.id, name: jobForm.name, client_name: jobForm.client_name,
+        budget: total, materials_budget: parseFloat(jobForm.materials_budget || 0),
+        labor_budget: parseFloat(jobForm.labor_budget || 0), profit_target: parseFloat(jobForm.profit_target || 0),
         stage: 'start'
       })
       if (error) throw error
@@ -147,17 +183,13 @@ export default function OwnerDashboard({ profile }) {
     setScanning(true)
     setScanResult(null)
     setScanError('')
-
     try {
-      // Upload photo to Supabase Storage first
       const fileName = `${profile.id}/${Date.now()}_${file.name}`
-      const { data: uploadData, error: uploadError } = await supabase.storage.from('receipts').upload(fileName, file)
+      const { error: uploadError } = await supabase.storage.from('receipts').upload(fileName, file)
       if (uploadError) throw uploadError
       const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(fileName)
-      const photoUrl = urlData.publicUrl
-      setReceiptForm(f => ({ ...f, photo_url: photoUrl }))
+      setReceiptForm(f => ({ ...f, photo_url: urlData.publicUrl }))
 
-      // AI scan via serverless function
       const reader = new FileReader()
       reader.onload = async (event) => {
         const base64 = event.target.result.split(',')[1]
@@ -168,14 +200,9 @@ export default function OwnerDashboard({ profile }) {
             body: JSON.stringify({ imageBase64: base64, mediaType: file.type })
           })
           const result = await response.json()
-          if (result.store || result.amount) {
-            setScanResult(result)
-          } else {
-            setScanError("Couldn't read this receipt — fill in the fields below.")
-          }
-        } catch (err) {
-          setScanError("Couldn't read this receipt — fill in the fields below.")
-        }
+          if (result.store || result.amount) setScanResult(result)
+          else setScanError("Couldn't read this receipt — fill in the fields below.")
+        } catch { setScanError("Couldn't read this receipt — fill in the fields below.") }
         setScanning(false)
       }
       reader.readAsDataURL(file)
@@ -197,13 +224,9 @@ export default function OwnerDashboard({ profile }) {
     try {
       const amount = parseFloat(receiptForm.amount)
       const { error } = await supabase.from('receipts').insert({
-        project_id: selectedProject.id,
-        owner_id: profile.id,
-        description: receiptForm.description,
-        store: receiptForm.store,
-        amount,
-        category: receiptForm.category,
-        photo_url: receiptForm.photo_url || null
+        project_id: selectedProject.id, owner_id: profile.id,
+        description: receiptForm.description, store: receiptForm.store,
+        amount, category: receiptForm.category, photo_url: receiptForm.photo_url || null
       })
       if (error) throw error
       if (receiptForm.category === 'materials') {
@@ -212,8 +235,7 @@ export default function OwnerDashboard({ profile }) {
       }
       setShowNewReceipt(false)
       setReceiptForm({ description: '', store: '', amount: '', category: 'materials', photo_url: '' })
-      setScanResult(null)
-      setScanError('')
+      setScanResult(null); setScanError('')
       await fetchProjectDetails(selectedProject)
       await fetchProjects()
       showToast('Receipt saved ✓')
@@ -229,13 +251,9 @@ export default function OwnerDashboard({ profile }) {
     setInlineError('')
     try {
       const { error } = await supabase.from('schedule_entries').insert({
-        owner_id: profile.id,
-        worker_id: scheduleForm.worker_id,
-        project_id: selectedProject.id,
-        task_description: scheduleForm.task_description,
-        scheduled_date: scheduleForm.scheduled_date,
-        start_time: scheduleForm.start_time,
-        end_time: scheduleForm.end_time
+        owner_id: profile.id, worker_id: scheduleForm.worker_id,
+        project_id: selectedProject.id, task_description: scheduleForm.task_description,
+        scheduled_date: scheduleForm.scheduled_date, start_time: scheduleForm.start_time, end_time: scheduleForm.end_time
       })
       if (error) throw error
       setShowNewSchedule(false)
@@ -254,10 +272,9 @@ export default function OwnerDashboard({ profile }) {
     setInlineError('')
     try {
       const { error } = await supabase.from('project_workers').insert({ worker_id: workerId, project_id: assignProjectId })
-      if (error && error.code !== '23505') throw error // 23505 = already assigned, that's fine
+      if (error && error.code !== '23505') throw error
       const jobName = projects.find(p => p.id === assignProjectId)?.name || 'job'
-      setShowAssignWorker(null)
-      setAssignProjectId('')
+      setShowAssignWorker(null); setAssignProjectId('')
       showToast(`Assigned to ${jobName} ✓`)
     } catch (e) {
       setInlineError('Failed to assign worker. Try again.')
@@ -271,8 +288,7 @@ export default function OwnerDashboard({ profile }) {
     try {
       const { error } = await supabase.from('profiles').update({ hourly_rate: parseFloat(editRate || 0) }).eq('id', showEditRate.id)
       if (error) throw error
-      setShowEditRate(null)
-      setEditRate('')
+      setShowEditRate(null); setEditRate('')
       await fetchWorkers()
       showToast('Rate updated ✓')
     } catch (e) {
@@ -288,8 +304,7 @@ export default function OwnerDashboard({ profile }) {
     try {
       const next = stages[current + 1]
       const { error } = await supabase.from('projects').update({
-        stage: next,
-        ...(next === 'end' ? { completed_at: new Date().toISOString() } : {})
+        stage: next, ...(next === 'end' ? { completed_at: new Date().toISOString() } : {})
       }).eq('id', project.id)
       if (error) throw error
       await fetchProjects()
@@ -311,10 +326,7 @@ export default function OwnerDashboard({ profile }) {
   }, 0)
 
   const reportYears = [new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2]
-  const reportJobs = completedProjects.filter(p => {
-    if (!p.completed_at) return false
-    return new Date(p.completed_at).getFullYear() === reportYear
-  })
+  const reportJobs = completedProjects.filter(p => p.completed_at && new Date(p.completed_at).getFullYear() === reportYear)
 
   // PROJECT DETAIL VIEW
   if (selectedProject) {
@@ -325,7 +337,7 @@ export default function OwnerDashboard({ profile }) {
     return (
       <div>
         <div className="topbar">
-          <button onClick={() => { setSelectedProject(null) }} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
+          <button onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
           <span className={'status-pill status-' + selectedProject.stage}>{selectedProject.stage}</span>
         </div>
@@ -420,7 +432,6 @@ export default function OwnerDashboard({ profile }) {
           )}
         </div>
 
-        {/* ADD RECEIPT MODAL */}
         {showNewReceipt && (
           <div className="modal-overlay" onClick={() => { setShowNewReceipt(false); setScanResult(null); setScanError('') }}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
@@ -433,7 +444,7 @@ export default function OwnerDashboard({ profile }) {
               </div>
               {scanResult && (
                 <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
-                  <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', marginBottom: '8px' }}>📷 Scanned Receipt — confirm before saving</p>
+                  <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', marginBottom: '8px' }}>📷 Scanned — confirm before saving</p>
                   <p style={{ fontSize: '15px', fontWeight: '600' }}>Store: {scanResult.store}</p>
                   <p style={{ fontSize: '15px', fontWeight: '600' }}>Amount: ${scanResult.amount}</p>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -453,7 +464,6 @@ export default function OwnerDashboard({ profile }) {
           </div>
         )}
 
-        {/* SCHEDULE MODAL */}
         {showNewSchedule && (
           <div className="modal-overlay" onClick={() => setShowNewSchedule(false)}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
@@ -487,7 +497,6 @@ export default function OwnerDashboard({ profile }) {
       </div>
       <div className="page">
 
-        {/* JOBS TAB */}
         {activeTab === 'jobs' && (
           <div>
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
@@ -546,30 +555,48 @@ export default function OwnerDashboard({ profile }) {
           </div>
         )}
 
-        {/* WORKERS TAB */}
         {activeTab === 'workers' && (
           <div>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Workers sign up at the app and enter your email to link to your account.</p>
-            {workers.map(w => (
-              <div key={w.id} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <h3>{w.full_name}</h3>
-                    <p>{w.email}</p>
-                    <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate || 0}/hr</p>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Edit Rate</button>
-                    <button onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign</button>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
+              Workers sign up at the app and enter your email to link to your account.
+            </p>
+            {workers.map(w => {
+              const stats = workerStats[w.id]
+              return (
+                <div key={w.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <h3>{w.full_name}</h3>
+                      <p>{w.email}</p>
+                      <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate || 0}/hr</p>
+                      {stats && (
+                        <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                          <div>
+                            <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>This Month</p>
+                            <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatTime(stats.monthMinutes)}</p>
+                            <p style={{ fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{formatCurrency(stats.monthCost)}</p>
+                          </div>
+                          <div style={{ width: '1px', background: '#f0f0f0' }} />
+                          <div>
+                            <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>All Time</p>
+                            <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatTime(stats.totalMinutes)}</p>
+                            <p style={{ fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{formatCurrency(stats.totalCost)}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
+                      <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Edit Rate</button>
+                      <button onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
             {workers.length === 0 && <div className="empty-state"><p>No workers yet. Ask your crew to sign up and enter your email to link up.</p></div>}
           </div>
         )}
 
-        {/* REPORTS TAB */}
         {activeTab === 'reports' && (
           <div>
             <div className="input-group">
@@ -621,15 +648,11 @@ export default function OwnerDashboard({ profile }) {
         )}
       </div>
 
-      {/* EDIT RATE MODAL */}
       {showEditRate && (
         <div className="modal-overlay" onClick={() => setShowEditRate(null)}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>Edit {showEditRate.full_name}</h2>
-            <div className="input-group">
-              <label>Hourly Rate ($)</label>
-              <input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} placeholder="22" />
-            </div>
+            <div className="input-group"><label>Hourly Rate ($)</label><input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} placeholder="22" /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={saveWorkerRate} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
             <button className="btn-secondary" onClick={() => { setShowEditRate(null); setInlineError('') }}>Cancel</button>
@@ -637,13 +660,11 @@ export default function OwnerDashboard({ profile }) {
         </div>
       )}
 
-      {/* ASSIGN WORKER MODAL */}
       {showAssignWorker && (
         <div className="modal-overlay" onClick={() => setShowAssignWorker(null)}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>Assign {showAssignWorker.full_name}</h2>
-            <div className="input-group">
-              <label>Select Job</label>
+            <div className="input-group"><label>Select Job</label>
               <select value={assignProjectId} onChange={e => setAssignProjectId(e.target.value)}>
                 <option value="">-- Choose a job --</option>
                 {activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -656,7 +677,6 @@ export default function OwnerDashboard({ profile }) {
         </div>
       )}
 
-      {/* NEW JOB MODAL */}
       {showNewJob && (
         <div className="modal-overlay" onClick={() => setShowNewJob(false)}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>

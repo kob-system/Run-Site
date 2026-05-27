@@ -1,17 +1,67 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatTime } from '../utils/formatTime'
+
+const OFFLINE_KEY = 'runsite_offline_entry'
+const MAX_RETRIES = 3
+
+function saveOfflineEntry(entry) {
+  localStorage.setItem(OFFLINE_KEY, JSON.stringify(entry))
+}
+
+function getOfflineEntry() {
+  try {
+    const raw = localStorage.getItem(OFFLINE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function clearOfflineEntry() {
+  localStorage.removeItem(OFFLINE_KEY)
+}
 
 export default function WorkerDashboard({ profile }) {
   const [activeTab, setActiveTab] = useState('clock')
   const [projects, setProjects] = useState([])
   const [activeEntry, setActiveEntry] = useState(null)
+  const [offlineEntry, setOfflineEntry] = useState(null)
   const [selectedProject, setSelectedProject] = useState('')
   const [timer, setTimer] = useState(0)
   const [schedule, setSchedule] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [syncing, setSyncing] = useState(false)
+  const [syncRetries, setSyncRetries] = useState(0)
+  const [showEditOffline, setShowEditOffline] = useState(false)
+  const [editClockIn, setEditClockIn] = useState('')
+  const [editClockOut, setEditClockOut] = useState('')
+
+  // Track online/offline status
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true)
+    const goOffline = () => setIsOnline(false)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+    }
+  }, [])
+
+  // When coming back online, attempt sync
+  useEffect(() => {
+    if (isOnline && offlineEntry) {
+      attemptSync(offlineEntry)
+    }
+  }, [isOnline])
+
+  // Load offline entry from localStorage on mount
+  useEffect(() => {
+    const saved = getOfflineEntry()
+    if (saved) setOfflineEntry(saved)
+  }, [])
 
   useEffect(() => {
     fetchAssignedProjects()
@@ -19,16 +69,94 @@ export default function WorkerDashboard({ profile }) {
     checkActiveEntry()
   }, [])
 
+  // Timer — runs off whichever entry is active
   useEffect(() => {
     let interval
-    if (activeEntry) {
+    const entry = activeEntry || offlineEntry
+    if (entry) {
       interval = setInterval(() => {
-        const diff = Math.floor((Date.now() - new Date(activeEntry.clocked_in_at).getTime()) / 1000)
+        const clockInTime = entry.clocked_in_at
+        const diff = Math.floor((Date.now() - new Date(clockInTime).getTime()) / 1000)
         setTimer(diff)
       }, 1000)
     }
     return () => clearInterval(interval)
-  }, [activeEntry])
+  }, [activeEntry, offlineEntry])
+
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 3000)
+  }
+
+  const attemptSync = useCallback(async (entry, retryCount = 0) => {
+    if (syncing) return
+    setSyncing(true)
+    try {
+      // Get owner profile to send notification
+      const { data: ownerProfile } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('id', profile.owner_id)
+        .single()
+
+      const { data, error } = await supabase.from('time_entries').insert({
+        project_id: entry.project_id,
+        worker_id: profile.id,
+        clocked_in_at: entry.clocked_in_at,
+        gps_lat: entry.gps_lat,
+        gps_lng: entry.gps_lng,
+        ...(entry.clocked_out_at ? {
+          clocked_out_at: entry.clocked_out_at,
+          total_minutes: entry.total_minutes,
+          labor_cost: entry.labor_cost
+        } : {})
+      }).select().single()
+
+      if (error) throw error
+
+      // If entry includes a clock-out, update project labor_spent
+      if (entry.clocked_out_at && entry.labor_cost) {
+        const { data: project } = await supabase.from('projects').select('labor_spent').eq('id', entry.project_id).single()
+        await supabase.from('projects').update({
+          labor_spent: (project?.labor_spent || 0) + entry.labor_cost
+        }).eq('id', entry.project_id)
+      }
+
+      // Notify owner
+      if (ownerProfile?.email) {
+        const jobName = projects.find(p => p.id === entry.project_id)?.name || 'a job'
+        fetch('/api/notify-owner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ownerEmail: ownerProfile.email,
+            workerName: profile.full_name,
+            jobName,
+            action: 'in',
+            timestamp: entry.clocked_in_at
+          })
+        })
+      }
+
+      clearOfflineEntry()
+      setOfflineEntry(null)
+      if (!entry.clocked_out_at) setActiveEntry(data)
+      setSyncRetries(0)
+      showToast('Synced ✓')
+    } catch (e) {
+      if (retryCount < MAX_RETRIES) {
+        const delay = [5000, 30000, 120000][retryCount]
+        setTimeout(() => {
+          setSyncRetries(retryCount + 1)
+          attemptSync(entry, retryCount + 1)
+        }, delay)
+      } else {
+        setError('Sync failed after 3 attempts. Tap "Retry Sync" when you have signal.')
+        setSyncRetries(0)
+      }
+    }
+    setSyncing(false)
+  }, [profile, projects, syncing])
 
   const fetchAssignedProjects = async () => {
     try {
@@ -47,53 +175,80 @@ export default function WorkerDashboard({ profile }) {
 
   const fetchSchedule = async () => {
     try {
-      const { data, error } = await supabase.from('schedule_entries').select('*, projects(name)').eq('worker_id', profile.id).gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date', { ascending: true })
-      if (error) throw error
+      const { data } = await supabase.from('schedule_entries').select('*, projects(name)').eq('worker_id', profile.id).gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date', { ascending: true })
       setSchedule(data || [])
-    } catch (e) {
-      console.error('Schedule fetch failed:', e)
-    }
+    } catch (e) {}
   }
 
   const checkActiveEntry = async () => {
     try {
-      const { data, error } = await supabase.from('time_entries').select('*').eq('worker_id', profile.id).is('clocked_out_at', null).single()
+      const { data } = await supabase.from('time_entries').select('*').eq('worker_id', profile.id).is('clocked_out_at', null).single()
       if (data) setActiveEntry(data)
-    } catch (e) {
-      // no active entry is fine
-    }
+    } catch (e) {}
   }
 
   const clockIn = async () => {
     if (!selectedProject) return setError('Select a job first')
     setLoading(true)
     setError('')
-    try {
-      // GPS
-      let gpsLat = null
-      let gpsLng = null
-      try {
-        const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
-        })
-        gpsLat = pos.coords.latitude
-        gpsLng = pos.coords.longitude
-      } catch (gpsErr) {
-        // GPS failed — clock in anyway, just without location
-      }
 
+    // Get GPS
+    let gpsLat = null
+    let gpsLng = null
+    try {
+      const pos = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
+      )
+      gpsLat = pos.coords.latitude
+      gpsLng = pos.coords.longitude
+    } catch {}
+
+    const clockInTime = new Date().toISOString()
+    const entry = { project_id: selectedProject, clocked_in_at: clockInTime, gps_lat: gpsLat, gps_lng: gpsLng }
+
+    if (!isOnline) {
+      // Save offline
+      saveOfflineEntry(entry)
+      setOfflineEntry(entry)
+      showToast('📶 Saved offline — will sync when connected')
+      setLoading(false)
+      return
+    }
+
+    try {
+      const { data: ownerProfile } = await supabase.from('profiles').select('email').eq('id', profile.owner_id).single()
       const { data, error } = await supabase.from('time_entries').insert({
         project_id: selectedProject,
         worker_id: profile.id,
+        clocked_in_at: clockInTime,
         gps_lat: gpsLat,
         gps_lng: gpsLng
       }).select().single()
 
       if (error) throw error
       setActiveEntry(data)
-      setToast('Clocked in ✓')
+
+      // Notify owner
+      if (ownerProfile?.email) {
+        const jobName = projects.find(p => p.id === selectedProject)?.name || 'a job'
+        fetch('/api/notify-owner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ownerEmail: ownerProfile.email,
+            workerName: profile.full_name,
+            jobName,
+            action: 'in',
+            timestamp: clockInTime
+          })
+        })
+      }
+      showToast('Clocked in ✓')
     } catch (e) {
-      setError('Clock-in failed. Try again.')
+      // Online but Supabase failed — save offline as fallback
+      saveOfflineEntry(entry)
+      setOfflineEntry(entry)
+      showToast('📶 Saved locally — will sync shortly')
     }
     setLoading(false)
   }
@@ -101,36 +256,83 @@ export default function WorkerDashboard({ profile }) {
   const clockOut = async () => {
     setLoading(true)
     setError('')
-    try {
-      const now = new Date()
-      const clockedIn = new Date(activeEntry.clocked_in_at)
-      const totalMinutes = Math.floor((now - clockedIn) / 60000)
-      const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
+    const entry = activeEntry || offlineEntry
+    if (!entry) { setLoading(false); return }
 
+    const now = new Date()
+    const clockedIn = new Date(entry.clocked_in_at)
+    const totalMinutes = Math.floor((now - clockedIn) / 60000)
+    const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
+
+    if (offlineEntry && !activeEntry) {
+      // Still offline — save full entry locally including clock-out
+      const fullEntry = { ...offlineEntry, clocked_out_at: now.toISOString(), total_minutes: totalMinutes, labor_cost: laborCost }
+      saveOfflineEntry(fullEntry)
+      setOfflineEntry(fullEntry)
+      setTimer(0)
+      showToast('📶 Saved offline — will sync when connected')
+      setLoading(false)
+      return
+    }
+
+    try {
       const { error: timeError } = await supabase.from('time_entries').update({
         clocked_out_at: now.toISOString(),
         total_minutes: totalMinutes,
         labor_cost: laborCost
       }).eq('id', activeEntry.id)
-
       if (timeError) throw timeError
 
-      const { data: project, error: projFetchError } = await supabase.from('projects').select('labor_spent').eq('id', activeEntry.project_id).single()
-      if (projFetchError) throw projFetchError
-
-      const { error: projUpdateError } = await supabase.from('projects').update({
+      const { data: project } = await supabase.from('projects').select('labor_spent').eq('id', activeEntry.project_id).single()
+      await supabase.from('projects').update({
         labor_spent: (project?.labor_spent || 0) + laborCost
       }).eq('id', activeEntry.project_id)
 
-      if (projUpdateError) throw projUpdateError
+      // Notify owner
+      const { data: ownerProfile } = await supabase.from('profiles').select('email').eq('id', profile.owner_id).single()
+      if (ownerProfile?.email) {
+        const jobName = projects.find(p => p.id === activeEntry.project_id)?.name || 'a job'
+        fetch('/api/notify-owner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ownerEmail: ownerProfile.email,
+            workerName: profile.full_name,
+            jobName,
+            action: 'out',
+            timestamp: now.toISOString()
+          })
+        })
+      }
 
       setActiveEntry(null)
       setTimer(0)
-      setToast('Clocked out ✓')
+      showToast('Clocked out ✓')
     } catch (e) {
       setError('Clock-out failed. Try again.')
     }
     setLoading(false)
+  }
+
+  const saveOfflineEdit = () => {
+    if (!editClockIn) return setError('Clock-in time is required')
+    const clockInDate = new Date(editClockIn)
+    const updated = { ...offlineEntry, clocked_in_at: clockInDate.toISOString() }
+    if (editClockOut) {
+      const clockOutDate = new Date(editClockOut)
+      const totalMinutes = Math.floor((clockOutDate - clockInDate) / 60000)
+      const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
+      updated.clocked_out_at = clockOutDate.toISOString()
+      updated.total_minutes = totalMinutes
+      updated.labor_cost = laborCost
+    }
+    saveOfflineEntry(updated)
+    setOfflineEntry(updated)
+    setShowEditOffline(false)
+    setEditClockIn('')
+    setEditClockOut('')
+    if (isOnline) attemptSync(updated)
+    else showToast('Updated — will sync when connected')
   }
 
   const formatTimerDisplay = (seconds) => {
@@ -140,21 +342,47 @@ export default function WorkerDashboard({ profile }) {
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
   }
 
+  const toLocalDatetimeInput = (isoString) => {
+    if (!isoString) return ''
+    const d = new Date(isoString)
+    const pad = n => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  const currentEntry = activeEntry || offlineEntry
+  const isOfflineMode = !!offlineEntry && !activeEntry
+
   return (
     <div>
-      <div className="topbar"><h1>RUN-SITE</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
+      <div className="topbar">
+        <h1>RUN-SITE</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {!isOnline && <span style={{ fontSize: '11px', background: 'rgba(255,255,255,0.2)', padding: '3px 8px', borderRadius: '12px' }}>📶 Offline</span>}
+          <button onClick={() => supabase.auth.signOut()}>Sign Out</button>
+        </div>
+      </div>
+
       <div className="tabs" style={{ margin: '16px 16px 0' }}>
         <button className={'tab ' + (activeTab === 'clock' ? 'active' : '')} onClick={() => setActiveTab('clock')}>Clock In/Out</button>
         <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>My Schedule</button>
       </div>
+
       <div className="page">
-        {error && <div className="alert-danger" style={{ marginBottom: '12px' }}>{error}</div>}
+        {error && <div className="alert-danger" style={{ marginBottom: '12px' }}>{error} {error.includes('Sync failed') && <button onClick={() => attemptSync(offlineEntry)} style={{ background: 'none', border: 'none', color: 'white', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry Sync</button>}</div>}
+
+        {syncing && <div style={{ textAlign: 'center', fontSize: '13px', color: '#E07B2A', marginBottom: '8px' }}>⏳ Syncing{syncRetries > 0 ? ` (attempt ${syncRetries + 1})` : ''}...</div>}
+
         {activeTab === 'clock' && (
           <div>
             <div className="card" style={{ textAlign: 'center' }}>
-              <p style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>{activeEntry ? 'Currently clocked in' : 'Not clocked in'}</p>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>
+                {currentEntry
+                  ? isOfflineMode ? '📶 Clocked in (offline)' : 'Currently clocked in'
+                  : 'Not clocked in'}
+              </p>
               <div className="timer-display">{formatTimerDisplay(timer)}</div>
-              {!activeEntry && (
+
+              {!currentEntry && (
                 <div className="input-group" style={{ marginBottom: '12px' }}>
                   <label>Select Job</label>
                   <select value={selectedProject} onChange={e => { setSelectedProject(e.target.value); setError('') }}>
@@ -163,17 +391,31 @@ export default function WorkerDashboard({ profile }) {
                   </select>
                 </div>
               )}
-              {activeEntry ? (
-                <button className="btn-danger" onClick={clockOut} disabled={loading}>{loading ? 'Clocking Out...' : 'Clock Out'}</button>
+
+              {currentEntry ? (
+                <div>
+                  <button className="btn-danger" onClick={clockOut} disabled={loading} style={{ marginBottom: '8px' }}>
+                    {loading ? 'Clocking Out...' : 'Clock Out'}
+                  </button>
+                  {isOfflineMode && (
+                    <button onClick={() => { setShowEditOffline(true); setEditClockIn(toLocalDatetimeInput(offlineEntry.clocked_in_at)) }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', cursor: 'pointer', display: 'block', margin: '0 auto' }}>
+                      ✏️ Edit clock-in time
+                    </button>
+                  )}
+                </div>
               ) : (
-                <button className="btn-primary" onClick={clockIn} disabled={loading}>{loading ? 'Clocking In...' : 'Clock In'}</button>
+                <button className="btn-primary" onClick={clockIn} disabled={loading}>
+                  {loading ? 'Clocking In...' : 'Clock In'}
+                </button>
               )}
             </div>
-            {projects.length === 0 && !activeEntry && (
+
+            {projects.length === 0 && !currentEntry && (
               <div className="empty-state"><p>No jobs assigned yet. Ask your boss to assign you to a job.</p></div>
             )}
           </div>
         )}
+
         {activeTab === 'schedule' && (
           <div>
             {schedule.length === 0
@@ -190,14 +432,34 @@ export default function WorkerDashboard({ profile }) {
           </div>
         )}
       </div>
+
+      {/* EDIT OFFLINE ENTRY MODAL */}
+      {showEditOffline && (
+        <div className="modal-overlay" onClick={() => setShowEditOffline(false)}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+            <h2>Edit Clock-In</h2>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '16px' }}>Saved offline. You can correct the time or add a clock-out if needed.</p>
+            <div className="input-group">
+              <label>Clock-In Time</label>
+              <input type="datetime-local" value={editClockIn} onChange={e => setEditClockIn(e.target.value)} />
+            </div>
+            <div className="input-group">
+              <label>Clock-Out Time (optional)</label>
+              <input type="datetime-local" value={editClockOut} onChange={e => setEditClockOut(e.target.value)} />
+            </div>
+            {error && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{error}</p>}
+            <button className="btn-primary" onClick={saveOfflineEdit}>Save</button>
+            <button className="btn-secondary" onClick={() => setShowEditOffline(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div style={{
           position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
           background: '#16A34A', color: 'white', padding: '12px 24px', borderRadius: '24px',
           fontSize: '14px', fontWeight: '600', zIndex: 999, boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
-        }}>
-          {toast}
-        </div>
+        }}>{toast}</div>
       )}
     </div>
   )
