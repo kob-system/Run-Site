@@ -68,7 +68,9 @@ const [history, setHistory] = useState([])
     fetchAssignedProjects()
     fetchSchedule()
     checkActiveEntry()
-  }, [])const fetchHistory = async () => {
+  }, [])
+
+const fetchHistory = async () => {
   try {
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
