@@ -450,7 +450,39 @@ const fetchHistory = async () => {
           </div>
         )}
       </div>
-
+{activeTab === 'history' && (
+  <div>
+    {history.length === 0
+      ? <div className="empty-state"><p>No time entries in the last 30 days</p></div>
+      : history.map(entry => {
+          const clockIn = new Date(entry.clocked_in_at)
+          const clockOut = entry.clocked_out_at ? new Date(entry.clocked_out_at) : null
+          return (
+            <div key={entry.id} className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                    {clockIn.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </p>
+                  <h3>{entry.projects?.name || 'Unknown Job'}</h3>
+                  <p style={{ fontSize: '13px', color: '#666', marginTop: '4px' }}>
+                    In: {clockIn.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                    {clockOut ? ` — Out: ${clockOut.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
+                  </p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  {entry.clocked_out_at
+                    ? <p style={{ fontWeight: '700', fontSize: '16px', color: '#1C2B3A' }}>{formatTime(entry.total_minutes || 0)}</p>
+                    : <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600' }}>Active</p>
+                  }
+                </div>
+              </div>
+            </div>
+          )
+        })
+    }
+  </div>
+)}
       {/* EDIT OFFLINE ENTRY MODAL */}
       {showEditOffline && (
         <div className="modal-overlay" onClick={() => setShowEditOffline(false)}>
