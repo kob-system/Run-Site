@@ -360,6 +360,28 @@ export default function OwnerDashboard({ profile }) {
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>LABOR</p>
                 <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(selectedProject.labor_spent)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.labor_budget)}</span></p>
                 <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(labPct)} style={{ width: labPct + '%' }} /></div>
+                {timeEntries.length > 0 && (
+    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+      <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>By Worker</p>
+      {Object.values(
+        timeEntries.filter(t => t.clocked_out_at).reduce((acc, t) => {
+          const name = t.profiles?.full_name || 'Unknown'
+          if (!acc[name]) acc[name] = { name, minutes: 0, cost: 0 }
+          acc[name].minutes += t.total_minutes || 0
+          acc[name].cost += t.labor_cost || 0
+          return acc
+        }, {})
+      ).map(w => (
+        <div key={w.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f9f9f9' }}>
+          <div>
+            <p style={{ fontWeight: '600', fontSize: '14px' }}>{w.name}</p>
+            <p style={{ fontSize: '12px', color: '#888' }}>{formatTime(w.minutes)}</p>
+          </div>
+          <p style={{ fontWeight: '700', color: '#DC2626', fontSize: '14px' }}>{formatCurrency(w.cost)}</p>
+        </div>
+      ))}
+    </div>
+  )}
               </div>
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>PROFIT TARGET</p>
