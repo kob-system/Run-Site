@@ -21,7 +21,7 @@ function Toast({ message, type = 'success', onClose }) {
   )
 }
 
-function PhotoViewer({ receipt, onClose }) {
+function PhotoViewer({ receipt, onClose, onDelete }) {
   if (!receipt) return null
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -42,6 +42,18 @@ function PhotoViewer({ receipt, onClose }) {
           <p style={{ fontSize: '22px', fontWeight: '700', color: '#DC2626', marginTop: '8px' }}>{formatCurrency(receipt.amount)}</p>
           <p style={{ fontSize: '12px', color: '#aaa', marginTop: '4px' }}>{new Date(receipt.created_at).toLocaleDateString()}</p>
         </div>
+        {onDelete && (
+          <button
+            onClick={() => onDelete(receipt)}
+            style={{
+              marginTop: '20px', width: '100%', padding: '12px', borderRadius: '12px',
+              border: '1px solid #DC2626', background: 'white', color: '#DC2626',
+              fontSize: '15px', fontWeight: '600', cursor: 'pointer'
+            }}
+          >
+            Delete this expense
+          </button>
+        )}
       </div>
     </div>
   )
@@ -52,12 +64,15 @@ export default function OwnerDashboard({ profile }) {
   const [projects, setProjects] = useState([])
   const [workers, setWorkers] = useState([])
   const [workerStats, setWorkerStats] = useState({}) // keyed by worker id
+  const [spendByProject, setSpendByProject] = useState({}) // keyed by project id: { materials, labor, other }
   const [selectedProject, setSelectedProject] = useState(null)
   const [projectTab, setProjectTab] = useState('receipts')
   const [receipts, setReceipts] = useState([])
   const [timeEntries, setTimeEntries] = useState([])
   const [scheduleEntries, setScheduleEntries] = useState([])
   const [showNewJob, setShowNewJob] = useState(false)
+  const [showEditJob, setShowEditJob] = useState(false)
+  const [editJobForm, setEditJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [showNewReceipt, setShowNewReceipt] = useState(false)
   const [showNewSchedule, setShowNewSchedule] = useState(false)
   const [showAssignWorker, setShowAssignWorker] = useState(null)
@@ -131,6 +146,35 @@ export default function OwnerDashboard({ profile }) {
     }
   }, [])
 
+  // Compute each job's spending LIVE from the source records (receipts +
+  // clocked-out time entries) instead of trusting denormalized running-total
+  // columns. This keeps profit accurate, counts every receipt category, and
+  // means editing/deleting a record self-corrects the totals automatically.
+  const fetchSpend = useCallback(async (projectList) => {
+    if (!projectList?.length) { setSpendByProject({}); return }
+    try {
+      const ids = projectList.map(p => p.id)
+      const [{ data: rcpts }, { data: times }] = await Promise.all([
+        supabase.from('receipts').select('project_id, amount, category').eq('owner_id', profile.id),
+        supabase.from('time_entries').select('project_id, labor_cost').in('project_id', ids).not('clocked_out_at', 'is', null)
+      ])
+      const spend = {}
+      ids.forEach(id => { spend[id] = { materials: 0, labor: 0, other: 0 } })
+      ;(rcpts || []).forEach(r => {
+        if (!spend[r.project_id]) spend[r.project_id] = { materials: 0, labor: 0, other: 0 }
+        if (r.category === 'materials') spend[r.project_id].materials += r.amount || 0
+        else spend[r.project_id].other += r.amount || 0
+      })
+      ;(times || []).forEach(t => {
+        if (!spend[t.project_id]) spend[t.project_id] = { materials: 0, labor: 0, other: 0 }
+        spend[t.project_id].labor += t.labor_cost || 0
+      })
+      setSpendByProject(spend)
+    } catch (e) {
+      console.error('Spend fetch failed:', e)
+    }
+  }, [profile.id])
+
   useEffect(() => {
     fetchProjects()
     fetchWorkers()
@@ -139,6 +183,10 @@ export default function OwnerDashboard({ profile }) {
   useEffect(() => {
     if (workers.length) fetchWorkerStats(workers)
   }, [workers, fetchWorkerStats])
+
+  useEffect(() => {
+    fetchSpend(projects)
+  }, [projects, fetchSpend])
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
@@ -229,10 +277,6 @@ export default function OwnerDashboard({ profile }) {
         amount, category: receiptForm.category, photo_url: receiptForm.photo_url || null
       })
       if (error) throw error
-      if (receiptForm.category === 'materials') {
-        const { data: p } = await supabase.from('projects').select('materials_spent').eq('id', selectedProject.id).single()
-        await supabase.from('projects').update({ materials_spent: (p?.materials_spent || 0) + amount }).eq('id', selectedProject.id)
-      }
       setShowNewReceipt(false)
       setReceiptForm({ description: '', store: '', amount: '', category: 'materials', photo_url: '' })
       setScanResult(null); setScanError('')
@@ -315,24 +359,139 @@ export default function OwnerDashboard({ profile }) {
     }
   }
 
+  const exportReportCSV = () => {
+    const header = ['Job', 'Client', 'Completed', 'Revenue', 'Materials', 'Labor', 'Other', 'Profit', 'Margin %']
+    const rows = [header]
+    const tot = { rev: 0, mat: 0, lab: 0, oth: 0, prof: 0 }
+    reportJobs.forEach(p => {
+      const s = spendOf(p.id)
+      const profit = profitOf(p)
+      const margin = p.budget > 0 ? Math.round((profit / p.budget) * 100) : 0
+      tot.rev += p.budget || 0; tot.mat += s.materials; tot.lab += s.labor; tot.oth += s.other; tot.prof += profit
+      rows.push([
+        p.name || '', p.client_name || '',
+        p.completed_at ? new Date(p.completed_at).toLocaleDateString() : '',
+        (p.budget || 0).toFixed(2), s.materials.toFixed(2), s.labor.toFixed(2),
+        s.other.toFixed(2), profit.toFixed(2), margin
+      ])
+    })
+    rows.push([])
+    rows.push(['TOTALS', '', '', tot.rev.toFixed(2), tot.mat.toFixed(2), tot.lab.toFixed(2), tot.oth.toFixed(2), tot.prof.toFixed(2), ''])
+    const csv = rows.map(r => r.map(cell => {
+      const v = String(cell)
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v
+    }).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `run-site-${reportYear}-tax-report.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast('Report exported ✓')
+  }
+
+  const deleteReceipt = async (receipt) => {
+    if (!window.confirm('Delete this receipt? This cannot be undone.')) return
+    try {
+      const { error } = await supabase.from('receipts').delete().eq('id', receipt.id)
+      if (error) throw error
+      setPhotoViewer(null)
+      await fetchProjectDetails(selectedProject)
+      await fetchProjects()
+      showToast('Receipt deleted ✓')
+    } catch (e) {
+      showToast('Failed to delete receipt', 'error')
+    }
+  }
+
+  const deleteTimeEntry = async (entry) => {
+    if (!window.confirm('Delete this time entry? Labor cost recalculates automatically.')) return
+    try {
+      const { error } = await supabase.from('time_entries').delete().eq('id', entry.id)
+      if (error) throw error
+      await fetchProjectDetails(selectedProject)
+      await fetchProjects()
+      showToast('Time entry deleted ✓')
+    } catch (e) {
+      showToast('Failed to delete time entry', 'error')
+    }
+  }
+
+  const reopenJob = async (project) => {
+    if (!window.confirm('Reopen this completed job?')) return
+    try {
+      const { error } = await supabase.from('projects').update({ stage: 'mid', completed_at: null }).eq('id', project.id)
+      if (error) throw error
+      await fetchProjects()
+      setSelectedProject(prev => prev ? { ...prev, stage: 'mid', completed_at: null } : null)
+      showToast('Job reopened ✓')
+    } catch (e) {
+      showToast('Failed to reopen job', 'error')
+    }
+  }
+
+  const openEditJob = () => {
+    setEditJobForm({
+      name: selectedProject.name || '',
+      client_name: selectedProject.client_name || '',
+      materials_budget: selectedProject.materials_budget || '',
+      labor_budget: selectedProject.labor_budget || '',
+      profit_target: selectedProject.profit_target || ''
+    })
+    setInlineError('')
+    setShowEditJob(true)
+  }
+
+  const saveEditJob = async () => {
+    if (!editJobForm.name) return setInlineError('Job name is required')
+    setLoading(true)
+    setInlineError('')
+    try {
+      const materials = parseFloat(editJobForm.materials_budget || 0)
+      const labor = parseFloat(editJobForm.labor_budget || 0)
+      const profit = parseFloat(editJobForm.profit_target || 0)
+      const total = materials + labor + profit
+      const updated = {
+        name: editJobForm.name, client_name: editJobForm.client_name,
+        materials_budget: materials, labor_budget: labor, profit_target: profit, budget: total
+      }
+      const { error } = await supabase.from('projects').update(updated).eq('id', selectedProject.id)
+      if (error) throw error
+      setShowEditJob(false)
+      await fetchProjects()
+      setSelectedProject(prev => prev ? { ...prev, ...updated } : null)
+      showToast('Job updated ✓')
+    } catch (e) {
+      setInlineError('Failed to update job. Try again.')
+    }
+    setLoading(false)
+  }
+
   const getBudgetPct = (spent, budget) => budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
   const getBudgetClass = (pct) => pct >= 100 ? 'danger' : pct >= 80 ? 'warning' : ''
+  const spendOf = (pid) => spendByProject[pid] || { materials: 0, labor: 0, other: 0 }
+  // Profit = contract price (budget) minus everything actually spent.
+  const profitOf = (p) => {
+    const s = spendOf(p.id)
+    return (p.budget || 0) - s.materials - s.labor - s.other
+  }
 
   const activeProjects = projects.filter(p => p.stage !== 'end')
   const completedProjects = projects.filter(p => p.stage === 'end')
-  const projectedProfit = activeProjects.reduce((sum, p) => {
-    if (!p.materials_budget && !p.labor_budget) return sum
-    return sum + (p.profit_target || 0) - (p.materials_spent || 0) - (p.labor_spent || 0)
-  }, 0)
+  const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
 
   const reportYears = [new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2]
   const reportJobs = completedProjects.filter(p => p.completed_at && new Date(p.completed_at).getFullYear() === reportYear)
 
   // PROJECT DETAIL VIEW
   if (selectedProject) {
-    const matPct = getBudgetPct(selectedProject.materials_spent, selectedProject.materials_budget)
-    const labPct = getBudgetPct(selectedProject.labor_spent, selectedProject.labor_budget)
-    const projProfit = (selectedProject.profit_target || 0) - (selectedProject.materials_spent || 0) - (selectedProject.labor_spent || 0)
+    const sp = spendOf(selectedProject.id)
+    const matPct = getBudgetPct(sp.materials, selectedProject.materials_budget)
+    const labPct = getBudgetPct(sp.labor, selectedProject.labor_budget)
+    const projProfit = profitOf(selectedProject)
 
     return (
       <div>
@@ -353,12 +512,12 @@ export default function OwnerDashboard({ profile }) {
             <div>
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>MATERIALS</p>
-                <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(selectedProject.materials_spent)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.materials_budget)}</span></p>
+                <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(sp.materials)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.materials_budget)}</span></p>
                 <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(matPct)} style={{ width: matPct + '%' }} /></div>
               </div>
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>LABOR</p>
-                <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(selectedProject.labor_spent)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.labor_budget)}</span></p>
+                <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(sp.labor)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.labor_budget)}</span></p>
                 <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(labPct)} style={{ width: labPct + '%' }} /></div>
                 {timeEntries.length > 0 && (
     <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
@@ -383,6 +542,13 @@ export default function OwnerDashboard({ profile }) {
     </div>
   )}
               </div>
+              {sp.other > 0 && (
+                <div className="card">
+                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>OTHER COSTS</p>
+                  <p style={{ fontWeight: '700', fontSize: '18px', color: '#DC2626' }}>{formatCurrency(sp.other)}</p>
+                  <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>Non-materials receipts (gas, permits, tools, subs)</p>
+                </div>
+              )}
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>PROFIT TARGET</p>
                 <p style={{ fontWeight: '700', fontSize: '22px', color: '#16A34A' }}>{formatCurrency(selectedProject.profit_target)}</p>
@@ -396,6 +562,10 @@ export default function OwnerDashboard({ profile }) {
                 <button className="btn-secondary" onClick={() => advanceStage(selectedProject)}>
                   {selectedProject.stage === 'start' ? 'Advance to Mid →' : 'Mark as Complete ✓'}
                 </button>
+              )}
+              <button className="btn-secondary" onClick={openEditJob}>✎ Edit Job Details</button>
+              {selectedProject.stage === 'end' && (
+                <button className="btn-secondary" onClick={() => reopenJob(selectedProject)}>↩ Reopen Job</button>
               )}
             </div>
           )}
@@ -429,9 +599,28 @@ export default function OwnerDashboard({ profile }) {
                       <h3>{t.profiles ? t.profiles.full_name : 'Worker'}</h3>
                       <p>{new Date(t.clocked_in_at).toLocaleDateString()}</p>
                       <p>{t.total_minutes ? formatTime(t.total_minutes) : 'Still clocked in'}</p>
+                      {t.gps_lat != null && t.gps_lng != null && (
+                        <a
+                          href={`https://www.google.com/maps?q=${t.gps_lat},${t.gps_lng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: '12px', color: '#E07B2A', textDecoration: 'none', marginTop: '4px', display: 'inline-block' }}
+                        >
+                          📍 Clock-in location
+                        </a>
+                      )}
                     </div>
                     <p style={{ fontWeight: '700', color: '#1C2B3A' }}>{t.labor_cost ? formatCurrency(t.labor_cost) : '—'}</p>
                   </div>
+                  <button
+                    onClick={() => deleteTimeEntry(t)}
+                    style={{
+                      marginTop: '10px', background: 'none', border: 'none', color: '#DC2626',
+                      fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0'
+                    }}
+                  >
+                    Delete entry
+                  </button>
                 </div>
               ))}
               {timeEntries.length === 0 && <div className="empty-state"><p>No time entries yet</p></div>}
@@ -502,7 +691,24 @@ export default function OwnerDashboard({ profile }) {
           </div>
         )}
 
-        {photoViewer && <PhotoViewer receipt={photoViewer} onClose={() => setPhotoViewer(null)} />}
+        {showEditJob && (
+          <div className="modal-overlay" onClick={() => { setShowEditJob(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Edit Job</h2>
+              <div className="input-group"><label>Job Name</label><input value={editJobForm.name} onChange={e => setEditJobForm({ ...editJobForm, name: e.target.value })} placeholder="Kitchen remodel" /></div>
+              <div className="input-group"><label>Client</label><input value={editJobForm.client_name} onChange={e => setEditJobForm({ ...editJobForm, client_name: e.target.value })} placeholder="Client name" /></div>
+              <div className="input-group"><label>Materials Budget ($)</label><input type="number" value={editJobForm.materials_budget} onChange={e => setEditJobForm({ ...editJobForm, materials_budget: e.target.value })} placeholder="0.00" /></div>
+              <div className="input-group"><label>Labor Budget ($)</label><input type="number" value={editJobForm.labor_budget} onChange={e => setEditJobForm({ ...editJobForm, labor_budget: e.target.value })} placeholder="0.00" /></div>
+              <div className="input-group"><label>Profit Target ($)</label><input type="number" value={editJobForm.profit_target} onChange={e => setEditJobForm({ ...editJobForm, profit_target: e.target.value })} placeholder="0.00" /></div>
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Contract price = ${((parseFloat(editJobForm.materials_budget) || 0) + (parseFloat(editJobForm.labor_budget) || 0) + (parseFloat(editJobForm.profit_target) || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={saveEditJob} disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
+              <button className="btn-secondary" onClick={() => { setShowEditJob(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {photoViewer && <PhotoViewer receipt={photoViewer} onClose={() => setPhotoViewer(null)} onDelete={deleteReceipt} />}
         <Toast message={toast} type={toastType} onClose={() => setToast('')} />
       </div>
     )
@@ -532,8 +738,9 @@ export default function OwnerDashboard({ profile }) {
               <div>
                 <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 8px', padding: '0 4px' }}>Active</p>
                 {activeProjects.map(p => {
-                  const matPct = getBudgetPct(p.materials_spent, p.materials_budget)
-                  const labPct = getBudgetPct(p.labor_spent, p.labor_budget)
+                  const s = spendOf(p.id)
+                  const matPct = getBudgetPct(s.materials, p.materials_budget)
+                  const labPct = getBudgetPct(s.labor, p.labor_budget)
                   return (
                     <div key={p.id} className="card" onClick={() => fetchProjectDetails(p)} style={{ cursor: 'pointer' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
@@ -545,9 +752,9 @@ export default function OwnerDashboard({ profile }) {
                           {matPct >= 100 || labPct >= 100 ? '🔴 Over budget' : '⚠️ Approaching limit'}
                         </div>
                       )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', marginBottom: '4px' }}><span>Materials</span><span>{formatCurrency(p.materials_spent)} / {formatCurrency(p.materials_budget)}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', marginBottom: '4px' }}><span>Materials</span><span>{formatCurrency(s.materials)} / {formatCurrency(p.materials_budget)}</span></div>
                       <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(matPct)} style={{ width: matPct + '%' }} /></div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', margin: '6px 0 4px' }}><span>Labor</span><span>{formatCurrency(p.labor_spent)} / {formatCurrency(p.labor_budget)}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', margin: '6px 0 4px' }}><span>Labor</span><span>{formatCurrency(s.labor)} / {formatCurrency(p.labor_budget)}</span></div>
                       <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(labPct)} style={{ width: labPct + '%' }} /></div>
                     </div>
                   )
@@ -629,23 +836,26 @@ export default function OwnerDashboard({ profile }) {
             </div>
             {reportJobs.length > 0 ? (
               <>
+                <button className="btn-secondary" onClick={exportReportCSV} style={{ marginBottom: '12px' }}>⬇ Export {reportYear} for Taxes (CSV)</button>
                 <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
                   <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>{reportYear} Summary</p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Jobs Completed</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{reportJobs.length}</p></div>
                     <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Revenue</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + (p.budget || 0), 0))}</p></div>
-                    <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Materials</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + (p.materials_spent || 0), 0))}</p></div>
-                    <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Labor</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + (p.labor_spent || 0), 0))}</p></div>
+                    <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Materials</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + spendOf(p.id).materials, 0))}</p></div>
+                    <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Labor</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + spendOf(p.id).labor, 0))}</p></div>
+                    <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Other</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + spendOf(p.id).other, 0))}</p></div>
                   </div>
                   <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                     <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Net Profit</p>
                     <p style={{ fontSize: '28px', fontWeight: '800', color: '#16A34A' }}>
-                      {formatCurrency(reportJobs.reduce((s, p) => s + (p.budget || 0) - (p.materials_spent || 0) - (p.labor_spent || 0), 0))}
+                      {formatCurrency(reportJobs.reduce((s, p) => s + profitOf(p), 0))}
                     </p>
                   </div>
                 </div>
                 {reportJobs.map(p => {
-                  const profit = (p.budget || 0) - (p.materials_spent || 0) - (p.labor_spent || 0)
+                  const s = spendOf(p.id)
+                  const profit = profitOf(p)
                   const margin = p.budget > 0 ? Math.round((profit / p.budget) * 100) : 0
                   return (
                     <div key={p.id} className="card">
@@ -656,8 +866,9 @@ export default function OwnerDashboard({ profile }) {
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '13px' }}>
                         <div><span style={{ color: '#888' }}>Revenue</span><p style={{ fontWeight: '600' }}>{formatCurrency(p.budget)}</p></div>
                         <div><span style={{ color: '#888' }}>Profit</span><p style={{ fontWeight: '600', color: profit >= 0 ? '#16A34A' : '#DC2626' }}>{formatCurrency(profit)}</p></div>
-                        <div><span style={{ color: '#888' }}>Materials</span><p style={{ fontWeight: '600' }}>{formatCurrency(p.materials_spent)}</p></div>
-                        <div><span style={{ color: '#888' }}>Labor</span><p style={{ fontWeight: '600' }}>{formatCurrency(p.labor_spent)}</p></div>
+                        <div><span style={{ color: '#888' }}>Materials</span><p style={{ fontWeight: '600' }}>{formatCurrency(s.materials)}</p></div>
+                        <div><span style={{ color: '#888' }}>Labor</span><p style={{ fontWeight: '600' }}>{formatCurrency(s.labor)}</p></div>
+                        {s.other > 0 && <div><span style={{ color: '#888' }}>Other</span><p style={{ fontWeight: '600' }}>{formatCurrency(s.other)}</p></div>}
                       </div>
                     </div>
                   )

@@ -122,12 +122,8 @@ const fetchHistory = async () => {
 
       if (error) throw error
 
-      // If entry includes a clock-out, add labor cost to the project.
-      // Routed through a SECURITY DEFINER function because RLS only lets
-      // the owner update projects directly — see FIX-DATABASE-2.sql.
-      if (entry.clocked_out_at && entry.labor_cost) {
-        await supabase.rpc('add_labor_cost', { p_project_id: entry.project_id, p_cost: entry.labor_cost })
-      }
+      // Labor cost lives on the time entry itself; the owner dashboard sums
+      // those live, so there's no project total to update here.
 
       // Notify owner (email resolved server-side from owner_id)
       if (profile.owner_id) {
@@ -291,7 +287,8 @@ const fetchHistory = async () => {
       }).eq('id', activeEntry.id)
       if (timeError) throw timeError
 
-      await supabase.rpc('add_labor_cost', { p_project_id: activeEntry.project_id, p_cost: laborCost })
+      // labor_cost is saved on the time entry above; the owner dashboard
+      // sums time entries live, so no project total to update here.
 
       // Notify owner (email resolved server-side from owner_id)
       if (profile.owner_id) {
@@ -324,6 +321,7 @@ const fetchHistory = async () => {
     const updated = { ...offlineEntry, clocked_in_at: clockInDate.toISOString() }
     if (editClockOut) {
       const clockOutDate = new Date(editClockOut)
+      if (clockOutDate <= clockInDate) return setError('Clock-out must be after clock-in')
       const totalMinutes = Math.floor((clockOutDate - clockInDate) / 60000)
       const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
       updated.clocked_out_at = clockOutDate.toISOString()
