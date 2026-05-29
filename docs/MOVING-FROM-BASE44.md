@@ -38,6 +38,19 @@ The **only manual handoff** is JP clicking "Export to GitHub" in Base44. After t
 **Domains:** mostly **Namecheap**, one in **Wix**.
 **Accounts ready:** GitHub ✅, Vercel ✅, Supabase ✅ (already used for Run-Site).
 
+### Site inventory (live)
+All four resolve to the same shared hosting IPs (`216.24.57.7` / `216.24.57.251`) — consistent Base44 hosting; these are the DNS records to repoint to Vercel.
+
+| Site | Business | Expected complexity | Pilot? |
+|---|---|---|---|
+| allphasemaintenance.com | Maintenance | Likely simple brochure | ✅ strong pilot candidate |
+| 518firstclassservices.com | Services | Likely simple brochure | ✅ strong pilot candidate |
+| schenectadymarbleandgranite.com | Marble & granite | Brochure + likely quote form | Phase 1 |
+| troymegawash.com | Car wash | Maybe memberships/payments — verify source first | Phase 1 (assess) |
+| pump-puff-club.base44.app | Shop w/ accounts | Full app — Supabase rebuild | Phase 2 (last) |
+
+> NOTE: Live sites can't be crawled from the web sandbox (network allowlist blocks them — `host_not_allowed`). The real assessment happens after exporting each site's source to GitHub, which the sandbox CAN read.
+
 ---
 
 ## ⚠️ Golden rules (do not break these)
