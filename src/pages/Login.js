@@ -28,13 +28,25 @@ export default function Login() {
 
     let ownerId = null
     if (role === 'worker') {
-      const { data: ownerData } = await supabase.from('profiles').select('id').eq('email', ownerEmail).eq('role', 'owner').single()
-      if (!ownerData) {
+      let ownerLookup
+      try {
+        const resp = await fetch('/api/find-owner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ownerEmail })
+        })
+        ownerLookup = await resp.json()
+      } catch (err) {
+        setError("Couldn't reach the server. Check your connection and try again.")
+        setLoading(false)
+        return
+      }
+      if (!ownerLookup || !ownerLookup.ownerId) {
         setError("Could not find an owner account with that email. Ask your boss to sign up first.")
         setLoading(false)
         return
       }
-      ownerId = ownerData.id
+      ownerId = ownerLookup.ownerId
     }
 
     const { data, error } = await supabase.auth.signUp({ email, password })

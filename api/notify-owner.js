@@ -1,7 +1,30 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { ownerEmail, workerName, jobName, action, timestamp } = req.body
+  const { ownerId, workerName, jobName, action, timestamp } = req.body
+  if (!ownerId) return res.json({ success: false, error: 'Missing ownerId' })
+
+  // Resolve the owner's email server-side. Workers can't read the owner's
+  // profile under RLS, and this keeps the email out of the browser entirely.
+  let ownerEmail
+  try {
+    const lookup = await fetch(
+      `${process.env.REACT_APP_SUPABASE_URL}/rest/v1/profiles` +
+        `?id=eq.${encodeURIComponent(ownerId)}&select=email`,
+      {
+        headers: {
+          apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+        }
+      }
+    )
+    const rows = await lookup.json()
+    ownerEmail = rows?.[0]?.email
+  } catch (err) {
+    console.error('Owner lookup failed:', err)
+    return res.json({ success: false, error: 'Owner lookup failed' })
+  }
+  if (!ownerEmail) return res.json({ success: false, error: 'Owner email not found' })
 
   const time = new Date(timestamp).toLocaleTimeString('en-US', {
     hour: 'numeric', minute: '2-digit', hour12: true

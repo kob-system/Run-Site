@@ -107,13 +107,6 @@ const fetchHistory = async () => {
     if (syncing) return
     setSyncing(true)
     try {
-      // Get owner profile to send notification
-      const { data: ownerProfile } = await supabase
-        .from('profiles')
-        .select('email')
-        .eq('id', profile.owner_id)
-        .single()
-
       const { data, error } = await supabase.from('time_entries').insert({
         project_id: entry.project_id,
         worker_id: profile.id,
@@ -129,22 +122,21 @@ const fetchHistory = async () => {
 
       if (error) throw error
 
-      // If entry includes a clock-out, update project labor_spent
+      // If entry includes a clock-out, add labor cost to the project.
+      // Routed through a SECURITY DEFINER function because RLS only lets
+      // the owner update projects directly — see FIX-DATABASE-2.sql.
       if (entry.clocked_out_at && entry.labor_cost) {
-        const { data: project } = await supabase.from('projects').select('labor_spent').eq('id', entry.project_id).single()
-        await supabase.from('projects').update({
-          labor_spent: (project?.labor_spent || 0) + entry.labor_cost
-        }).eq('id', entry.project_id)
+        await supabase.rpc('add_labor_cost', { p_project_id: entry.project_id, p_cost: entry.labor_cost })
       }
 
-      // Notify owner
-      if (ownerProfile?.email) {
+      // Notify owner (email resolved server-side from owner_id)
+      if (profile.owner_id) {
         const jobName = projects.find(p => p.id === entry.project_id)?.name || 'a job'
         fetch('/api/notify-owner', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ownerEmail: ownerProfile.email,
+            ownerId: profile.owner_id,
             workerName: profile.full_name,
             jobName,
             action: 'in',
@@ -231,7 +223,6 @@ const fetchHistory = async () => {
     }
 
     try {
-      const { data: ownerProfile } = await supabase.from('profiles').select('email').eq('id', profile.owner_id).single()
       const { data, error } = await supabase.from('time_entries').insert({
         project_id: selectedProject,
         worker_id: profile.id,
@@ -243,14 +234,14 @@ const fetchHistory = async () => {
       if (error) throw error
       setActiveEntry(data)
 
-      // Notify owner
-      if (ownerProfile?.email) {
+      // Notify owner (email resolved server-side from owner_id)
+      if (profile.owner_id) {
         const jobName = projects.find(p => p.id === selectedProject)?.name || 'a job'
         fetch('/api/notify-owner', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ownerEmail: ownerProfile.email,
+            ownerId: profile.owner_id,
             workerName: profile.full_name,
             jobName,
             action: 'in',
@@ -300,20 +291,16 @@ const fetchHistory = async () => {
       }).eq('id', activeEntry.id)
       if (timeError) throw timeError
 
-      const { data: project } = await supabase.from('projects').select('labor_spent').eq('id', activeEntry.project_id).single()
-      await supabase.from('projects').update({
-        labor_spent: (project?.labor_spent || 0) + laborCost
-      }).eq('id', activeEntry.project_id)
+      await supabase.rpc('add_labor_cost', { p_project_id: activeEntry.project_id, p_cost: laborCost })
 
-      // Notify owner
-      const { data: ownerProfile } = await supabase.from('profiles').select('email').eq('id', profile.owner_id).single()
-      if (ownerProfile?.email) {
+      // Notify owner (email resolved server-side from owner_id)
+      if (profile.owner_id) {
         const jobName = projects.find(p => p.id === activeEntry.project_id)?.name || 'a job'
         fetch('/api/notify-owner', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ownerEmail: ownerProfile.email,
+            ownerId: profile.owner_id,
             workerName: profile.full_name,
             jobName,
             action: 'out',
