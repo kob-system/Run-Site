@@ -46,8 +46,11 @@ All four resolve to the same shared hosting IPs (`216.24.57.7` / `216.24.57.251`
 | allphasemaintenance.com | Maintenance | Likely simple brochure | ✅ strong pilot candidate |
 | 518firstclassservices.com | Services | Likely simple brochure | ✅ strong pilot candidate |
 | schenectadymarbleandgranite.com | Marble & granite | Brochure + likely quote form | Phase 1 |
-| troymegawash.com | Car wash | Maybe memberships/payments — verify source first | Phase 1 (assess) |
+| troymegawash.com | Al Barra — laundromat | Base44; brochure | Phase 1 |
+| troyfivestar.com | Al Barra — deli | **Wix — NO code export → REBUILD from template** | Phase 1 (rebuild) |
 | pump-puff-club.base44.app | Shop w/ accounts | Full app — Supabase rebuild | Phase 2 (last) |
+
+> Hosting confirmed via DNS: all `*.base44`-style sites resolve to `216.24.57.x` (Base44). **troyfivestar.com resolves to Wix** — Wix allows no code export, so that one is a clean rebuild, not a migration.
 
 > NOTE: Live sites can't be crawled from the web sandbox (network allowlist blocks them — `host_not_allowed`). The real assessment happens after exporting each site's source to GitHub, which the sandbox CAN read.
 
