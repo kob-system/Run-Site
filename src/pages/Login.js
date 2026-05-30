@@ -28,13 +28,13 @@ export default function Login() {
 
     let ownerId = null
     if (role === 'worker') {
-      const { data: ownerData } = await supabase.from('profiles').select('id').eq('email', ownerEmail).eq('role', 'owner').single()
-      if (!ownerData) {
+      const { data: foundOwnerId, error: lookupError } = await supabase.rpc('find_owner_id', { owner_email: ownerEmail })
+      if (lookupError || !foundOwnerId) {
         setError("Could not find an owner account with that email. Ask your boss to sign up first.")
         setLoading(false)
         return
       }
-      ownerId = ownerData.id
+      ownerId = foundOwnerId
     }
 
     const { data, error } = await supabase.auth.signUp({ email, password })
