@@ -7,41 +7,15 @@
 
 
 -- ------------------------------------------------------------
--- #5 — RLS HELPER FUNCTIONS (commit the previously-uncommitted
--- "RLS recursion patch" so the DB is reproducible from source).
--- SECURITY DEFINER + pinned search_path lets a policy check
--- ownership/assignment WITHOUT recursing through other tables'
--- policies. These match what the app's existing -2/-3 migrations
--- already rely on; create-or-replace is a no-op if identical.
+-- #5 — RLS HELPER FUNCTIONS: already present in the live DB from the
+-- earlier "RLS recursion patch" (verified 2026-05-30 — the live
+-- is_owner_of_project / is_worker_on_project use a `pid` parameter).
+-- This migration does NOT recreate them: a create-or-replace that
+-- renames the parameter errors (42P13), and the existing functions
+-- already work and are relied on by the -2/-3 policies. To version
+-- them in source, capture the live definitions with pg_get_functiondef
+-- rather than guessing the body/signature.
 -- ------------------------------------------------------------
-create or replace function public.is_owner_of_project(p_project_id uuid)
-returns boolean
-language sql
-security definer
-set search_path = public
-stable
-as $$
-  select exists (
-    select 1 from public.projects
-    where id = p_project_id and owner_id = auth.uid()
-  );
-$$;
-
-create or replace function public.is_worker_on_project(p_project_id uuid)
-returns boolean
-language sql
-security definer
-set search_path = public
-stable
-as $$
-  select exists (
-    select 1 from public.project_workers
-    where project_id = p_project_id and worker_id = auth.uid()
-  );
-$$;
-
-grant execute on function public.is_owner_of_project(uuid) to authenticated;
-grant execute on function public.is_worker_on_project(uuid) to authenticated;
 
 
 -- ------------------------------------------------------------
