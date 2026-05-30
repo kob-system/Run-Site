@@ -24,16 +24,24 @@ function Toast({ message, type = 'success', onClose }) {
 
 function PhotoViewer({ receipt, onClose, onDelete }) {
   const [imgUrl, setImgUrl] = useState(null)
+  const [imgErr, setImgErr] = useState(false)
   useEffect(() => {
     let active = true
     setImgUrl(null)
-    // photo_url holds the storage PATH; mint a short-lived signed URL to view it
-    // (the bucket is private, so receipts aren't world-readable).
-    if (receipt && receipt.photo_url) {
-      supabase.storage.from('receipts').createSignedUrl(receipt.photo_url, 300).then(({ data }) => {
-        if (active && data) setImgUrl(data.signedUrl)
+    setImgErr(false)
+    const path = receipt && receipt.photo_url
+    if (!path) return
+    // Legacy rows may hold a full URL; use it directly. Otherwise mint a short-
+    // lived signed URL (the bucket is private). Surface a terminal error instead
+    // of spinning forever if signing fails.
+    if (/^https?:\/\//.test(path)) { setImgUrl(path); return }
+    supabase.storage.from('receipts').createSignedUrl(path, 300)
+      .then(({ data, error }) => {
+        if (!active) return
+        if (data && data.signedUrl) setImgUrl(data.signedUrl)
+        else setImgErr(true)
       })
-    }
+      .catch(() => { if (active) setImgErr(true) })
     return () => { active = false }
   }, [receipt])
   if (!receipt) return null
@@ -50,7 +58,9 @@ function PhotoViewer({ receipt, onClose, onDelete }) {
         {receipt.photo_url
           ? (imgUrl
             ? <img src={imgUrl} alt="Receipt" style={{ width: '100%', borderRadius: '12px', objectFit: 'contain', maxHeight: '400px' }} />
-            : <div style={{ background: '#f4f6f9', borderRadius: '12px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280' }}>Loading photo…</div>)
+            : imgErr
+              ? <div style={{ background: '#f4f6f9', borderRadius: '12px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#DC2626' }}>Couldn't load photo</div>
+              : <div style={{ background: '#f4f6f9', borderRadius: '12px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280' }}>Loading photo…</div>)
           : <div style={{ background: '#f4f6f9', borderRadius: '12px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280' }}>No photo saved</div>
         }
         <div style={{ marginTop: '16px' }}>

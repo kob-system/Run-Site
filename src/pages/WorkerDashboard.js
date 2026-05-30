@@ -61,6 +61,7 @@ export default function WorkerDashboard({ profile }) {
   const retryTimerRef = useRef(null)
   const mountedRef = useRef(true)
   const toastTimerRef = useRef(null)
+  const retryCountRef = useRef(0)
 
   useEffect(() => {
     mountedRef.current = true
@@ -92,8 +93,13 @@ export default function WorkerDashboard({ profile }) {
   useEffect(() => {
     fetchAssignedProjects()
     fetchSchedule()
-    checkActiveEntry()
   }, [])
+
+  // Verify clock-in status on load AND whenever connectivity returns, so an
+  // offline-at-launch worker isn't permanently gated out of clocking in.
+  useEffect(() => {
+    if (isOnline) checkActiveEntry()
+  }, [isOnline])
 
   const showToast = (msg) => {
     setToast(msg)
@@ -117,66 +123,72 @@ export default function WorkerDashboard({ profile }) {
     } catch (e) { /* notifications are best-effort; never block clock in/out */ }
   }
 
-  const attemptSync = useCallback(async (entry) => {
-    if (!entry) return
-    if (syncingRef.current) return          // a real attempt is already in flight
-    if (!navigator.onLine) return           // don't burn attempts (or count retries) while offline
+  const attemptSync = useCallback(async () => {
+    if (syncingRef.current) return                                  // an attempt is already in flight
+    if (!navigator.onLine) { if (mountedRef.current) setSyncing(false); return }
+    if (!getOfflineEntry()) return
     if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
 
-    const retryCount = entry.__retry || 0
     syncingRef.current = true
-    setSyncing(true)
+    if (mountedRef.current) setSyncing(true)
+    let last = null
     try {
-      const { data, error } = await supabase.from('time_entries').insert({
-        client_id: entry.client_id,
-        project_id: entry.project_id,
-        worker_id: profile.id,
-        clocked_in_at: entry.clocked_in_at,
-        gps_lat: entry.gps_lat,
-        gps_lng: entry.gps_lng,
-        ...(entry.clocked_out_at ? {
-          clocked_out_at: entry.clocked_out_at,
-          total_minutes: entry.total_minutes,
-          labor_cost: entry.labor_cost
-        } : {})
-      }).select().single()
-
-      // 23505 = unique violation on client_id: this exact entry already reached
-      // the server on a prior attempt. Treat as success (idempotent) instead of
-      // inserting a duplicate shift.
-      const duplicate = error && error.code === '23505'
-      if (error && !duplicate) throw error
-
-      // Clear local copy ONLY now that the server has it.
-      clearOfflineEntry()
-
-      // Best-effort owner notifications, derived from the entry's own state.
-      notifyOwner('in', entry.clocked_in_at, entry.project_id)
-      if (entry.clocked_out_at) notifyOwner('out', entry.clocked_out_at, entry.project_id)
-
-      if (mountedRef.current) {
-        setOfflineEntry(null)
-        if (!entry.clocked_out_at) {
-          if (data) setActiveEntry(data)
-          else checkActiveEntry()           // duplicate path: restore the existing row
-        }
-        setSyncRetries(0)
-        setSyncing(false)
-        showToast('Synced ✓')
+      // localStorage is the single source of truth for the pending shift. Sync
+      // whatever is stored NOW; if it changes mid-sync (e.g. a clock-out arrives
+      // while the clock-in is uploading), loop and sync the newer version too.
+      // Clear only once the stored entry stops changing, so a concurrent
+      // clock-out is never dropped. upsert(client_id) makes every write idempotent.
+      for (;;) {
+        if (!navigator.onLine) break
+        const cur = getOfflineEntry()
+        if (!cur) break
+        const { data, error } = await supabase.from('time_entries').upsert({
+          client_id: cur.client_id,
+          project_id: cur.project_id,
+          worker_id: profile.id,
+          clocked_in_at: cur.clocked_in_at,
+          gps_lat: cur.gps_lat,
+          gps_lng: cur.gps_lng,
+          clocked_out_at: cur.clocked_out_at || null,
+          total_minutes: cur.clocked_out_at ? cur.total_minutes : null,
+          labor_cost: cur.clocked_out_at ? cur.labor_cost : null
+        }, { onConflict: 'client_id' }).select().single()
+        if (error) throw error
+        last = { entry: cur, data }
+        const after = getOfflineEntry()
+        if (after && JSON.stringify(after) !== JSON.stringify(cur)) continue   // newer data arrived → sync it too
+        clearOfflineEntry()
+        break
       }
+
+      retryCountRef.current = 0
+      if (last && mountedRef.current) {
+        setOfflineEntry(null)
+        if (last.entry.clocked_out_at) setActiveEntry(null)
+        else if (last.data) setActiveEntry(last.data)
+        setSyncRetries(0)
+        showToast('Synced ✓')
+        notifyOwner('in', last.entry.clocked_in_at, last.entry.project_id)
+        if (last.entry.clocked_out_at) notifyOwner('out', last.entry.clocked_out_at, last.entry.project_id)
+      }
+      if (mountedRef.current) setSyncing(false)
     } catch (e) {
-      if (retryCount < MAX_RETRIES - 1 && navigator.onLine) {
-        const delay = [5000, 30000, 120000][retryCount] || 120000
-        if (mountedRef.current) setSyncRetries(retryCount + 1)
+      if (retryCountRef.current < MAX_RETRIES - 1 && navigator.onLine) {
+        const n = retryCountRef.current
+        retryCountRef.current = n + 1
+        if (mountedRef.current) setSyncRetries(n + 1)
         retryTimerRef.current = setTimeout(() => {
           retryTimerRef.current = null
-          if (mountedRef.current) attemptSync({ ...entry, __retry: retryCount + 1 })
-        }, delay)
+          if (mountedRef.current) attemptSync()
+        }, [5000, 30000, 120000][n] || 120000)
         // keep the "Syncing…" indicator on while a retry is pending
-      } else if (mountedRef.current) {
-        setError('Sync failed. Tap "Retry Sync" when you have signal — your hours are saved on this phone.')
-        setSyncRetries(0)
-        setSyncing(false)
+      } else {
+        retryCountRef.current = 0
+        if (mountedRef.current) {
+          setError('Sync failed. Tap "Retry Sync" when you have signal — your hours are saved on this phone.')
+          setSyncRetries(0)
+          setSyncing(false)
+        }
       }
     } finally {
       syncingRef.current = false
@@ -187,7 +199,7 @@ export default function WorkerDashboard({ profile }) {
   // online and have a pending entry, try to sync it. This also auto-syncs an
   // entry that was already in localStorage at app launch. Coalesced by syncingRef.
   useEffect(() => {
-    if (isOnline && offlineEntry) attemptSync(offlineEntry)
+    if (isOnline && offlineEntry) attemptSync()
   }, [isOnline, offlineEntry, attemptSync])
 
   // Timer — runs off whichever entry is active
@@ -412,7 +424,7 @@ export default function WorkerDashboard({ profile }) {
       </div>
 
       <div className="page">
-        {error && <div className="alert-danger" style={{ marginBottom: '12px' }}>{error} {error.includes('Sync failed') && <button onClick={() => attemptSync(offlineEntry)} style={{ background: 'none', border: 'none', color: 'white', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry Sync</button>}</div>}
+        {error && <div className="alert-danger" style={{ marginBottom: '12px' }}>{error} {error.includes('Sync failed') && <button onClick={() => attemptSync()} style={{ background: 'none', border: 'none', color: 'white', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry Sync</button>}</div>}
 
         {syncing && <div style={{ textAlign: 'center', fontSize: '13px', color: '#E07B2A', marginBottom: '8px' }}>⏳ Syncing{syncRetries > 0 ? ` (attempt ${syncRetries + 1})` : ''}...</div>}
 
@@ -454,8 +466,8 @@ export default function WorkerDashboard({ profile }) {
                   )}
                 </div>
               ) : (
-                <button className="btn-primary" onClick={clockIn} disabled={loading || !clockReady}>
-                  {loading ? 'Clocking In...' : !clockReady ? 'Checking…' : 'Clock In'}
+                <button className="btn-primary" onClick={clockIn} disabled={loading || (isOnline && !clockReady)}>
+                  {loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
                 </button>
               )}
             </div>

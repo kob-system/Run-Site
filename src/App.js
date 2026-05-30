@@ -52,6 +52,9 @@ export default function App() {
           const res = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
           if (res.error) throw res.error
           data = res.data
+          // Creation truly failed (error + still no row) → surface the retry
+          // screen, not the "Back to login" orphaned-account recovery.
+          if (insErr && !data) throw insErr
         }
       }
       setProfile(data)
