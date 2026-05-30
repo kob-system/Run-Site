@@ -350,6 +350,33 @@ export default function WorkerDashboard({ profile }) {
       return
     }
 
+    // Online clock-in being clocked out. If we're offline (or the update fails),
+    // persist the completed shift keyed by the row's client_id so the sync loop
+    // finishes it via upsert — never silently fail the clock-out and lose hours.
+    const deferClockOut = () => {
+      const full = {
+        client_id: activeEntry.client_id,
+        project_id: activeEntry.project_id,
+        clocked_in_at: activeEntry.clocked_in_at,
+        gps_lat: activeEntry.gps_lat,
+        gps_lng: activeEntry.gps_lng,
+        clocked_out_at: now.toISOString(),
+        total_minutes: totalMinutes,
+        labor_cost: laborCost
+      }
+      saveOfflineEntry(full)
+      setOfflineEntry(full)
+      setActiveEntry(null)
+      setTimer(0)
+    }
+
+    if (!isOnline) {
+      if (activeEntry.client_id) { deferClockOut(); showToast('📶 Clocked out — will sync when connected') }
+      else setError("You're offline — reconnect to clock out.")
+      setLoading(false)
+      return
+    }
+
     try {
       const { error: timeError } = await supabase.from('time_entries').update({
         clocked_out_at: now.toISOString(),
@@ -363,7 +390,9 @@ export default function WorkerDashboard({ profile }) {
       setTimer(0)
       showToast('Clocked out ✓')
     } catch (e) {
-      setError('Clock-out failed. Try again.')
+      // Online but the update failed — defer offline if we can dedup it, else retry.
+      if (activeEntry.client_id) { deferClockOut(); showToast('Clocked out — syncing…') }
+      else setError('Clock-out failed. Try again.')
     }
     setLoading(false)
   }

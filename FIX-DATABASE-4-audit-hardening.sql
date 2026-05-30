@@ -92,9 +92,13 @@ create policy "worker_delete_own_time_entries" on public.time_entries
 alter table public.time_entries
   add column if not exists client_id uuid;
 
+-- NON-partial unique index: required so the app's upsert(on_conflict=client_id)
+-- can use it — Postgres ON CONFLICT cannot target a PARTIAL index via PostgREST.
+-- NULLs are distinct in a unique index, so any legacy rows without a client_id
+-- coexist fine (only non-null client_ids are enforced unique).
+drop index if exists public.uq_time_entries_client_id;
 create unique index if not exists uq_time_entries_client_id
-  on public.time_entries(client_id)
-  where client_id is not null;
+  on public.time_entries(client_id);
 
 
 -- ------------------------------------------------------------
