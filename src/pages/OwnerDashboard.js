@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
-import { computeProfit, computeMargin, computeContractPrice } from '../utils/money'
+import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
 
 function Toast({ message, type = 'success', onClose }) {
   useEffect(() => {
@@ -23,6 +23,19 @@ function Toast({ message, type = 'success', onClose }) {
 }
 
 function PhotoViewer({ receipt, onClose, onDelete }) {
+  const [imgUrl, setImgUrl] = useState(null)
+  useEffect(() => {
+    let active = true
+    setImgUrl(null)
+    // photo_url holds the storage PATH; mint a short-lived signed URL to view it
+    // (the bucket is private, so receipts aren't world-readable).
+    if (receipt && receipt.photo_url) {
+      supabase.storage.from('receipts').createSignedUrl(receipt.photo_url, 300).then(({ data }) => {
+        if (active && data) setImgUrl(data.signedUrl)
+      })
+    }
+    return () => { active = false }
+  }, [receipt])
   if (!receipt) return null
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -35,13 +48,15 @@ function PhotoViewer({ receipt, onClose, onDelete }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
         </div>
         {receipt.photo_url
-          ? <img src={receipt.photo_url} alt="Receipt" style={{ width: '100%', borderRadius: '12px', objectFit: 'contain', maxHeight: '400px' }} />
-          : <div style={{ background: '#f4f6f9', borderRadius: '12px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888' }}>No photo saved</div>
+          ? (imgUrl
+            ? <img src={imgUrl} alt="Receipt" style={{ width: '100%', borderRadius: '12px', objectFit: 'contain', maxHeight: '400px' }} />
+            : <div style={{ background: '#f4f6f9', borderRadius: '12px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280' }}>Loading photo…</div>)
+          : <div style={{ background: '#f4f6f9', borderRadius: '12px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280' }}>No photo saved</div>
         }
         <div style={{ marginTop: '16px' }}>
           <p style={{ fontSize: '14px', color: '#666' }}>{receipt.store} · {receipt.category}</p>
           <p style={{ fontSize: '22px', fontWeight: '700', color: '#DC2626', marginTop: '8px' }}>{formatCurrency(receipt.amount)}</p>
-          <p style={{ fontSize: '12px', color: '#aaa', marginTop: '4px' }}>{new Date(receipt.created_at).toLocaleDateString()}</p>
+          <p style={{ fontSize: '12px', color: '#717171', marginTop: '4px' }}>{new Date(receipt.created_at).toLocaleDateString()}</p>
         </div>
         {onDelete && (
           <button
@@ -81,6 +96,7 @@ export default function OwnerDashboard({ profile }) {
   const [assignProjectId, setAssignProjectId] = useState('')
   const [editRate, setEditRate] = useState('')
   const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState(null)
   const [scanError, setScanError] = useState('')
@@ -177,8 +193,7 @@ export default function OwnerDashboard({ profile }) {
   }, [profile.id])
 
   useEffect(() => {
-    fetchProjects()
-    fetchWorkers()
+    Promise.all([fetchProjects(), fetchWorkers()]).finally(() => setInitialLoading(false))
   }, [fetchProjects, fetchWorkers])
 
   useEffect(() => {
@@ -236,16 +251,21 @@ export default function OwnerDashboard({ profile }) {
       const fileName = `${profile.id}/${Date.now()}_${file.name}`
       const { error: uploadError } = await supabase.storage.from('receipts').upload(fileName, file)
       if (uploadError) throw uploadError
-      const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(fileName)
-      setReceiptForm(f => ({ ...f, photo_url: urlData.publicUrl }))
+      // Store the storage PATH (not a public URL); the bucket is private and the
+      // image is viewed via a short-lived signed URL in PhotoViewer.
+      setReceiptForm(f => ({ ...f, photo_url: fileName }))
 
       const reader = new FileReader()
       reader.onload = async (event) => {
         const base64 = event.target.result.split(',')[1]
         try {
+          const { data: { session } } = await supabase.auth.getSession()
           const response = await fetch('/api/scan-receipt', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(session ? { Authorization: `Bearer ${session.access_token}` } : {})
+            },
             body: JSON.stringify({ imageBase64: base64, mediaType: file.type })
           })
           const result = await response.json()
@@ -363,21 +383,25 @@ export default function OwnerDashboard({ profile }) {
   const exportReportCSV = () => {
     const header = ['Job', 'Client', 'Completed', 'Revenue', 'Materials', 'Labor', 'Other', 'Profit', 'Margin %']
     const rows = [header]
+    // Round every cell to cents and total THOSE rounded values, so the TOTALS
+    // row always equals the sum of the printed rows (no off-by-a-cent on a tax doc).
+    const r2 = roundCents
     const tot = { rev: 0, mat: 0, lab: 0, oth: 0, prof: 0 }
     reportJobs.forEach(p => {
       const s = spendOf(p.id)
-      const profit = profitOf(p)
+      const rev = r2(p.budget), mat = r2(s.materials), lab = r2(s.labor), oth = r2(s.other)
+      const profit = r2(profitOf(p))
       const margin = computeMargin(profit, p.budget)
-      tot.rev += p.budget || 0; tot.mat += s.materials; tot.lab += s.labor; tot.oth += s.other; tot.prof += profit
+      tot.rev += rev; tot.mat += mat; tot.lab += lab; tot.oth += oth; tot.prof += profit
       rows.push([
         p.name || '', p.client_name || '',
         p.completed_at ? new Date(p.completed_at).toLocaleDateString() : '',
-        (p.budget || 0).toFixed(2), s.materials.toFixed(2), s.labor.toFixed(2),
-        s.other.toFixed(2), profit.toFixed(2), margin
+        rev.toFixed(2), mat.toFixed(2), lab.toFixed(2),
+        oth.toFixed(2), profit.toFixed(2), margin
       ])
     })
     rows.push([])
-    rows.push(['TOTALS', '', '', tot.rev.toFixed(2), tot.mat.toFixed(2), tot.lab.toFixed(2), tot.oth.toFixed(2), tot.prof.toFixed(2), ''])
+    rows.push(['TOTALS', '', '', r2(tot.rev).toFixed(2), r2(tot.mat).toFixed(2), r2(tot.lab).toFixed(2), r2(tot.oth).toFixed(2), r2(tot.prof).toFixed(2), ''])
     const csv = rows.map(r => r.map(cell => {
       const v = String(cell)
       return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v
@@ -577,7 +601,7 @@ export default function OwnerDashboard({ profile }) {
                     <div>
                       <h3>{r.description}</h3>
                       <p>{r.store} · {r.category}</p>
-                      <p style={{ fontSize: '11px', color: '#aaa' }}>{new Date(r.created_at).toLocaleDateString()}</p>
+                      <p style={{ fontSize: '11px', color: '#717171' }}>{new Date(r.created_at).toLocaleDateString()}</p>
                       {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
                     </div>
                     <p style={{ fontWeight: '700', color: '#DC2626', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
@@ -613,8 +637,9 @@ export default function OwnerDashboard({ profile }) {
                   <button
                     onClick={() => deleteTimeEntry(t)}
                     style={{
-                      marginTop: '10px', background: 'none', border: 'none', color: '#DC2626',
-                      fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0'
+                      marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626',
+                      fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px',
+                      borderRadius: '8px', minHeight: '40px'
                     }}
                   >
                     Delete entry
@@ -769,7 +794,7 @@ export default function OwnerDashboard({ profile }) {
                       <div>
                         <h3 style={{ color: '#666' }}>{p.name}</h3>
                         <p>{p.client_name}</p>
-                        {p.completed_at && <p style={{ fontSize: '11px', color: '#aaa', marginTop: '2px' }}>Completed {new Date(p.completed_at).toLocaleDateString()}</p>}
+                        {p.completed_at && <p style={{ fontSize: '11px', color: '#717171', marginTop: '2px' }}>Completed {new Date(p.completed_at).toLocaleDateString()}</p>}
                       </div>
                       <span className="status-pill status-end">✓ Done</span>
                     </div>
@@ -778,7 +803,8 @@ export default function OwnerDashboard({ profile }) {
               </div>
             )}
 
-            {projects.length === 0 && <div className="empty-state"><p>No jobs yet. Create your first job!</p></div>}
+            {initialLoading && projects.length === 0 && <div className="empty-state"><p>Loading…</p></div>}
+            {!initialLoading && projects.length === 0 && <div className="empty-state"><p>No jobs yet. Create your first job!</p></div>}
           </div>
         )}
 
@@ -820,7 +846,8 @@ export default function OwnerDashboard({ profile }) {
                 </div>
               )
             })}
-            {workers.length === 0 && <div className="empty-state"><p>No workers yet. Ask your crew to sign up and enter your email to link up.</p></div>}
+            {initialLoading && workers.length === 0 && <div className="empty-state"><p>Loading…</p></div>}
+            {!initialLoading && workers.length === 0 && <div className="empty-state"><p>No workers yet. Ask your crew to sign up and enter your email to link up.</p></div>}
           </div>
         )}
 

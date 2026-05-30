@@ -6,6 +6,11 @@
 //   profit = contract price (budget) − materials − labor − other
 //   margin = profit ÷ contract price, as a whole-number percent
 
+// Round a money value to whole cents. Totals must be summed from these rounded
+// values (not from raw floats) so a report's TOTALS row equals the sum of its
+// printed rows — no off-by-a-cent on a tax document.
+export const roundCents = (x) => Math.round(((x || 0) + Number.EPSILON) * 100) / 100
+
 export const computeProfit = (budget, spend = {}) =>
   (budget || 0) - (spend.materials || 0) - (spend.labor || 0) - (spend.other || 0)
 

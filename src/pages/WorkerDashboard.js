@@ -1,9 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatTime } from '../utils/formatTime'
 
 const OFFLINE_KEY = 'runsite_offline_entry'
 const MAX_RETRIES = 3
+
+// Stable client-generated id so a retried/duplicated sync can never create a
+// second row (the DB has a unique constraint on client_id; see the migration).
+function newId() {
+  try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID() } catch (e) {}
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
 
 function saveOfflineEntry(entry) {
   localStorage.setItem(OFFLINE_KEY, JSON.stringify(entry))
@@ -30,6 +41,7 @@ export default function WorkerDashboard({ profile }) {
   const [schedule, setSchedule] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [editError, setEditError] = useState('')
   const [toast, setToast] = useState('')
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [syncing, setSyncing] = useState(false)
@@ -37,7 +49,27 @@ export default function WorkerDashboard({ profile }) {
   const [showEditOffline, setShowEditOffline] = useState(false)
   const [editClockIn, setEditClockIn] = useState('')
   const [editClockOut, setEditClockOut] = useState('')
-const [history, setHistory] = useState([])
+  const [history, setHistory] = useState([])
+  const [historyError, setHistoryError] = useState('')
+  const [scheduleError, setScheduleError] = useState('')
+  const [clockReady, setClockReady] = useState(false)
+  const [statusError, setStatusError] = useState('')
+
+  // Refs so the sync lock / retry timer / mounted check are synchronous and not
+  // subject to stale-closure bugs the way React state is.
+  const syncingRef = useRef(false)
+  const retryTimerRef = useRef(null)
+  const mountedRef = useRef(true)
+  const toastTimerRef = useRef(null)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    }
+  }, [])
 
   // Track online/offline status
   useEffect(() => {
@@ -51,14 +83,7 @@ const [history, setHistory] = useState([])
     }
   }, [])
 
-  // When coming back online, attempt sync
-  useEffect(() => {
-    if (isOnline && offlineEntry) {
-      attemptSync(offlineEntry)
-    }
-  }, [isOnline])
-
-  // Load offline entry from localStorage on mount
+  // Load any saved offline entry on mount.
   useEffect(() => {
     const saved = getOfflineEntry()
     if (saved) setOfflineEntry(saved)
@@ -70,44 +95,40 @@ const [history, setHistory] = useState([])
     checkActiveEntry()
   }, [])
 
-const fetchHistory = async () => {
-  try {
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-    const { data } = await supabase
-      .from('time_entries')
-      .select('*, projects(name)')
-      .eq('worker_id', profile.id)
-      .gte('clocked_in_at', thirtyDaysAgo.toISOString())
-      .order('clocked_in_at', { ascending: false })
-    setHistory(data || [])
-  } catch (e) {}
-}
-
-  // Timer — runs off whichever entry is active
-  useEffect(() => {
-    let interval
-    const entry = activeEntry || offlineEntry
-    if (entry) {
-      interval = setInterval(() => {
-        const clockInTime = entry.clocked_in_at
-        const diff = Math.floor((Date.now() - new Date(clockInTime).getTime()) / 1000)
-        setTimer(diff)
-      }, 1000)
-    }
-    return () => clearInterval(interval)
-  }, [activeEntry, offlineEntry])
-
   const showToast = (msg) => {
     setToast(msg)
-    setTimeout(() => setToast(''), 3000)
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = setTimeout(() => { if (mountedRef.current) setToast('') }, 3000)
   }
 
-  const attemptSync = useCallback(async (entry, retryCount = 0) => {
-    if (syncing) return
+  // Fire-and-forget owner notification. Worker name, owner, and job name are all
+  // resolved SERVER-SIDE from the authenticated token + projectId — nothing
+  // user-controlled is trusted — so this can't be spoofed/injected.
+  const notifyOwner = async (action, timestamp, projectId) => {
+    if (!profile.owner_id) return
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      await fetch('/api/notify-owner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ projectId, action, timestamp })
+      })
+    } catch (e) { /* notifications are best-effort; never block clock in/out */ }
+  }
+
+  const attemptSync = useCallback(async (entry) => {
+    if (!entry) return
+    if (syncingRef.current) return          // a real attempt is already in flight
+    if (!navigator.onLine) return           // don't burn attempts (or count retries) while offline
+    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
+
+    const retryCount = entry.__retry || 0
+    syncingRef.current = true
     setSyncing(true)
     try {
       const { data, error } = await supabase.from('time_entries').insert({
+        client_id: entry.client_id,
         project_id: entry.project_id,
         worker_id: profile.id,
         clocked_in_at: entry.clocked_in_at,
@@ -120,46 +141,85 @@ const fetchHistory = async () => {
         } : {})
       }).select().single()
 
-      if (error) throw error
+      // 23505 = unique violation on client_id: this exact entry already reached
+      // the server on a prior attempt. Treat as success (idempotent) instead of
+      // inserting a duplicate shift.
+      const duplicate = error && error.code === '23505'
+      if (error && !duplicate) throw error
 
-      // Labor cost lives on the time entry itself; the owner dashboard sums
-      // those live, so there's no project total to update here.
-
-      // Notify owner (email resolved server-side from owner_id)
-      if (profile.owner_id) {
-        const jobName = projects.find(p => p.id === entry.project_id)?.name || 'a job'
-        fetch('/api/notify-owner', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ownerId: profile.owner_id,
-            workerName: profile.full_name,
-            jobName,
-            action: 'in',
-            timestamp: entry.clocked_in_at
-          })
-        })
-      }
-
+      // Clear local copy ONLY now that the server has it.
       clearOfflineEntry()
-      setOfflineEntry(null)
-      if (!entry.clocked_out_at) setActiveEntry(data)
-      setSyncRetries(0)
-      showToast('Synced ✓')
-    } catch (e) {
-      if (retryCount < MAX_RETRIES) {
-        const delay = [5000, 30000, 120000][retryCount]
-        setTimeout(() => {
-          setSyncRetries(retryCount + 1)
-          attemptSync(entry, retryCount + 1)
-        }, delay)
-      } else {
-        setError('Sync failed after 3 attempts. Tap "Retry Sync" when you have signal.')
+
+      // Best-effort owner notifications, derived from the entry's own state.
+      notifyOwner('in', entry.clocked_in_at, entry.project_id)
+      if (entry.clocked_out_at) notifyOwner('out', entry.clocked_out_at, entry.project_id)
+
+      if (mountedRef.current) {
+        setOfflineEntry(null)
+        if (!entry.clocked_out_at) {
+          if (data) setActiveEntry(data)
+          else checkActiveEntry()           // duplicate path: restore the existing row
+        }
         setSyncRetries(0)
+        setSyncing(false)
+        showToast('Synced ✓')
       }
+    } catch (e) {
+      if (retryCount < MAX_RETRIES - 1 && navigator.onLine) {
+        const delay = [5000, 30000, 120000][retryCount] || 120000
+        if (mountedRef.current) setSyncRetries(retryCount + 1)
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null
+          if (mountedRef.current) attemptSync({ ...entry, __retry: retryCount + 1 })
+        }, delay)
+        // keep the "Syncing…" indicator on while a retry is pending
+      } else if (mountedRef.current) {
+        setError('Sync failed. Tap "Retry Sync" when you have signal — your hours are saved on this phone.')
+        setSyncRetries(0)
+        setSyncing(false)
+      }
+    } finally {
+      syncingRef.current = false
     }
-    setSyncing(false)
-  }, [profile, projects, syncing])
+  }, [profile])
+
+  // Drive sync off the DATA, not a connectivity transition: whenever we're
+  // online and have a pending entry, try to sync it. This also auto-syncs an
+  // entry that was already in localStorage at app launch. Coalesced by syncingRef.
+  useEffect(() => {
+    if (isOnline && offlineEntry) attemptSync(offlineEntry)
+  }, [isOnline, offlineEntry, attemptSync])
+
+  // Timer — runs off whichever entry is active
+  useEffect(() => {
+    let interval
+    const entry = activeEntry || offlineEntry
+    if (entry) {
+      interval = setInterval(() => {
+        const diff = Math.floor((Date.now() - new Date(entry.clocked_in_at).getTime()) / 1000)
+        setTimer(diff)
+      }, 1000)
+    }
+    return () => clearInterval(interval)
+  }, [activeEntry, offlineEntry])
+
+  const fetchHistory = async () => {
+    setHistoryError('')
+    try {
+      const thirtyDaysAgo = new Date()
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+      const { data, error } = await supabase
+        .from('time_entries')
+        .select('*, projects(name)')
+        .eq('worker_id', profile.id)
+        .gte('clocked_in_at', thirtyDaysAgo.toISOString())
+        .order('clocked_in_at', { ascending: false })
+      if (error) throw error
+      setHistory(data || [])
+    } catch (e) {
+      setHistoryError("Couldn't load your history. Check your connection and try again.")
+    }
+  }
 
   const fetchAssignedProjects = async () => {
     try {
@@ -170,6 +230,8 @@ const fetchHistory = async () => {
         const { data, error: projError } = await supabase.from('projects').select('*').in('id', ids).neq('stage', 'end')
         if (projError) throw projError
         setProjects(data || [])
+      } else {
+        setProjects([])
       }
     } catch (e) {
       setError('Could not load jobs. Check your connection.')
@@ -177,17 +239,29 @@ const fetchHistory = async () => {
   }
 
   const fetchSchedule = async () => {
+    setScheduleError('')
     try {
-      const { data } = await supabase.from('schedule_entries').select('*, projects(name)').eq('worker_id', profile.id).gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date', { ascending: true })
+      const { data, error } = await supabase.from('schedule_entries').select('*, projects(name)').eq('worker_id', profile.id).gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date', { ascending: true })
+      if (error) throw error
       setSchedule(data || [])
-    } catch (e) {}
+    } catch (e) {
+      setScheduleError("Couldn't load your schedule. Check your connection.")
+    }
   }
 
   const checkActiveEntry = async () => {
+    setStatusError('')
     try {
-      const { data } = await supabase.from('time_entries').select('*').eq('worker_id', profile.id).is('clocked_out_at', null).maybeSingle()
+      const { data, error } = await supabase.from('time_entries').select('*').eq('worker_id', profile.id).is('clocked_out_at', null).maybeSingle()
+      if (error) throw error
       if (data) setActiveEntry(data)
-    } catch (e) {}
+      setClockReady(true)
+    } catch (e) {
+      // Do NOT silently fall through to "not clocked in" — that would let a
+      // worker clock in twice. Block clock-in until we can confirm status.
+      setStatusError("Couldn't verify your clock-in status.")
+      setClockReady(false)
+    }
   }
 
   const clockIn = async () => {
@@ -195,7 +269,6 @@ const fetchHistory = async () => {
     setLoading(true)
     setError('')
 
-    // Get GPS
     let gpsLat = null
     let gpsLng = null
     try {
@@ -207,10 +280,10 @@ const fetchHistory = async () => {
     } catch {}
 
     const clockInTime = new Date().toISOString()
-    const entry = { project_id: selectedProject, clocked_in_at: clockInTime, gps_lat: gpsLat, gps_lng: gpsLng }
+    const jobName = projects.find(p => p.id === selectedProject)?.name || ''
+    const entry = { client_id: newId(), project_id: selectedProject, clocked_in_at: clockInTime, gps_lat: gpsLat, gps_lng: gpsLng, job_name: jobName }
 
     if (!isOnline) {
-      // Save offline
       saveOfflineEntry(entry)
       setOfflineEntry(entry)
       showToast('📶 Saved offline — will sync when connected')
@@ -220,6 +293,7 @@ const fetchHistory = async () => {
 
     try {
       const { data, error } = await supabase.from('time_entries').insert({
+        client_id: entry.client_id,
         project_id: selectedProject,
         worker_id: profile.id,
         clocked_in_at: clockInTime,
@@ -229,25 +303,10 @@ const fetchHistory = async () => {
 
       if (error) throw error
       setActiveEntry(data)
-
-      // Notify owner (email resolved server-side from owner_id)
-      if (profile.owner_id) {
-        const jobName = projects.find(p => p.id === selectedProject)?.name || 'a job'
-        fetch('/api/notify-owner', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ownerId: profile.owner_id,
-            workerName: profile.full_name,
-            jobName,
-            action: 'in',
-            timestamp: clockInTime
-          })
-        })
-      }
+      notifyOwner('in', clockInTime, selectedProject)
       showToast('Clocked in ✓')
     } catch (e) {
-      // Online but Supabase failed — save offline as fallback
+      // Online but the write failed — keep it locally and let the sync effect retry.
       saveOfflineEntry(entry)
       setOfflineEntry(entry)
       showToast('📶 Saved locally — will sync shortly')
@@ -267,15 +326,15 @@ const fetchHistory = async () => {
     const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
 
     if (offlineEntry && !activeEntry) {
+      // Build the completed entry and KEEP it in localStorage until the server
+      // confirms the insert. The sync effect (driven by offlineEntry changing)
+      // picks it up; attemptSync clears local storage only on success.
       const fullEntry = { ...offlineEntry, clocked_out_at: now.toISOString(), total_minutes: totalMinutes, labor_cost: laborCost }
       saveOfflineEntry(fullEntry)
-      setOfflineEntry(null)
-      clearOfflineEntry()
+      setOfflineEntry(fullEntry)
       setTimer(0)
-      showToast('📶 Clocked out — will sync when connected')
+      showToast(isOnline ? 'Clocked out — syncing…' : '📶 Clocked out — will sync when connected')
       setLoading(false)
-      // Attempt sync immediately if online
-      if (isOnline) attemptSync(fullEntry)
       return
     }
 
@@ -287,25 +346,7 @@ const fetchHistory = async () => {
       }).eq('id', activeEntry.id)
       if (timeError) throw timeError
 
-      // labor_cost is saved on the time entry above; the owner dashboard
-      // sums time entries live, so no project total to update here.
-
-      // Notify owner (email resolved server-side from owner_id)
-      if (profile.owner_id) {
-        const jobName = projects.find(p => p.id === activeEntry.project_id)?.name || 'a job'
-        fetch('/api/notify-owner', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ownerId: profile.owner_id,
-            workerName: profile.full_name,
-            jobName,
-            action: 'out',
-            timestamp: now.toISOString()
-          })
-        })
-      }
-
+      notifyOwner('out', now.toISOString(), activeEntry.project_id)
       setActiveEntry(null)
       setTimer(0)
       showToast('Clocked out ✓')
@@ -316,12 +357,13 @@ const fetchHistory = async () => {
   }
 
   const saveOfflineEdit = () => {
-    if (!editClockIn) return setError('Clock-in time is required')
+    setEditError('')
+    if (!editClockIn) return setEditError('Clock-in time is required')
     const clockInDate = new Date(editClockIn)
     const updated = { ...offlineEntry, clocked_in_at: clockInDate.toISOString() }
     if (editClockOut) {
       const clockOutDate = new Date(editClockOut)
-      if (clockOutDate <= clockInDate) return setError('Clock-out must be after clock-in')
+      if (clockOutDate <= clockInDate) return setEditError('Clock-out must be after clock-in')
       const totalMinutes = Math.floor((clockOutDate - clockInDate) / 60000)
       const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
       updated.clocked_out_at = clockOutDate.toISOString()
@@ -329,12 +371,11 @@ const fetchHistory = async () => {
       updated.labor_cost = laborCost
     }
     saveOfflineEntry(updated)
-    setOfflineEntry(updated)
+    setOfflineEntry(updated)   // sync effect will pick it up if online
     setShowEditOffline(false)
     setEditClockIn('')
     setEditClockOut('')
-    if (isOnline) attemptSync(updated)
-    else showToast('Updated — will sync when connected')
+    if (!isOnline) showToast('Updated — will sync when connected')
   }
 
   const formatTimerDisplay = (seconds) => {
@@ -367,7 +408,7 @@ const fetchHistory = async () => {
       <div className="tabs" style={{ margin: '16px 16px 0' }}>
         <button className={'tab ' + (activeTab === 'clock' ? 'active' : '')} onClick={() => setActiveTab('clock')}>Clock In/Out</button>
         <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>My Schedule</button>
-<button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => { setActiveTab('history'); fetchHistory() }}>History</button>
+        <button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => { setActiveTab('history'); fetchHistory() }}>History</button>
       </div>
 
       <div className="page">
@@ -378,7 +419,7 @@ const fetchHistory = async () => {
         {activeTab === 'clock' && (
           <div>
             <div className="card" style={{ textAlign: 'center' }}>
-              <p style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>
+              <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '4px' }}>
                 {currentEntry
                   ? isOfflineMode ? '📶 Clocked in (offline)' : 'Currently clocked in'
                   : 'Not clocked in'}
@@ -387,11 +428,17 @@ const fetchHistory = async () => {
 
               {!currentEntry && (
                 <div className="input-group" style={{ marginBottom: '12px' }}>
-                  <label>Select Job</label>
-                  <select value={selectedProject} onChange={e => { setSelectedProject(e.target.value); setError('') }}>
+                  <label htmlFor="select-job">Select Job</label>
+                  <select id="select-job" value={selectedProject} onChange={e => { setSelectedProject(e.target.value); setError('') }}>
                     <option value="">-- Choose a job --</option>
                     {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
+                </div>
+              )}
+
+              {statusError && !currentEntry && (
+                <div className="alert-warning" style={{ marginBottom: '12px' }}>
+                  {statusError} <button onClick={checkActiveEntry} style={{ background: 'none', border: 'none', color: '#92400e', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry</button>
                 </div>
               )}
 
@@ -401,19 +448,19 @@ const fetchHistory = async () => {
                     {loading ? 'Clocking Out...' : 'Clock Out'}
                   </button>
                   {isOfflineMode && (
-                    <button onClick={() => { setShowEditOffline(true); setEditClockIn(toLocalDatetimeInput(offlineEntry.clocked_in_at)) }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', cursor: 'pointer', display: 'block', margin: '0 auto' }}>
+                    <button onClick={() => { setEditError(''); setShowEditOffline(true); setEditClockIn(toLocalDatetimeInput(offlineEntry.clocked_in_at)) }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', cursor: 'pointer', display: 'block', margin: '0 auto', minHeight: '44px' }}>
                       ✏️ Edit clock-in time
                     </button>
                   )}
                 </div>
               ) : (
-                <button className="btn-primary" onClick={clockIn} disabled={loading}>
-                  {loading ? 'Clocking In...' : 'Clock In'}
+                <button className="btn-primary" onClick={clockIn} disabled={loading || !clockReady}>
+                  {loading ? 'Clocking In...' : !clockReady ? 'Checking…' : 'Clock In'}
                 </button>
               )}
             </div>
 
-            {projects.length === 0 && !currentEntry && (
+            {projects.length === 0 && !currentEntry && clockReady && (
               <div className="empty-state"><p>No jobs assigned yet. Ask your boss to assign you to a job.</p></div>
             )}
           </div>
@@ -421,50 +468,54 @@ const fetchHistory = async () => {
 
         {activeTab === 'schedule' && (
           <div>
-            {schedule.length === 0
-              ? <div className="empty-state"><p>No upcoming schedule</p></div>
-              : schedule.map(entry => (
-                <div key={entry.id} className="card">
-                  <p className="schedule-day">{new Date(entry.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                  <h3>{entry.projects?.name}</h3>
-                  <p>{entry.task_description}</p>
-                  {entry.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{entry.start_time} — {entry.end_time}</p>}
-                </div>
-              ))
+            {scheduleError
+              ? <div className="alert-danger">{scheduleError}</div>
+              : schedule.length === 0
+                ? <div className="empty-state"><p>No upcoming schedule</p></div>
+                : schedule.map(entry => (
+                  <div key={entry.id} className="card">
+                    <p className="schedule-day">{new Date(entry.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
+                    <h3>{entry.projects?.name}</h3>
+                    <p>{entry.task_description}</p>
+                    {entry.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{entry.start_time} — {entry.end_time}</p>}
+                  </div>
+                ))
             }
           </div>
         )}
 
         {activeTab === 'history' && (
           <div>
-            {history.length === 0
-              ? <div className="empty-state"><p>No time entries in the last 30 days</p></div>
-              : history.map(entry => {
-                  const clockIn = new Date(entry.clocked_in_at)
-                  const clockOut = entry.clocked_out_at ? new Date(entry.clocked_out_at) : null
-                  return (
-                    <div key={entry.id} className="card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
-                            {clockIn.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                          </p>
-                          <h3>{entry.projects?.name || 'Unknown Job'}</h3>
-                          <p style={{ fontSize: '13px', color: '#666', marginTop: '4px' }}>
-                            In: {clockIn.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
-                            {clockOut ? ` — Out: ${clockOut.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
-                          </p>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          {entry.clocked_out_at
-                            ? <p style={{ fontWeight: '700', fontSize: '16px', color: '#1C2B3A' }}>{formatTime(entry.total_minutes || 0)}</p>
-                            : <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600' }}>Active</p>
-                          }
+            {historyError
+              ? <div className="alert-danger">{historyError} <button onClick={fetchHistory} style={{ background: 'none', border: 'none', color: 'white', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry</button></div>
+              : history.length === 0
+                ? <div className="empty-state"><p>No time entries in the last 30 days</p></div>
+                : history.map(entry => {
+                    const clockIn = new Date(entry.clocked_in_at)
+                    const clockOut = entry.clocked_out_at ? new Date(entry.clocked_out_at) : null
+                    return (
+                      <div key={entry.id} className="card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <p style={{ fontSize: '11px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                              {clockIn.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            </p>
+                            <h3>{entry.projects?.name || 'Unknown Job'}</h3>
+                            <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
+                              In: {clockIn.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                              {clockOut ? ` — Out: ${clockOut.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
+                            </p>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            {entry.clocked_out_at
+                              ? <p style={{ fontWeight: '700', fontSize: '16px', color: '#1C2B3A' }}>{formatTime(entry.total_minutes || 0)}</p>
+                              : <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600' }}>Active</p>
+                            }
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )
-                })
+                    )
+                  })
             }
           </div>
         )}
@@ -472,21 +523,21 @@ const fetchHistory = async () => {
 
       {/* EDIT OFFLINE ENTRY MODAL */}
       {showEditOffline && (
-        <div className="modal-overlay" onClick={() => setShowEditOffline(false)}>
+        <div className="modal-overlay" onClick={() => { setShowEditOffline(false); setEditError('') }}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>Edit Clock-In</h2>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '16px' }}>Saved offline. You can correct the time or add a clock-out if needed.</p>
+            <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>Saved offline. You can correct the time or add a clock-out if needed.</p>
             <div className="input-group">
-              <label>Clock-In Time</label>
-              <input type="datetime-local" value={editClockIn} onChange={e => setEditClockIn(e.target.value)} />
+              <label htmlFor="edit-clock-in">Clock-In Time</label>
+              <input id="edit-clock-in" type="datetime-local" value={editClockIn} onChange={e => setEditClockIn(e.target.value)} />
             </div>
             <div className="input-group">
-              <label>Clock-Out Time (optional)</label>
-              <input type="datetime-local" value={editClockOut} onChange={e => setEditClockOut(e.target.value)} />
+              <label htmlFor="edit-clock-out">Clock-Out Time (optional)</label>
+              <input id="edit-clock-out" type="datetime-local" value={editClockOut} onChange={e => setEditClockOut(e.target.value)} />
             </div>
-            {error && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{error}</p>}
+            {editError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{editError}</p>}
             <button className="btn-primary" onClick={saveOfflineEdit}>Save</button>
-            <button className="btn-secondary" onClick={() => setShowEditOffline(false)}>Cancel</button>
+            <button className="btn-secondary" onClick={() => { setShowEditOffline(false); setEditError('') }}>Cancel</button>
           </div>
         </div>
       )}

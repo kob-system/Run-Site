@@ -9,6 +9,7 @@ export default function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -27,8 +28,10 @@ export default function App() {
   }, [])
 
   const fetchProfile = async (user) => {
+    setLoadError(false)
     try {
-      let { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+      let { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+      if (error) throw error
 
       // No profile row yet. If this account signed up with metadata (the
       // email-confirmation flow defers profile creation to first sign-in),
@@ -37,7 +40,7 @@ export default function App() {
       if (!data) {
         const md = user.user_metadata || {}
         if (md.role) {
-          await supabase.from('profiles').insert({
+          const { error: insErr } = await supabase.from('profiles').insert({
             id: user.id,
             email: user.email,
             full_name: md.full_name || '',
@@ -45,13 +48,18 @@ export default function App() {
             role: md.role,
             owner_id: md.owner_id || null
           })
+          if (insErr) console.error('Profile auto-create failed:', insErr)
           const res = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+          if (res.error) throw res.error
           data = res.data
         }
       }
       setProfile(data)
     } catch (e) {
+      // A real read/insert failure (network/RLS) — distinct from a genuinely
+      // absent profile. Show a retry screen, not the sign-out recovery.
       console.error('Profile error:', e)
+      setLoadError(true)
     }
     setLoading(false)
   }
@@ -60,6 +68,17 @@ export default function App() {
   if (!session) return <Login />
   if (profile?.role === 'worker') return <WorkerDashboard profile={profile} />
   if (profile) return <OwnerDashboard profile={profile} />
+  if (loadError) return (
+    <div className="loading">
+      <p>We couldn't reach your account. Check your connection.</p>
+      <button
+        onClick={() => window.location.reload()}
+        style={{ marginTop: 12, padding: '10px 20px', fontSize: 16, cursor: 'pointer' }}
+      >
+        Try again
+      </button>
+    </div>
+  )
   // Session exists but no profile loaded — e.g. an orphaned session after a DB
   // reset, or a failed/incomplete signup. This used to dead-end on a permanent
   // "Loading..." with no escape. Show a recovery screen that sends them back to

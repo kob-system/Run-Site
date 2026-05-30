@@ -1,14 +1,17 @@
-/* Run-Site service worker — conservative network-first caching.
-   Goal: let the app shell load when offline (workers on job sites with
-   spotty signal) without ever serving stale code while online.
+/* Run-Site service worker.
+   Goals:
+   - Let the app shell load offline on spotty job sites.
+   - Never serve stale code while online.
+   - Never white-screen from a shell that references an evicted/missing bundle.
 
    Strategy:
-   - Network-first for everything. If the network succeeds, use it and
-     refresh the cache. If it fails (offline), fall back to the cache.
-   - Never cache API calls (Supabase, our /api functions, Anthropic, etc.)
-     so clock data and receipts always go straight to the network. */
+   - /static/* are content-hashed and immutable -> CACHE-FIRST (once fetched they
+     never change, so they're always available offline and can't 404).
+   - Everything else (incl. index.html / navigations) -> NETWORK-FIRST with a
+     cache fallback when offline.
+   - Never cache API calls. */
 
-const CACHE = 'run-site-v1'
+const CACHE = 'run-site-v2'
 
 self.addEventListener('install', () => {
   self.skipWaiting()
@@ -27,15 +30,29 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return
 
   const url = new URL(request.url)
-
-  // Only handle same-origin requests; let API/cross-origin go to network.
   if (url.origin !== self.location.origin) return
   if (url.pathname.startsWith('/api/')) return
 
+  // Immutable hashed build assets: cache-first.
+  if (url.pathname.startsWith('/static/')) {
+    event.respondWith(
+      caches.match(request).then((cached) =>
+        cached || fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone()
+            caches.open(CACHE).then((cache) => cache.put(request, copy))
+          }
+          return response
+        })
+      )
+    )
+    return
+  }
+
+  // Everything else: network-first, fall back to cache when offline.
   event.respondWith(
     fetch(request)
       .then((response) => {
-        // Cache a copy of successful basic responses for offline fallback.
         if (response && response.status === 200 && response.type === 'basic') {
           const copy = response.clone()
           caches.open(CACHE).then((cache) => cache.put(request, copy))
@@ -45,7 +62,6 @@ self.addEventListener('fetch', (event) => {
       .catch(async () => {
         const cached = await caches.match(request)
         if (cached) return cached
-        // For navigations, fall back to the cached app shell.
         if (request.mode === 'navigate') {
           const shell = await caches.match('/index.html')
           if (shell) return shell

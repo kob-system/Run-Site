@@ -117,17 +117,17 @@ export default function Login() {
                   <button type="button" onClick={() => setRole('worker')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'worker' ? '#E07B2A' : '#ddd'), background: role === 'worker' ? '#FFF4ED' : 'white', color: role === 'worker' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Worker</button>
                 </div>
               </div>
-              <div className="input-group"><label>Full Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
+              <div className="input-group"><label htmlFor="su-name">Full Name</label><input id="su-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
               {role === 'owner' && (
-                <div className="input-group"><label>Company Name</label><input type="text" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
+                <div className="input-group"><label htmlFor="su-company">Company Name</label><input id="su-company" type="text" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
               )}
               {role === 'worker' && (
-                <div className="input-group"><label>Your Boss's Email</label><input type="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
+                <div className="input-group"><label htmlFor="su-owner">Your Boss's Email</label><input id="su-owner" type="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
               )}
             </>
           )}
-          <div className="input-group"><label>Your Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
-          <div className="input-group"><label>Password</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required /></div>
+          <div className="input-group"><label htmlFor="li-email">Your Email</label><input id="li-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
+          <div className="input-group"><label htmlFor="li-password">Password</label><input id="li-password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required /></div>
           <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Loading...' : isSignup ? 'Create Account' : 'Sign In'}</button>
         </form>
         <p style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px', color: '#666' }}>

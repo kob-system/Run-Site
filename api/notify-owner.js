@@ -1,61 +1,87 @@
+// Emails the owner when their worker clocks in/out. Requires an authenticated
+// worker; the worker's name, their owner, and the job name are ALL resolved
+// server-side from trusted data (never the request body), so the email can't be
+// spoofed, and user-controlled text is HTML-escaped as defense in depth.
+const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const FROM = process.env.RESEND_FROM || 'Run-Site <onboarding@resend.dev>'
+
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+
+async function sbGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` }
+  })
+  if (!r.ok) throw new Error('Supabase lookup failed: ' + r.status)
+  return r.json()
+}
+
+async function getUserId(req) {
+  const auth = req.headers.authorization || ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
+  if (!token) return null
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${token}` }
+    })
+    if (!r.ok) return null
+    const u = await r.json()
+    return u && u.id ? u.id : null
+  } catch { return null }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
+  if (!SUPABASE_URL || !SERVICE_KEY) return res.json({ success: false, error: 'Server misconfigured' })
+  if (!process.env.RESEND_API_KEY) return res.json({ success: false, error: 'Email not configured' })
 
-  const { ownerId, workerName, jobName, action, timestamp } = req.body
-  if (!ownerId) return res.json({ success: false, error: 'Missing ownerId' })
+  const workerId = await getUserId(req)
+  if (!workerId) return res.status(401).json({ success: false, error: 'Unauthorized' })
 
-  // Resolve the owner's email server-side. Workers can't read the owner's
-  // profile under RLS, and this keeps the email out of the browser entirely.
-  let ownerEmail
-  try {
-    const lookup = await fetch(
-      `${process.env.REACT_APP_SUPABASE_URL}/rest/v1/profiles` +
-        `?id=eq.${encodeURIComponent(ownerId)}&select=email`,
-      {
-        headers: {
-          apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-        }
-      }
-    )
-    const rows = await lookup.json()
-    ownerEmail = rows?.[0]?.email
-  } catch (err) {
-    console.error('Owner lookup failed:', err)
-    return res.json({ success: false, error: 'Owner lookup failed' })
-  }
-  if (!ownerEmail) return res.json({ success: false, error: 'Owner email not found' })
-
-  const time = new Date(timestamp).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', hour12: true
-  })
-
-  const subject = action === 'in'
-    ? `${workerName} clocked in — ${jobName}`
-    : `${workerName} clocked out — ${jobName}`
-
-  const body = action === 'in'
-    ? `${workerName} clocked in on ${jobName} at ${time}.`
-    : `${workerName} clocked out of ${jobName} at ${time}.`
+  const { projectId, action, timestamp } = req.body || {}
 
   try {
-    // Using Resend for email — add RESEND_API_KEY to Vercel env variables
-    // Sign up free at resend.com — 3,000 emails/month free
+    // Worker (name + their owner) resolved from the AUTHENTICATED id, not the body.
+    const workerRows = await sbGet(`profiles?id=eq.${encodeURIComponent(workerId)}&select=full_name,owner_id`)
+    const worker = workerRows && workerRows[0]
+    if (!worker || !worker.owner_id) return res.json({ success: false, error: 'No linked owner' })
+
+    const ownerRows = await sbGet(`profiles?id=eq.${encodeURIComponent(worker.owner_id)}&select=email`)
+    const ownerEmail = ownerRows && ownerRows[0] && ownerRows[0].email
+    if (!ownerEmail) return res.json({ success: false, error: 'Owner email not found' })
+
+    let jobName = 'a job'
+    if (projectId) {
+      const projRows = await sbGet(`projects?id=eq.${encodeURIComponent(projectId)}&select=name`)
+      if (projRows && projRows[0] && projRows[0].name) jobName = projRows[0].name
+    }
+
+    const workerName = worker.full_name || 'A worker'
+    const ts = timestamp ? new Date(timestamp) : new Date()
+    const time = isNaN(ts.getTime())
+      ? ''
+      : ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    const verb = action === 'out' ? 'clocked out of' : 'clocked in on'
+    const subject = `${esc(workerName)} ${action === 'out' ? 'clocked out' : 'clocked in'} — ${esc(jobName)}`.replace(/[\r\n]+/g, ' ')
+    const line = `${esc(workerName)} ${verb} ${esc(jobName)}${time ? ` at ${esc(time)}` : ''}.`
+
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`
       },
       body: JSON.stringify({
-        from: 'Run-Site <onboarding@resend.dev>',
+        from: FROM,
         to: ownerEmail,
         subject,
         html: `
           <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto; padding: 24px;">
             <h2 style="color: #1C2B3A; margin-bottom: 8px;">RUN-SITE</h2>
             <div style="background: #f4f6f9; border-radius: 12px; padding: 20px; margin-top: 16px;">
-              <p style="font-size: 18px; font-weight: 700; color: #1C2B3A; margin: 0 0 8px;">${body}</p>
+              <p style="font-size: 18px; font-weight: 700; color: #1C2B3A; margin: 0 0 8px;">${line}</p>
               <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by Run-Site</p>
             </div>
           </div>
@@ -63,11 +89,14 @@ export default async function handler(req, res) {
       })
     })
 
-    if (!response.ok) throw new Error('Email failed')
+    if (!response.ok) {
+      const body = await response.text()
+      console.error('Resend error', response.status, body)
+      return res.json({ success: false, error: 'Email failed' })
+    }
     res.json({ success: true })
   } catch (err) {
-    console.error('Notify error:', err)
-    // Don't fail the clock-in if email fails — just log it
-    res.json({ success: false, error: err.message })
+    console.error('notify-owner error:', err)
+    res.json({ success: false, error: 'Notify failed' })
   }
 }

@@ -1,4 +1,23 @@
-import { computeProfit, computeMargin, computeContractPrice } from './money'
+import { computeProfit, computeMargin, computeContractPrice, roundCents } from './money'
+
+describe('roundCents (tax-report footing)', () => {
+  test('rounds to whole cents', () => {
+    expect(roundCents(10.416666)).toBe(10.42)
+    expect(roundCents(31.255)).toBe(31.26)
+    expect(roundCents(0)).toBe(0)
+    expect(roundCents(null)).toBe(0)
+  })
+  test('the bug it fixes: TOTALS must equal the sum of the printed rows', () => {
+    // Three jobs each with labor (25/60)*25 = 10.41666… → each row prints $10.42.
+    const raw = (25 / 60) * 25
+    const cell = roundCents(raw)
+    expect(cell).toBe(10.42)
+    // Total summed from rounded cells == what an accountant gets adding the rows.
+    const total = roundCents(cell + cell + cell)
+    expect(total).toBe(31.26)
+    // (Summing the raw floats first would give 31.25 — the off-by-a-cent defect.)
+  })
+})
 
 describe('computeProfit', () => {
   test('subtracts every spend bucket from the budget', () => {
