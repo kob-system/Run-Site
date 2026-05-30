@@ -84,18 +84,19 @@ create policy "worker_delete_own_time_entries" on public.time_entries
 
 -- ------------------------------------------------------------
 -- #3 — IDEMPOTENT TIME-ENTRY SYNC.
--- The app now stamps each entry with a client-generated UUID and
--- relies on a unique violation (23505) to no-op a retried/replayed
--- sync instead of inserting a duplicate (double-paid) shift.
--- Partial index so existing rows with NULL client_id don't collide.
+-- The app stamps each entry with a client-generated UUID and syncs via
+-- upsert(on_conflict = client_id), so a retried/replayed/duplicated sync
+-- UPDATES the same row instead of inserting a second (double-paid) shift.
+-- The unique index MUST be non-partial: Postgres ON CONFLICT (used by
+-- upsert) cannot target a PARTIAL index. NULLs are distinct in a unique
+-- index, so any legacy rows without a client_id coexist fine.
 -- ------------------------------------------------------------
 alter table public.time_entries
   add column if not exists client_id uuid;
 
--- NON-partial unique index: required so the app's upsert(on_conflict=client_id)
--- can use it — Postgres ON CONFLICT cannot target a PARTIAL index via PostgREST.
--- NULLs are distinct in a unique index, so any legacy rows without a client_id
--- coexist fine (only non-null client_ids are enforced unique).
+-- Drop first so a re-run replaces any earlier (e.g. partial) index of this name,
+-- then create the non-partial unique index. (Assumes no duplicate non-null
+-- client_ids exist — always true for a fresh DB and for app-written rows.)
 drop index if exists public.uq_time_entries_client_id;
 create unique index if not exists uq_time_entries_client_id
   on public.time_entries(client_id);
