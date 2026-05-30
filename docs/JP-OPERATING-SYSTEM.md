@@ -63,13 +63,15 @@
 ## §4. 🔫 The Loaded Magazine (deep task queue)
 Legend: **[JP]** needs you · **[ME]** I can do it · **[LAPTOP]** needs your laptop session.
 
-### A. Build speed / Claude Code mastery
+### A. Build speed / Claude Code mastery  → see CLAUDE-CODE-PLAYBOOK.md
 - [ME][LAPTOP] Build reusable **local-business starter template** (Next.js + Tailwind + shadcn).
-- [ME] `CLAUDE.md` in every project (done for Run-Site ✅).
+- [ME] `CLAUDE.md` in every project (done for Run-Site ✅). Keep lean.
 - [ME][LAPTOP] Custom slash commands: `/new-client-site`, `/deploy`, `/add-contact-form`.
-- [ME][LAPTOP] Connect MCP: Supabase + Vercel so I deploy/manage directly.
+- [ME][LAPTOP] Connect MCP: **Supabase** (DB), **Playwright** (I self-verify sites in a browser), Vercel.
 - [ME] Standardize ONE stack; stop reinventing per project.
 - [ME] Reusable component library (hero, services grid, reviews, contact, footer).
+- [JP] **Habits:** Plan Mode for features · small pattern-setting tasks first · `/clear` between clients, `/compact` within a build · review every diff (no VIP-coding).
+- [ME][LAPTOP] **GitHub Actions auto-deploy** (issue → Claude fix → merge → live) — makes Care Plan maintenance near-hands-off recurring revenue.
 
 ### B. Base44 migration (see MOVING-FROM-BASE44.md)
 - [JP] Add domains + youtube to network allowlist.
