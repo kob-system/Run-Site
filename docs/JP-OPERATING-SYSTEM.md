@@ -118,7 +118,28 @@ Legend: **[JP]** needs you · **[ME]** I can do it · **[LAPTOP]** needs your la
 
 ---
 
-## §6. Self-improvement loop (how this doc stays alive)
+## §6. Plan-Mode build targets (what to build with Plan Mode)
+Use Plan Mode (Shift+Tab) on each — review the plan, then build small.
+- **Deli site rebuild** (info + DoorDash CTA) — easiest first win.
+- **pump-puff-club rebuild** — schema → auth → store → purchase history (Run-Site as reference).
+- **Your starter template** — the factory for all future sites.
+- **Your own agency site** — proof of work, lead magnet.
+- **Booking/quote widget** — reusable add-on for service clients (granite, maintenance).
+- **Run-Site features** — improve the contractor app you already own.
+
+## §7. Automation opportunities (high ROI — get the agents working)
+Ranked by value. Each = build once, save forever.
+1. **Lead-gen agent** 🥇 — finds local 518 businesses with bad/no websites → builds a target list + draft outreach. **Fills your sales pipeline automatically.** (The bad deli site proves the demand exists.)
+2. **Content engine** 🥈 — input a shoot's photos + business info → outputs a month of captions + calendar → ready to drop into GHL. **Makes the Al Barra $800 deal sustainable and scalable to more clients.**
+3. **Care Plan auto-maintenance** 🥉 — GitHub Actions: issue → Claude fix → merge → live. Near-hands-off recurring revenue. (See GITHUB-ACTIONS-AUTODEPLOY.md.)
+4. **Intake → site scaffold** — filled Client Intake Brief auto-generates a prefilled site from the template.
+5. **Proposal generator** — notes/intake → branded proposal with scope + pricing (like the Al Barra one).
+6. **Reputation automation** — GHL: auto-request reviews after service, AI-drafted review replies.
+7. **Site uptime monitor + weekly screenshot** — justifies the Care Plan, catches outages first.
+8. **Construction-inspector report drafting** (day job) — draft reports from field notes/photos (check employer rules first). Saves time at the W2.
+9. **Weekly self-brain review** — a recurring job that updates this doc and re-ranks priorities.
+
+## §8. Self-improvement loop (how this doc stays alive)
 - **After each session:** add what shipped, new tasks, and one behavioral note to §1.
 - **Weekly:** re-rank §5 priorities; close finished items in §4.
 - **The rule:** every session should either *ship something* or *sharpen the plan* — never just talk.
