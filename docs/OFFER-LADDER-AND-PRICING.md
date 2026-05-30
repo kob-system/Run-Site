@@ -6,6 +6,14 @@
 ## The model
 **Goal = recurring revenue.** Win the client with a fast, cheap, high-quality site (entry), then climb the ladder to monthly income. One-off cash is nice; **retainers are what make this survive next to a full-time job.**
 
+## Pricing-model rule (setup + monthly — never $0 setup)
+- **Setup fee = payment for the BUILD** (your labor + risk). It also filters tire-kickers.
+- **Monthly = payment for ONGOING value.** Match the monthly to what's *actually* ongoing.
+- ❌ **Never $0 setup** — you'd do all the heavy build up front and eat it if they cancel early.
+- ❌ **Never a hosting-sized monthly ($100) while promising marketing-sized work** — that's the scope-creep trap ($99–$299/mo is the industry "red flag" zone).
+- ✅ Website client → **$1,000 setup + $99/mo Care Plan** (light edits only; bigger work billed extra).
+- ✅ "Everything" client → smaller/no site fee + **higher monthly** that genuinely contains the ongoing work.
+
 ---
 
 ## Tier 1 — Site-in-a-Day  *(entry / trust-builder)*
