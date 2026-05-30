@@ -7,6 +7,7 @@ export default function Login() {
   const [isSignup, setIsSignup] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
   const [role, setRole] = useState('owner')
@@ -25,6 +26,7 @@ export default function Login() {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setNotice('')
 
     let ownerId = null
     if (role === 'worker') {
@@ -49,9 +51,34 @@ export default function Login() {
       ownerId = ownerLookup.ownerId
     }
 
-    const { data, error } = await supabase.auth.signUp({ email, password })
+    // Stash the signup details in the auth user's metadata. If email
+    // confirmation is ON there's no session yet (so we can't create the
+    // profile row here under RLS); App.js creates it from this metadata on
+    // first sign-in instead. If confirmation is OFF we create it immediately.
+    const signupMeta = {
+      full_name: name,
+      role,
+      company_name: role === 'owner' ? company : null,
+      owner_id: ownerId
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: signupMeta }
+    })
     if (error) { setError(error.message); setLoading(false); return }
 
+    // No session => Supabase requires email confirmation. Don't try to insert
+    // the profile (it would fail RLS and orphan the account). Tell the user.
+    if (!data.session) {
+      setNotice('Account created! Check your email to confirm, then sign in.')
+      setIsSignup(false)
+      setLoading(false)
+      return
+    }
+
+    // Session exists (confirmation off) — create the profile now.
     if (data.user) {
       const { error: profileError } = await supabase.from('profiles').insert({
         id: data.user.id,
@@ -79,6 +106,7 @@ export default function Login() {
       <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px' }}>
         <h2 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '20px', color: '#1C2B3A' }}>{isSignup ? 'Create Account' : 'Sign In'}</h2>
         {error && <div className="alert-danger">{error}</div>}
+        {notice && <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', color: '#15803d', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', fontWeight: '600', marginBottom: '12px' }}>{notice}</div>}
         <form onSubmit={isSignup ? handleSignup : handleLogin}>
           {isSignup && (
             <>
@@ -104,7 +132,7 @@ export default function Login() {
         </form>
         <p style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px', color: '#666' }}>
           {isSignup ? 'Already have an account?' : "Don't have an account?"}
-          <button onClick={() => { setIsSignup(!isSignup); setError('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>{isSignup ? 'Sign In' : 'Sign Up'}</button>
+          <button onClick={() => { setIsSignup(!isSignup); setError(''); setNotice('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>{isSignup ? 'Sign In' : 'Sign Up'}</button>
         </p>
       </div>
     </div>

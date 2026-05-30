@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
+import { computeProfit, computeMargin, computeContractPrice } from '../utils/money'
 
 function Toast({ message, type = 'success', onClose }) {
   useEffect(() => {
@@ -207,7 +208,7 @@ export default function OwnerDashboard({ profile }) {
     setLoading(true)
     setInlineError('')
     try {
-      const total = parseFloat(jobForm.materials_budget || 0) + parseFloat(jobForm.labor_budget || 0) + parseFloat(jobForm.profit_target || 0)
+      const total = computeContractPrice(jobForm.materials_budget, jobForm.labor_budget, jobForm.profit_target)
       const { error } = await supabase.from('projects').insert({
         owner_id: profile.id, name: jobForm.name, client_name: jobForm.client_name,
         budget: total, materials_budget: parseFloat(jobForm.materials_budget || 0),
@@ -366,7 +367,7 @@ export default function OwnerDashboard({ profile }) {
     reportJobs.forEach(p => {
       const s = spendOf(p.id)
       const profit = profitOf(p)
-      const margin = p.budget > 0 ? Math.round((profit / p.budget) * 100) : 0
+      const margin = computeMargin(profit, p.budget)
       tot.rev += p.budget || 0; tot.mat += s.materials; tot.lab += s.labor; tot.oth += s.other; tot.prof += profit
       rows.push([
         p.name || '', p.client_name || '',
@@ -474,10 +475,7 @@ export default function OwnerDashboard({ profile }) {
   const getBudgetClass = (pct) => pct >= 100 ? 'danger' : pct >= 80 ? 'warning' : ''
   const spendOf = (pid) => spendByProject[pid] || { materials: 0, labor: 0, other: 0 }
   // Profit = contract price (budget) minus everything actually spent.
-  const profitOf = (p) => {
-    const s = spendOf(p.id)
-    return (p.budget || 0) - s.materials - s.labor - s.other
-  }
+  const profitOf = (p) => computeProfit(p.budget, spendOf(p.id))
 
   const activeProjects = projects.filter(p => p.stage !== 'end')
   const completedProjects = projects.filter(p => p.stage === 'end')
@@ -856,7 +854,7 @@ export default function OwnerDashboard({ profile }) {
                 {reportJobs.map(p => {
                   const s = spendOf(p.id)
                   const profit = profitOf(p)
-                  const margin = p.budget > 0 ? Math.round((profit / p.budget) * 100) : 0
+                  const margin = computeMargin(profit, p.budget)
                   return (
                     <div key={p.id} className="card">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
