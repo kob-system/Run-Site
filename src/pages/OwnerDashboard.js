@@ -299,7 +299,7 @@ export default function OwnerDashboard({ profile }) {
       setReceipts(r || [])
       const { data: t } = await supabase.from('time_entries').select('*, profiles(full_name)').eq('project_id', project.id).order('clocked_in_at', { ascending: false })
       setTimeEntries(t || [])
-      const { data: s } = await supabase.from('schedule_entries').select('*, profiles(full_name)').eq('project_id', project.id).order('scheduled_date', { ascending: true })
+      const { data: s } = await supabase.from('schedule_entries').select('*, profiles!schedule_entries_worker_id_fkey(full_name)').eq('project_id', project.id).order('scheduled_date', { ascending: true })
       setScheduleEntries(s || [])
       const { data: m } = await supabase.from('mileage_entries').select('*').eq('project_id', project.id).order('trip_date', { ascending: false })
       setMileageEntries(m || [])
