@@ -4,6 +4,32 @@ import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
 import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
 
+// Deduction categories an accountant wants broken out at tax time.
+const RECEIPT_CATEGORIES = ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other']
+const CATEGORY_LABELS = {
+  materials: 'Materials', fuel: 'Fuel / Gas', tools: 'Tools', permits: 'Permits',
+  subcontractor: 'Subcontractor', supplies: 'Supplies', insurance: 'Insurance', meals: 'Meals', other: 'Other'
+}
+const DEFAULT_MILEAGE_RATE = 0.70 // IRS standard business mileage rate — edit per trip to the current year's rate
+
+// Sunday-start week key (YYYY-MM-DD), used to group pay into weekly paychecks.
+const dateKey = (d) => {
+  const x = new Date(d)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`
+}
+const weekStartKey = (dateLike) => {
+  const d = new Date(dateLike)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - d.getDay())
+  return dateKey(d)
+}
+const addDaysKey = (key, days) => {
+  const d = new Date(key + 'T00:00:00')
+  d.setDate(d.getDate() + days)
+  return dateKey(d)
+}
+
 function Toast({ message, type = 'success', onClose }) {
   useEffect(() => {
     if (!message) return
@@ -116,8 +142,13 @@ export default function OwnerDashboard({ profile }) {
   const [inlineError, setInlineError] = useState('')
   const [reportYear, setReportYear] = useState(new Date().getFullYear())
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
-  const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', category: 'materials', photo_url: '' })
+  const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
   const [scheduleForm, setScheduleForm] = useState({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
+  const [mileageEntries, setMileageEntries] = useState([])
+  const [showNewMileage, setShowNewMileage] = useState(false)
+  const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
+  const [payroll, setPayroll] = useState([])
+  const [paychecks, setPaychecks] = useState([])
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
 
@@ -173,6 +204,49 @@ export default function OwnerDashboard({ profile }) {
     }
   }, [])
 
+  // Build weekly pay rows (one per worker per week) from clocked-out time, and
+  // load any paychecks already recorded so each week shows paid vs. owed.
+  const fetchPayroll = useCallback(async () => {
+    const workerIds = workers.map(w => w.id)
+    if (!workerIds.length) { setPayroll([]); setPaychecks([]); return }
+    try {
+      const [{ data: times }, { data: checks }] = await Promise.all([
+        supabase.from('time_entries').select('worker_id, total_minutes, labor_cost, clocked_in_at').in('worker_id', workerIds).not('clocked_out_at', 'is', null),
+        supabase.from('paychecks').select('*').eq('owner_id', profile.id)
+      ])
+      setPaychecks(checks || [])
+      const rows = {}
+      ;(times || []).forEach(t => {
+        const ws = weekStartKey(t.clocked_in_at)
+        const key = t.worker_id + '|' + ws
+        if (!rows[key]) rows[key] = { worker_id: t.worker_id, week_start: ws, minutes: 0, gross: 0 }
+        rows[key].minutes += t.total_minutes || 0
+        rows[key].gross += t.labor_cost || 0
+      })
+      setPayroll(Object.values(rows).sort((a, b) => b.week_start.localeCompare(a.week_start)))
+    } catch (e) {
+      console.error('Payroll fetch failed:', e)
+    }
+  }, [workers, profile.id])
+
+  const recordPaycheck = async (row) => {
+    setLoading(true)
+    try {
+      const { error } = await supabase.from('paychecks').insert({
+        owner_id: profile.id, worker_id: row.worker_id,
+        week_start: row.week_start, week_end: addDaysKey(row.week_start, 6),
+        total_minutes: row.minutes, gross_pay: roundCents(row.gross),
+        paid_at: new Date().toISOString()
+      })
+      if (error) throw error
+      await fetchPayroll()
+      showToast('Paycheck recorded ✓')
+    } catch (e) {
+      showToast('Failed to record paycheck', 'error')
+    }
+    setLoading(false)
+  }
+
   // Compute each job's spending LIVE from the source records (receipts +
   // clocked-out time entries) instead of trusting denormalized running-total
   // columns. This keeps profit accurate, counts every receipt category, and
@@ -214,6 +288,10 @@ export default function OwnerDashboard({ profile }) {
     fetchSpend(projects)
   }, [projects, fetchSpend])
 
+  useEffect(() => {
+    if (activeTab === 'payroll' && workers.length) fetchPayroll()
+  }, [activeTab, workers, fetchPayroll])
+
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
     try {
@@ -223,8 +301,45 @@ export default function OwnerDashboard({ profile }) {
       setTimeEntries(t || [])
       const { data: s } = await supabase.from('schedule_entries').select('*, profiles(full_name)').eq('project_id', project.id).order('scheduled_date', { ascending: true })
       setScheduleEntries(s || [])
+      const { data: m } = await supabase.from('mileage_entries').select('*').eq('project_id', project.id).order('trip_date', { ascending: false })
+      setMileageEntries(m || [])
     } catch (e) {
       showToast('Failed to load job details', 'error')
+    }
+  }
+
+  const addMileage = async () => {
+    if (!mileageForm.miles) return setInlineError('Miles are required')
+    setLoading(true)
+    setInlineError('')
+    try {
+      const { error } = await supabase.from('mileage_entries').insert({
+        owner_id: profile.id, project_id: selectedProject.id,
+        trip_date: mileageForm.trip_date || new Date().toISOString().split('T')[0],
+        miles: parseFloat(mileageForm.miles || 0),
+        rate: parseFloat(mileageForm.rate || DEFAULT_MILEAGE_RATE),
+        notes: mileageForm.notes
+      })
+      if (error) throw error
+      setShowNewMileage(false)
+      setMileageForm({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
+      await fetchProjectDetails(selectedProject)
+      showToast('Mileage added ✓')
+    } catch (e) {
+      setInlineError('Failed to add mileage. Try again.')
+    }
+    setLoading(false)
+  }
+
+  const deleteMileage = async (entry) => {
+    if (!window.confirm('Delete this mileage entry?')) return
+    try {
+      const { error } = await supabase.from('mileage_entries').delete().eq('id', entry.id)
+      if (error) throw error
+      await fetchProjectDetails(selectedProject)
+      showToast('Mileage deleted ✓')
+    } catch (e) {
+      showToast('Failed to delete mileage', 'error')
     }
   }
 
@@ -305,11 +420,12 @@ export default function OwnerDashboard({ profile }) {
       const { error } = await supabase.from('receipts').insert({
         project_id: selectedProject.id, owner_id: profile.id,
         description: receiptForm.description, store: receiptForm.store,
-        amount, category: receiptForm.category, photo_url: receiptForm.photo_url || null
+        amount, tax_amount: parseFloat(receiptForm.tax || 0),
+        category: receiptForm.category, photo_url: receiptForm.photo_url || null
       })
       if (error) throw error
       setShowNewReceipt(false)
-      setReceiptForm({ description: '', store: '', amount: '', category: 'materials', photo_url: '' })
+      setReceiptForm({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
       setScanResult(null); setScanError('')
       await fetchProjectDetails(selectedProject)
       await fetchProjects()
@@ -428,6 +544,85 @@ export default function OwnerDashboard({ profile }) {
     showToast('Report exported ✓')
   }
 
+  const downloadCsv = (rows, filename) => {
+    const csv = rows.map(r => r.map(cell => {
+      const v = String(cell)
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v
+    }).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // A full, accountant-ready summary for the year: income from completed jobs,
+  // deductible expenses broken out by category, labor, mileage, and sales tax.
+  const exportTaxPack = async () => {
+    setLoading(true)
+    try {
+      const yStart = `${reportYear}-01-01`
+      const yEndDate = `${reportYear}-12-31`
+      const yEndTs = `${yEndDate}T23:59:59`
+      const projectIds = projects.map(p => p.id)
+      const [{ data: rcpts }, { data: miles }, timesRes] = await Promise.all([
+        supabase.from('receipts').select('category, amount, tax_amount, created_at').eq('owner_id', profile.id).gte('created_at', yStart).lte('created_at', yEndTs),
+        supabase.from('mileage_entries').select('miles, rate, trip_date').eq('owner_id', profile.id).gte('trip_date', yStart).lte('trip_date', yEndDate),
+        projectIds.length
+          ? supabase.from('time_entries').select('labor_cost, clocked_in_at').in('project_id', projectIds).not('clocked_out_at', 'is', null).gte('clocked_in_at', yStart).lte('clocked_in_at', yEndTs)
+          : Promise.resolve({ data: [] })
+      ])
+      const r2 = roundCents
+      const byCat = {}
+      let salesTax = 0
+      ;(rcpts || []).forEach(r => {
+        byCat[r.category] = (byCat[r.category] || 0) + (r.amount || 0)
+        salesTax += r.tax_amount || 0
+      })
+      const totalMiles = (miles || []).reduce((s, m) => s + (m.miles || 0), 0)
+      const mileageDeduction = (miles || []).reduce((s, m) => s + (m.miles || 0) * (m.rate || 0), 0)
+      const laborTotal = (timesRes.data || []).reduce((s, t) => s + (t.labor_cost || 0), 0)
+      const expensesTotal = Object.values(byCat).reduce((s, v) => s + v, 0)
+      const income = reportJobs.reduce((s, p) => s + (p.budget || 0), 0)
+      const deductions = expensesTotal + laborTotal + mileageDeduction
+
+      const rows = []
+      rows.push(['RUN-SITE TAX PACK', String(reportYear)])
+      rows.push(['Generated', new Date().toLocaleDateString()])
+      rows.push([])
+      rows.push(['INCOME — completed jobs'])
+      rows.push(['Job', 'Client', 'Completed', 'Revenue'])
+      reportJobs.forEach(p => rows.push([p.name || '', p.client_name || '', p.completed_at ? new Date(p.completed_at).toLocaleDateString() : '', r2(p.budget).toFixed(2)]))
+      rows.push(['', '', 'TOTAL INCOME', r2(income).toFixed(2)])
+      rows.push([])
+      rows.push(['DEDUCTIBLE EXPENSES — by category'])
+      rows.push(['Category', 'Amount'])
+      Object.keys(byCat).sort().forEach(c => rows.push([CATEGORY_LABELS[c] || c, r2(byCat[c]).toFixed(2)]))
+      rows.push(['Labor / wages', r2(laborTotal).toFixed(2)])
+      rows.push([`Mileage (${totalMiles.toLocaleString()} mi)`, r2(mileageDeduction).toFixed(2)])
+      rows.push(['TOTAL DEDUCTIONS', r2(deductions).toFixed(2)])
+      rows.push([])
+      rows.push(['Sales tax paid on purchases (info)', r2(salesTax).toFixed(2)])
+      rows.push([])
+      rows.push(['SUMMARY'])
+      rows.push(['Total income', r2(income).toFixed(2)])
+      rows.push(['Total deductions', r2(deductions).toFixed(2)])
+      rows.push(['Net (income − deductions)', r2(income - deductions).toFixed(2)])
+      rows.push([])
+      rows.push(['NOTE: Summary for your accountant — not a tax filing. Mileage uses the standard rate; do not also deduct actual vehicle costs for those same miles.'])
+
+      downloadCsv(rows, `run-site-${reportYear}-tax-pack.csv`)
+      showToast('Tax Pack exported ✓')
+    } catch (e) {
+      showToast('Failed to export Tax Pack', 'error')
+    }
+    setLoading(false)
+  }
+
   const deleteReceipt = async (receipt) => {
     if (!window.confirm('Delete this receipt? This cannot be undone.')) return
     try {
@@ -535,7 +730,7 @@ export default function OwnerDashboard({ profile }) {
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
         <div className="tabs" style={{ margin: '16px 16px 0' }}>
-          {['receipts', 'time', 'budget', 'schedule'].map(t => (
+          {['receipts', 'time', 'mileage', 'budget', 'schedule'].map(t => (
             <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
           ))}
         </div>
@@ -610,7 +805,7 @@ export default function OwnerDashboard({ profile }) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
                       <h3>{r.description}</h3>
-                      <p>{r.store} · {r.category}</p>
+                      <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ` · tax ${formatCurrency(r.tax_amount)}` : ''}</p>
                       <p style={{ fontSize: '11px', color: '#717171' }}>{new Date(r.created_at).toLocaleDateString()}</p>
                       {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
                     </div>
@@ -660,6 +855,34 @@ export default function OwnerDashboard({ profile }) {
             </div>
           )}
 
+          {projectTab === 'mileage' && (
+            <div>
+              <button className="btn-primary" onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add Mileage</button>
+              {mileageEntries.length > 0 && (
+                <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Mileage Deduction</p>
+                  <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>
+                    {formatCurrency(mileageEntries.reduce((s, m) => s + (m.miles || 0) * (m.rate || 0), 0))}
+                  </p>
+                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>{mileageEntries.reduce((s, m) => s + (m.miles || 0), 0).toLocaleString()} miles tracked</p>
+                </div>
+              )}
+              {mileageEntries.map(m => (
+                <div key={m.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <h3>{(m.miles || 0).toLocaleString()} mi <span style={{ fontWeight: '400', color: '#888', fontSize: '13px' }}>@ ${m.rate}/mi</span></h3>
+                      <p style={{ fontSize: '12px', color: '#717171' }}>{m.trip_date ? new Date(m.trip_date + 'T00:00:00').toLocaleDateString() : ''}{m.notes ? ` · ${m.notes}` : ''}</p>
+                    </div>
+                    <p style={{ fontWeight: '700', color: '#16A34A', fontSize: '16px' }}>{formatCurrency((m.miles || 0) * (m.rate || 0))}</p>
+                  </div>
+                  <button onClick={() => deleteMileage(m)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
+                </div>
+              ))}
+              {mileageEntries.length === 0 && <div className="empty-state"><p>No mileage logged yet. Track miles driven for this job — it's a deduction.</p></div>}
+            </div>
+          )}
+
           {projectTab === 'schedule' && (
             <div>
               <button className="btn-primary" onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule Worker</button>
@@ -700,7 +923,8 @@ export default function OwnerDashboard({ profile }) {
               <div className="input-group"><label>Description</label><input value={receiptForm.description} onChange={e => setReceiptForm({ ...receiptForm, description: e.target.value })} placeholder="Concrete mix" /></div>
               <div className="input-group"><label>Store</label><input value={receiptForm.store} onChange={e => setReceiptForm({ ...receiptForm, store: e.target.value })} placeholder="Home Depot" /></div>
               <div className="input-group"><label>Amount ($)</label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
-              <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({ ...receiptForm, category: e.target.value })}><option value="materials">Materials</option><option value="other">Other</option></select></div>
+              <div className="input-group"><label>Sales Tax ($) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={receiptForm.tax} onChange={e => setReceiptForm({ ...receiptForm, tax: e.target.value })} placeholder="0.00" /></div>
+              <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({ ...receiptForm, category: e.target.value })}>{RECEIPT_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select></div>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addReceipt} disabled={loading || !receiptForm.amount}>{loading ? 'Saving...' : 'Save Receipt'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewReceipt(false); setScanResult(null); setScanError(''); setInlineError('') }}>Cancel</button>
@@ -720,6 +944,22 @@ export default function OwnerDashboard({ profile }) {
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving...' : 'Schedule'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {showNewMileage && (
+          <div className="modal-overlay" onClick={() => { setShowNewMileage(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Add Mileage</h2>
+              <div className="input-group"><label>Miles driven</label><input type="number" value={mileageForm.miles} onChange={e => setMileageForm({ ...mileageForm, miles: e.target.value })} placeholder="42" /></div>
+              <div className="input-group"><label>Rate ($/mile)</label><input type="number" step="0.01" value={mileageForm.rate} onChange={e => setMileageForm({ ...mileageForm, rate: e.target.value })} placeholder="0.70" /></div>
+              <div className="input-group"><label>Date</label><input type="date" value={mileageForm.trip_date} onChange={e => setMileageForm({ ...mileageForm, trip_date: e.target.value })} /></div>
+              <div className="input-group"><label>Notes (optional)</label><input value={mileageForm.notes} onChange={e => setMileageForm({ ...mileageForm, notes: e.target.value })} placeholder="Supply run to Home Depot" /></div>
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Deduction = {formatCurrency((parseFloat(mileageForm.miles) || 0) * (parseFloat(mileageForm.rate) || 0))} · set the rate to the current IRS standard mileage rate.</p>
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={addMileage} disabled={loading}>{loading ? 'Saving...' : 'Add Mileage'}</button>
+              <button className="btn-secondary" onClick={() => { setShowNewMileage(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
         )}
@@ -752,7 +992,7 @@ export default function OwnerDashboard({ profile }) {
     <div>
       <div className="topbar"><h1>RUN-SITE</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
       <div className="tabs" style={{ margin: '16px 16px 0' }}>
-        {['jobs', 'workers', 'reports'].map(t => (
+        {['jobs', 'workers', 'payroll', 'reports'].map(t => (
           <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
@@ -861,6 +1101,46 @@ export default function OwnerDashboard({ profile }) {
           </div>
         )}
 
+        {activeTab === 'payroll' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
+              Weekly pay per worker, straight from their clocked hours. Tap "Mark Paid" each week to record a paycheck.
+            </p>
+            {workers.length === 0 && <div className="empty-state"><p>Add workers first — their clocked hours become weekly paychecks here.</p></div>}
+            {workers.map(w => {
+              const rows = payroll.filter(r => r.worker_id === w.id)
+              const unpaidTotal = rows.reduce((s, r) => {
+                const paid = paychecks.find(c => c.worker_id === r.worker_id && c.week_start === r.week_start)
+                return s + (paid ? 0 : r.gross)
+              }, 0)
+              return (
+                <div key={w.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: rows.length ? '8px' : '0' }}>
+                    <div><h3>{w.full_name}</h3><p>${w.hourly_rate || 0}/hr</p></div>
+                    {unpaidTotal > 0 && <div style={{ textAlign: 'right' }}><p style={{ fontSize: '11px', color: '#888' }}>Owed</p><p style={{ fontWeight: '700', color: '#DC2626', fontSize: '16px' }}>{formatCurrency(unpaidTotal)}</p></div>}
+                  </div>
+                  {rows.length === 0 && <p style={{ fontSize: '13px', color: '#888' }}>No hours clocked yet.</p>}
+                  {rows.map(r => {
+                    const paid = paychecks.find(c => c.worker_id === r.worker_id && c.week_start === r.week_start)
+                    return (
+                      <div key={r.week_start} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
+                        <div>
+                          <p style={{ fontWeight: '600', fontSize: '14px' }}>Week of {new Date(r.week_start + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                          <p style={{ fontSize: '12px', color: '#717171' }}>{formatTime(r.minutes)} · {formatCurrency(r.gross)}</p>
+                        </div>
+                        {paid
+                          ? <span style={{ fontSize: '12px', fontWeight: '700', color: '#16A34A' }}>Paid ✓</span>
+                          : <button onClick={() => recordPaycheck(r)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark Paid</button>
+                        }
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         {activeTab === 'reports' && (
           <div>
             <div className="input-group">
@@ -871,7 +1151,8 @@ export default function OwnerDashboard({ profile }) {
             </div>
             {reportJobs.length > 0 ? (
               <>
-                <button className="btn-secondary" onClick={exportReportCSV} style={{ marginBottom: '12px' }}>⬇ Export {reportYear} for Taxes (CSV)</button>
+                <button className="btn-primary" onClick={exportTaxPack} disabled={loading} style={{ marginBottom: '8px' }}>{loading ? 'Preparing…' : `📦 Download ${reportYear} Tax Pack`}</button>
+                <button className="btn-secondary" onClick={exportReportCSV} style={{ marginBottom: '12px' }}>⬇ Job profit report (CSV)</button>
                 <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
                   <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>{reportYear} Summary</p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
