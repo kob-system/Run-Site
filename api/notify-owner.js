@@ -52,6 +52,15 @@ export default async function handler(req, res) {
     const ownerEmail = ownerRows && ownerRows[0] && ownerRows[0].email
     if (!ownerEmail) return res.json({ success: false, error: 'Owner email not found' })
 
+    // TEMP (until a Resend sending domain is verified): onboarding@resend.dev can only
+    // deliver to the Resend account's own email. Set NOTIFY_OVERRIDE_TO in Vercel to that
+    // address to route every alert there for testing; remove it once a domain is verified
+    // so alerts go to the real owners.
+    const recipient = process.env.NOTIFY_OVERRIDE_TO || ownerEmail
+    const testNote = process.env.NOTIFY_OVERRIDE_TO
+      ? `<p style="font-size:12px;color:#888;margin:8px 0 0;">Test mode — originally addressed to ${esc(ownerEmail)}.</p>`
+      : ''
+
     let jobName = 'a job'
     if (projectId) {
       const projRows = await sbGet(`projects?id=eq.${encodeURIComponent(projectId)}&select=name`)
@@ -75,14 +84,14 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         from: FROM,
-        to: ownerEmail,
+        to: recipient,
         subject,
         html: `
           <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto; padding: 24px;">
             <h2 style="color: #1C2B3A; margin-bottom: 8px;">RUN-SITE</h2>
             <div style="background: #f4f6f9; border-radius: 12px; padding: 20px; margin-top: 16px;">
               <p style="font-size: 18px; font-weight: 700; color: #1C2B3A; margin: 0 0 8px;">${line}</p>
-              <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by Run-Site</p>
+              <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by Run-Site</p>${testNote}
             </div>
           </div>
         `
