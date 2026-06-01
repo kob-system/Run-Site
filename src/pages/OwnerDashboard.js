@@ -19,6 +19,14 @@ const PROJECT_TAB_LABELS = {
   log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
 }
 
+// Estimate line-item math (pure; safe at module scope).
+const ESTIMATE_KINDS = [['materials', 'Materials'], ['labor', 'Labor'], ['other', 'Other']]
+const estItemAmount = (it) => (parseFloat(it && it.qty) || 0) * (parseFloat(it && it.unit_price) || 0)
+const estSubtotal = (items) => (items || []).reduce((s, it) => s + estItemAmount(it), 0)
+const estTotal = (items, taxRate) => { const sub = estSubtotal(items); return sub + sub * (parseFloat(taxRate) || 0) / 100 }
+const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
+const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
+
 // Sunday-start week key (YYYY-MM-DD), used to group pay into weekly paychecks.
 const dateKey = (d) => {
   const x = new Date(d)
@@ -191,6 +199,11 @@ export default function OwnerDashboard({ profile }) {
   const [logForm, setLogForm] = useState({ log_date: '', weather: '', note: '' })
   const [changeForm, setChangeForm] = useState({ description: '', amount: '', status: 'approved' })
   const [invoiceForm, setInvoiceForm] = useState({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '' })
+  const [estimates, setEstimates] = useState([])
+  const [showNewEstimate, setShowNewEstimate] = useState(false)
+  const [editingEstimateId, setEditingEstimateId] = useState(null)
+  const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
+  const [estimateItems, setEstimateItems] = useState([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
 
@@ -335,6 +348,17 @@ export default function OwnerDashboard({ profile }) {
     } catch (e) { console.error('Invoices fetch failed:', e) }
   }, [profile.id])
 
+  const fetchEstimates = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('estimates')
+        .select('*')
+        .eq('owner_id', profile.id)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setEstimates(data || [])
+    } catch (e) { console.error('Estimates fetch failed:', e) }
+  }, [profile.id])
+
   useEffect(() => {
     Promise.all([fetchProjects(), fetchWorkers()]).finally(() => setInitialLoading(false))
   }, [fetchProjects, fetchWorkers])
@@ -354,6 +378,10 @@ export default function OwnerDashboard({ profile }) {
   useEffect(() => {
     if (activeTab === 'invoices') fetchInvoices()
   }, [activeTab, fetchInvoices])
+
+  useEffect(() => {
+    if (activeTab === 'estimates') fetchEstimates()
+  }, [activeTab, fetchEstimates])
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
@@ -490,6 +518,88 @@ export default function OwnerDashboard({ profile }) {
   }
 
   // ---- Invoices (what the client owes / has paid) ----
+  // ---- Estimates ----
+  const openNewEstimate = () => {
+    setEditingEstimateId(null)
+    setEstimateForm({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
+    setEstimateItems([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
+    setInlineError(''); setShowNewEstimate(true)
+  }
+  const openEditEstimate = (est) => {
+    setEditingEstimateId(est.id)
+    setEstimateForm({
+      client_name: est.client_name || '', client_phone: est.client_phone || '', client_email: est.client_email || '',
+      title: est.title || '', tax_rate: est.tax_rate ? String(est.tax_rate) : '', notes: est.notes || ''
+    })
+    const items = Array.isArray(est.items) ? est.items : []
+    setEstimateItems(items.length
+      ? items.map(it => ({ description: it.description || '', qty: String(it.qty ?? '1'), unit_price: String(it.unit_price ?? ''), kind: it.kind || 'materials' }))
+      : [{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
+    setInlineError(''); setShowNewEstimate(true)
+  }
+  const setEstimateItem = (i, field, value) => setEstimateItems(items => items.map((it, idx) => idx === i ? { ...it, [field]: value } : it))
+  const addEstimateRow = () => setEstimateItems(items => [...items, { description: '', qty: '1', unit_price: '', kind: 'materials' }])
+  const removeEstimateRow = (i) => setEstimateItems(items => items.length > 1 ? items.filter((_, idx) => idx !== i) : items)
+
+  const saveEstimate = async () => {
+    if (!estimateForm.title && !estimateForm.client_name) return setInlineError('Add a title or client name')
+    setLoading(true); setInlineError('')
+    try {
+      const items = estimateItems
+        .filter(it => it.description || it.unit_price)
+        .map(it => ({ description: it.description, qty: parseFloat(it.qty) || 0, unit_price: parseFloat(it.unit_price) || 0, kind: it.kind }))
+      const payload = {
+        owner_id: profile.id, client_name: estimateForm.client_name, client_phone: estimateForm.client_phone || null,
+        client_email: estimateForm.client_email || null, title: estimateForm.title, items,
+        tax_rate: parseFloat(estimateForm.tax_rate || 0), notes: estimateForm.notes || null
+      }
+      let error
+      if (editingEstimateId) ({ error } = await supabase.from('estimates').update(payload).eq('id', editingEstimateId))
+      else ({ error } = await supabase.from('estimates').insert({ ...payload, status: 'draft' }))
+      if (error) throw error
+      setShowNewEstimate(false); setEditingEstimateId(null)
+      await fetchEstimates(); showToast('Estimate saved ✓')
+    } catch (e) { setInlineError('Failed to save estimate. Try again.') }
+    setLoading(false)
+  }
+  const markEstimateStatus = async (est, status) => {
+    try {
+      const { error } = await supabase.from('estimates').update({ status }).eq('id', est.id)
+      if (error) throw error
+      await fetchEstimates(); showToast(status === 'sent' ? 'Marked sent ✓' : status === 'declined' ? 'Marked declined ✓' : 'Updated ✓')
+    } catch (e) { showToast('Failed to update estimate', 'error') }
+  }
+  const acceptEstimate = async (est) => {
+    if (!window.confirm('Accept this estimate and create a job from it?')) return
+    setLoading(true)
+    try {
+      const items = Array.isArray(est.items) ? est.items : []
+      const materials = items.filter(it => it.kind === 'materials').reduce((s, it) => s + estItemAmount(it), 0)
+      const labor = items.filter(it => it.kind === 'labor').reduce((s, it) => s + estItemAmount(it), 0)
+      const total = estTotal(items, est.tax_rate)
+      const profit = Math.max(total - materials - labor, 0)
+      const { data: proj, error } = await supabase.from('projects').insert({
+        owner_id: profile.id, name: est.title || (est.client_name ? est.client_name + ' — job' : 'New job'),
+        client_name: est.client_name, client_phone: est.client_phone || null, client_email: est.client_email || null,
+        budget: roundCents(total), materials_budget: roundCents(materials), labor_budget: roundCents(labor),
+        profit_target: roundCents(profit), stage: 'start'
+      }).select().single()
+      if (error) throw error
+      await supabase.from('estimates').update({ status: 'accepted', project_id: proj ? proj.id : null }).eq('id', est.id)
+      await fetchEstimates(); await fetchProjects()
+      showToast('Job created from estimate ✓')
+    } catch (e) { showToast('Failed to accept estimate', 'error') }
+    setLoading(false)
+  }
+  const deleteEstimate = async (est) => {
+    if (!window.confirm('Delete this estimate?')) return
+    try {
+      const { error } = await supabase.from('estimates').delete().eq('id', est.id)
+      if (error) throw error
+      await fetchEstimates(); showToast('Estimate deleted ✓')
+    } catch (e) { showToast('Failed to delete estimate', 'error') }
+  }
+
   const addInvoice = async () => {
     if (!invoiceForm.project_id || !invoiceForm.amount) return setInlineError('Pick a job and enter an amount')
     setLoading(true); setInlineError('')
@@ -1307,7 +1417,7 @@ export default function OwnerDashboard({ profile }) {
     <div>
       <div className="topbar"><h1>RUN-SITE</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
       <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
-        {['jobs', 'workers', 'payroll', 'invoices', 'reports'].map(t => (
+        {['jobs', 'estimates', 'workers', 'payroll', 'invoices', 'reports'].map(t => (
           <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
@@ -1453,6 +1563,39 @@ export default function OwnerDashboard({ profile }) {
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {activeTab === 'estimates' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
+              Quote a job, send it, and turn a "yes" into a job with one tap.
+            </p>
+            <button className="btn-primary" onClick={openNewEstimate}>+ New Estimate</button>
+            {estimates.map(est => {
+              const total = estTotal(est.items, est.tax_rate)
+              const statusColor = est.status === 'accepted' ? 'status-end' : est.status === 'sent' ? 'status-mid' : 'status-start'
+              return (
+                <div key={est.id} className="card" style={est.status === 'accepted' ? { background: '#f9fafb' } : undefined}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <div style={{ flex: 1, paddingRight: '10px' }}>
+                      <h3>{est.title || 'Untitled estimate'}</h3>
+                      <p>{est.client_name}</p>
+                      <span className={'status-pill ' + statusColor} style={{ marginTop: '4px' }}>{est.status}</span>
+                    </div>
+                    <p style={{ fontWeight: '700', fontSize: '18px', color: '#1C2B3A' }}>{formatCurrency(total)}</p>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+                    {est.status !== 'accepted' && <button onClick={() => openEditEstimate(est)} style={btnSm('#1C2B3A')}>Edit</button>}
+                    {est.status === 'draft' && <button onClick={() => markEstimateStatus(est, 'sent')} style={btnSm('#E07B2A')}>Mark Sent</button>}
+                    {est.status !== 'accepted' && <button onClick={() => acceptEstimate(est)} style={btnSm('#16A34A')}>Accept → Job</button>}
+                    {est.status !== 'accepted' && est.status !== 'declined' && <button onClick={() => markEstimateStatus(est, 'declined')} style={btnSmOutline()}>Decline</button>}
+                    <button onClick={() => deleteEstimate(est)} style={btnSmOutline()}>Delete</button>
+                  </div>
+                </div>
+              )
+            })}
+            {estimates.length === 0 && <div className="empty-state"><p>No estimates yet. Quote your next job and send it to win the work.</p></div>}
           </div>
         )}
 
@@ -1615,6 +1758,43 @@ export default function OwnerDashboard({ profile }) {
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewJob(false); setInlineError('') }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {showNewEstimate && (
+        <div className="modal-overlay" onClick={() => { setShowNewEstimate(false); setEditingEstimateId(null); setInlineError('') }}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+            <h2>{editingEstimateId ? 'Edit Estimate' : 'New Estimate'}</h2>
+            <div className="input-group"><label>Title</label><input value={estimateForm.title} onChange={e => setEstimateForm({ ...estimateForm, title: e.target.value })} placeholder="Kitchen remodel — 24 Pinewood Dr" /></div>
+            <div className="input-group"><label>Client Name</label><input value={estimateForm.client_name} onChange={e => setEstimateForm({ ...estimateForm, client_name: e.target.value })} placeholder="Sarah Whitman" /></div>
+            <div className="input-group"><label>Client Phone</label><input type="tel" value={estimateForm.client_phone} onChange={e => setEstimateForm({ ...estimateForm, client_phone: e.target.value })} placeholder="(518) 555-0199" /></div>
+            <div className="input-group"><label>Client Email</label><input type="email" value={estimateForm.client_email} onChange={e => setEstimateForm({ ...estimateForm, client_email: e.target.value })} placeholder="client@email.com" /></div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: '#444', marginBottom: '5px' }}>Line Items</label>
+            {estimateItems.map((it, i) => (
+              <div key={i} style={{ border: '1px solid #eee', borderRadius: '10px', padding: '10px', marginBottom: '8px' }}>
+                <input value={it.description} onChange={e => setEstimateItem(i, 'description', e.target.value)} placeholder="Description (e.g. Cabinets & install)" style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px', marginBottom: '6px' }} />
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <input type="number" value={it.qty} onChange={e => setEstimateItem(i, 'qty', e.target.value)} placeholder="Qty" style={{ width: '56px', padding: '8px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <span style={{ color: '#888' }}>×</span>
+                  <input type="number" value={it.unit_price} onChange={e => setEstimateItem(i, 'unit_price', e.target.value)} placeholder="Unit $" style={{ flex: 1, minWidth: '0', padding: '8px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <select value={it.kind} onChange={e => setEstimateItem(i, 'kind', e.target.value)} style={{ padding: '8px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '13px' }}>{ESTIMATE_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+                  {estimateItems.length > 1 && <button onClick={() => removeEstimateRow(i)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '20px', cursor: 'pointer', padding: '0 4px', lineHeight: '1' }}>×</button>}
+                </div>
+                <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', textAlign: 'right', marginTop: '4px' }}>{formatCurrency(estItemAmount(it))}</p>
+              </div>
+            ))}
+            <button onClick={addEstimateRow} style={{ background: 'none', border: '1px dashed #E07B2A', color: '#E07B2A', borderRadius: '8px', padding: '10px', width: '100%', fontSize: '13px', fontWeight: '600', cursor: 'pointer', marginBottom: '12px' }}>+ Add line</button>
+            <div className="input-group"><label>Tax Rate (%) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={estimateForm.tax_rate} onChange={e => setEstimateForm({ ...estimateForm, tax_rate: e.target.value })} placeholder="8" /></div>
+            <div className="input-group"><label>Notes (optional)</label><input value={estimateForm.notes} onChange={e => setEstimateForm({ ...estimateForm, notes: e.target.value })} placeholder="50% deposit to start, balance on completion" /></div>
+            <div style={{ background: '#1C2B3A', color: 'white', borderRadius: '12px', padding: '14px', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)' }}><span>Subtotal</span><span>{formatCurrency(estSubtotal(estimateItems))}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}><span>Tax ({parseFloat(estimateForm.tax_rate) || 0}%)</span><span>{formatCurrency(estSubtotal(estimateItems) * (parseFloat(estimateForm.tax_rate) || 0) / 100)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}><span>Total</span><span>{formatCurrency(estTotal(estimateItems, estimateForm.tax_rate))}</span></div>
+            </div>
+            {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+            <button className="btn-primary" onClick={saveEstimate} disabled={loading}>{loading ? 'Saving...' : 'Save Estimate'}</button>
+            <button className="btn-secondary" onClick={() => { setShowNewEstimate(false); setEditingEstimateId(null); setInlineError('') }}>Cancel</button>
           </div>
         </div>
       )}
