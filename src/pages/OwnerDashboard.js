@@ -1905,6 +1905,17 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'home' && (
           <div>
+            {projects.length === 0 && !initialLoading && (
+              <div className="card" style={{ border: '2px solid #E07B2A', marginBottom: '4px' }}>
+                <h2 style={{ fontSize: '19px', fontWeight: '800', color: '#1C2B3A', marginBottom: '4px' }}>👋 Welcome to Run-Site</h2>
+                <p style={{ fontSize: '13px', color: '#717171', marginBottom: '16px', lineHeight: '1.5' }}>Let's get your business set up — three quick steps and you're tracking jobs, crew, and profit on every project.</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <button className="btn-primary" onClick={() => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') }}>1 · Create your first job</button>
+                  <button className="btn-secondary" onClick={() => setActiveTab('workers')}>2 · Add your crew</button>
+                  <button className="btn-secondary" onClick={() => setActiveTab('estimates')}>3 · Send your first estimate</button>
+                </div>
+              </div>
+            )}
             <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
               <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
               <p style={{ fontSize: '30px', fontWeight: '800', color: '#F59E0B' }}>{formatCurrency(owedTotal)}</p>
