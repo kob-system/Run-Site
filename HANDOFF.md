@@ -32,7 +32,9 @@ JP is asleep; Claude works autonomously to perfect every inch of the app. JP is 
 - ✅ Audit: deep read-only bug/a11y audit of `OwnerDashboard.js` (delegated to a subagent for context economy). Backlog below.
 - ✅ Fix batch 1 (crash/null safety) — **LOCAL-ONLY `5c35214`** (ahead of origin 1), build-checked: `estSubtotal` Array.isArray guard (fixes a real white-screen if `est.items` is ever a non-array), `confirmScan` null guard, `parseInt(…,10)` radix.
 
-**MORNING TODO (once JP back / a browser is picked):** push held commits ONE AT A TIME, reload the LOGGED-IN owner dashboard after each, confirm it renders (not white). Then continue the audit backlog.
+- ☑️ MODE CONFIRMED (JP, leaving for work): **bank-changes mode** — keep banking tested, build-checked LOCAL commits all day; DO NOT deploy. Live demo stays exactly as-is (safe to show Josh anytime). JP will **remote into this computer** to reach this session; computer stays on + plugged in. The 2-browser ambiguity is moot until we deploy together.
+
+**WHEN JP REMOTES IN (deploy session):** push held commits ONE AT A TIME, reload the LOGGED-IN owner dashboard after each, confirm it renders (not white). Then continue the audit backlog.
 
 **AUDIT BACKLOG — work through, mark done as you go:**
 - CRASH — [x] est.items non-array crash → FIXED (5c35214, held). [ ] VERIFY-ONLY: `fetchProjectDetails` line ~449 `time_entries .select('*, profiles(full_name)')` is a BARE embed; likely safe (table seems to have a single profiles FK) but its CREATE TABLE isn't in repo migrations — if `time_entries` has BOTH owner_id+worker_id FKs this returns HTTP 300 and the Time tab blanks → then add `profiles!time_entries_worker_id_fkey(full_name)`. Confirm FK count against live DB FIRST (a wrong hint name breaks it).
