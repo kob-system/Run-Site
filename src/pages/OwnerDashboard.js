@@ -206,7 +206,7 @@ export default function OwnerDashboard({ profile }) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [logForm, setLogForm] = useState({ log_date: '', weather: '', note: '' })
   const [changeForm, setChangeForm] = useState({ description: '', amount: '', status: 'approved' })
-  const [invoiceForm, setInvoiceForm] = useState({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '' })
+  const [invoiceForm, setInvoiceForm] = useState({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' })
   const [estimates, setEstimates] = useState([])
   const [showNewEstimate, setShowNewEstimate] = useState(false)
   const [editingEstimateId, setEditingEstimateId] = useState(null)
@@ -358,7 +358,7 @@ export default function OwnerDashboard({ profile }) {
   const fetchInvoices = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('invoices')
-        .select('*, projects(name, client_name)')
+        .select('*, projects(name, client_name, client_email)')
         .eq('owner_id', profile.id)
         .order('issued_date', { ascending: false })
       if (error) throw error
@@ -790,6 +790,23 @@ export default function OwnerDashboard({ profile }) {
     try { const { error } = await supabase.from('permits').delete().eq('id', p.id); if (error) throw error; await fetchProjectDetails(selectedProject); showToast('Deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
   }
 
+  // ---- Email a quote / invoice to the client (opens their mail app, prefilled) ----
+  const emailEstimate = (est) => {
+    const items = Array.isArray(est.items) ? est.items : []
+    const lines = items.map(it => `• ${it.description}: ${it.qty} × $${Number(it.unit_price).toFixed(2)} = $${estItemAmount(it).toFixed(2)}`).join('\n')
+    const total = estTotal(est.items, est.tax_rate)
+    const subject = `Estimate${est.title ? ': ' + est.title : ''}`
+    const body = `Hi ${est.client_name || ''},\n\nHere's your estimate${est.title ? ' for ' + est.title : ''}:\n\n${lines}\n\nTotal: $${total.toFixed(2)}${est.notes ? '\n\n' + est.notes : ''}\n\nReply to approve and we'll get on the schedule.\n\nThanks,\n${profile.company_name || profile.full_name || ''}`
+    window.location.href = `mailto:${est.client_email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
+  const emailInvoice = (inv) => {
+    const job = inv.projects ? inv.projects.name : ''
+    const to = inv.projects ? (inv.projects.client_email || '') : ''
+    const subject = `Invoice${inv.label ? ': ' + inv.label : ''}${job ? ' — ' + job : ''}`
+    const body = `Hi${inv.projects && inv.projects.client_name ? ' ' + inv.projects.client_name : ''},\n\n${inv.label || 'Invoice'}${job ? ' for ' + job : ''}: $${Number(inv.amount || 0).toFixed(2)}${inv.due_date ? '\nDue: ' + new Date(inv.due_date + 'T00:00:00').toLocaleDateString() : ''}${inv.payment_link ? '\n\nPay online: ' + inv.payment_link : ''}\n\nThank you,\n${profile.company_name || profile.full_name || ''}`
+    window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
+
   const addInvoice = async () => {
     if (!invoiceForm.project_id || !invoiceForm.amount) return setInlineError('Pick a job and enter an amount')
     setLoading(true); setInlineError('')
@@ -798,10 +815,10 @@ export default function OwnerDashboard({ profile }) {
         owner_id: profile.id, project_id: invoiceForm.project_id,
         label: invoiceForm.label || 'Invoice', amount: parseFloat(invoiceForm.amount || 0),
         issued_date: invoiceForm.issued_date || new Date().toISOString().split('T')[0],
-        due_date: invoiceForm.due_date || null, notes: invoiceForm.notes || null, status: 'unpaid'
+        due_date: invoiceForm.due_date || null, notes: invoiceForm.notes || null, payment_link: invoiceForm.payment_link || null, status: 'unpaid'
       })
       if (error) throw error
-      setShowNewInvoice(false); setInvoiceForm({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '' })
+      setShowNewInvoice(false); setInvoiceForm({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' })
       await fetchInvoices(); showToast('Invoice created ✓')
     } catch (e) { setInlineError('Failed to create invoice. Try again.') }
     setLoading(false)
@@ -2035,6 +2052,7 @@ export default function OwnerDashboard({ profile }) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
                     {est.status !== 'accepted' && <button onClick={() => openEditEstimate(est)} style={btnSm('#1C2B3A')}>Edit</button>}
                     {est.status === 'draft' && <button onClick={() => markEstimateStatus(est, 'sent')} style={btnSm('#E07B2A')}>Mark Sent</button>}
+                    {(est.status === 'draft' || est.status === 'sent') && <button onClick={() => emailEstimate(est)} style={btnSm('#6366F1')}>✉️ Email</button>}
                     {est.status !== 'accepted' && <button onClick={() => acceptEstimate(est)} style={btnSm('#16A34A')}>Accept → Job</button>}
                     {est.status !== 'accepted' && est.status !== 'declined' && <button onClick={() => markEstimateStatus(est, 'declined')} style={btnSmOutline()}>Decline</button>}
                     <button onClick={() => deleteEstimate(est)} style={btnSmOutline()}>Delete</button>
@@ -2082,7 +2100,11 @@ export default function OwnerDashboard({ profile }) {
                         </div>
                         <button onClick={() => markInvoicePaid(inv)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark Paid</button>
                       </div>
-                      <button onClick={() => deleteInvoice(inv)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '12px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px' }}>Delete</button>
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                        {inv.projects && inv.projects.client_email && <button onClick={() => emailInvoice(inv)} style={btnSm('#6366F1')}>✉️ Email</button>}
+                        {inv.payment_link && <a href={inv.payment_link} target="_blank" rel="noopener noreferrer" style={{ ...btnSm('#16A34A'), textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>💳 Pay link</a>}
+                        <button onClick={() => deleteInvoice(inv)} style={btnSmOutline()}>Delete</button>
+                      </div>
                     </div>
                   ))}
                   {paid.length > 0 && <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 8px', padding: '0 4px' }}>Paid</p>}
@@ -2286,6 +2308,7 @@ export default function OwnerDashboard({ profile }) {
             <div className="input-group"><label>Issued Date</label><input type="date" value={invoiceForm.issued_date} onChange={e => setInvoiceForm({ ...invoiceForm, issued_date: e.target.value })} /></div>
             <div className="input-group"><label>Due Date</label><input type="date" value={invoiceForm.due_date} onChange={e => setInvoiceForm({ ...invoiceForm, due_date: e.target.value })} /></div>
             <div className="input-group"><label>Notes (optional)</label><input value={invoiceForm.notes} onChange={e => setInvoiceForm({ ...invoiceForm, notes: e.target.value })} placeholder="50% deposit to start" /></div>
+            <div className="input-group"><label>Payment link <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input value={invoiceForm.payment_link} onChange={e => setInvoiceForm({ ...invoiceForm, payment_link: e.target.value })} placeholder="Your Stripe / Square / PayPal link" /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={addInvoice} disabled={loading}>{loading ? 'Creating...' : 'Create Invoice'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewInvoice(false); setInlineError('') }}>Cancel</button>
