@@ -13,11 +13,11 @@ const CATEGORY_LABELS = {
 const DEFAULT_MILEAGE_RATE = 0.70 // IRS standard business mileage rate — edit per trip to the current year's rate
 
 // Project detail sub-tabs (scrollable on narrow screens).
-const PROJECT_TABS = ['receipts', 'time', 'photos', 'documents', 'punch', 'materials', 'changes', 'log', 'mileage', 'schedule', 'budget']
+const PROJECT_TABS = ['receipts', 'time', 'photos', 'documents', 'punch', 'materials', 'changes', 'permits', 'log', 'mileage', 'schedule', 'budget']
 const PROJECT_TAB_LABELS = {
   receipts: 'Receipts', time: 'Time', photos: 'Photos', documents: 'Documents',
   punch: 'Punch List', materials: 'Shopping List', changes: 'Change Orders',
-  log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
+  permits: 'Permits', log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
 }
 
 // Estimate line-item math (pure; safe at module scope).
@@ -213,6 +213,15 @@ export default function OwnerDashboard({ profile }) {
   const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
   const [estimateItems, setEstimateItems] = useState([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
   const [upcomingSchedule, setUpcomingSchedule] = useState([])
+  const [complianceItems, setComplianceItems] = useState([])
+  const [warranties, setWarranties] = useState([])
+  const [permits, setPermits] = useState([])
+  const [showNewCompliance, setShowNewCompliance] = useState(false)
+  const [showNewWarranty, setShowNewWarranty] = useState(false)
+  const [showNewPermit, setShowNewPermit] = useState(false)
+  const [complianceForm, setComplianceForm] = useState({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
+  const [warrantyForm, setWarrantyForm] = useState({ project_id: '', description: '', status: 'open', due_on: '' })
+  const [permitForm, setPermitForm] = useState({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
 
@@ -381,6 +390,22 @@ export default function OwnerDashboard({ profile }) {
     } catch (e) { console.error('Upcoming schedule fetch failed:', e) }
   }, [profile.id])
 
+  const fetchCompliance = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('compliance_items').select('*').eq('owner_id', profile.id).order('expires_on', { ascending: true })
+      if (error) throw error
+      setComplianceItems(data || [])
+    } catch (e) { console.error('Compliance fetch failed:', e) }
+  }, [profile.id])
+
+  const fetchWarranties = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('warranties').select('*, projects(name)').eq('owner_id', profile.id).order('created_at', { ascending: false })
+      if (error) throw error
+      setWarranties(data || [])
+    } catch (e) { console.error('Warranties fetch failed:', e) }
+  }, [profile.id])
+
   useEffect(() => {
     Promise.all([fetchProjects(), fetchWorkers()]).finally(() => setInitialLoading(false))
   }, [fetchProjects, fetchWorkers])
@@ -409,7 +434,9 @@ export default function OwnerDashboard({ profile }) {
     if (activeTab === 'home') { fetchInvoices(); fetchEstimates(); fetchUpcomingSchedule() }
     if (activeTab === 'clients') fetchInvoices()
     if (activeTab === 'calendar') fetchUpcomingSchedule()
-  }, [activeTab, fetchInvoices, fetchEstimates, fetchUpcomingSchedule])
+    if (activeTab === 'compliance') fetchCompliance()
+    if (activeTab === 'warranties') fetchWarranties()
+  }, [activeTab, fetchInvoices, fetchEstimates, fetchUpcomingSchedule, fetchCompliance, fetchWarranties])
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
@@ -434,6 +461,8 @@ export default function OwnerDashboard({ profile }) {
       setMaterialItems(mt || [])
       const { data: dc } = await supabase.from('job_documents').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
       setJobDocuments(dc || [])
+      const { data: pm } = await supabase.from('permits').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
+      setPermits(pm || [])
     } catch (e) {
       showToast('Failed to load job details', 'error')
     }
@@ -699,6 +728,66 @@ export default function OwnerDashboard({ profile }) {
       if (error) throw error
       await fetchEstimates(); showToast('Estimate deleted ✓')
     } catch (e) { showToast('Failed to delete estimate', 'error') }
+  }
+
+  // ---- Compliance (insurance / license) ----
+  const addCompliance = async () => {
+    if (!complianceForm.name) return setInlineError('Add a name')
+    setLoading(true); setInlineError('')
+    try {
+      const { error } = await supabase.from('compliance_items').insert({ owner_id: profile.id, kind: complianceForm.kind, name: complianceForm.name, reference: complianceForm.reference || null, expires_on: complianceForm.expires_on || null, notes: complianceForm.notes || null })
+      if (error) throw error
+      setShowNewCompliance(false); setComplianceForm({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
+      await fetchCompliance(); showToast('Saved ✓')
+    } catch (e) { setInlineError('Failed to save. Try again.') }
+    setLoading(false)
+  }
+  const deleteCompliance = async (item) => {
+    if (!window.confirm('Delete this item?')) return
+    try { const { error } = await supabase.from('compliance_items').delete().eq('id', item.id); if (error) throw error; await fetchCompliance(); showToast('Deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
+  }
+
+  // ---- Warranties / callbacks ----
+  const addWarranty = async () => {
+    if (!warrantyForm.description) return setInlineError('Describe the callback')
+    setLoading(true); setInlineError('')
+    try {
+      const { error } = await supabase.from('warranties').insert({ owner_id: profile.id, project_id: warrantyForm.project_id || null, description: warrantyForm.description, status: warrantyForm.status, due_on: warrantyForm.due_on || null })
+      if (error) throw error
+      setShowNewWarranty(false); setWarrantyForm({ project_id: '', description: '', status: 'open', due_on: '' })
+      await fetchWarranties(); showToast('Saved ✓')
+    } catch (e) { setInlineError('Failed to save. Try again.') }
+    setLoading(false)
+  }
+  const cycleWarrantyStatus = async (w) => {
+    const next = w.status === 'open' ? 'scheduled' : w.status === 'scheduled' ? 'closed' : 'open'
+    try { const { error } = await supabase.from('warranties').update({ status: next }).eq('id', w.id); if (error) throw error; await fetchWarranties() } catch (e) { showToast('Failed to update', 'error') }
+  }
+  const deleteWarranty = async (w) => {
+    if (!window.confirm('Delete this callback?')) return
+    try { const { error } = await supabase.from('warranties').delete().eq('id', w.id); if (error) throw error; await fetchWarranties(); showToast('Deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
+  }
+
+  // ---- Permits & inspections (per job) ----
+  const addPermit = async () => {
+    if (!permitForm.name) return setInlineError('Name the permit')
+    setLoading(true); setInlineError('')
+    try {
+      const { error } = await supabase.from('permits').insert({ owner_id: profile.id, project_id: selectedProject.id, name: permitForm.name, status: permitForm.status, permit_number: permitForm.permit_number || null, inspection_on: permitForm.inspection_on || null, notes: permitForm.notes || null })
+      if (error) throw error
+      setShowNewPermit(false); setPermitForm({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
+      await fetchProjectDetails(selectedProject); showToast('Permit added ✓')
+    } catch (e) { setInlineError('Failed to add. Try again.') }
+    setLoading(false)
+  }
+  const cyclePermitStatus = async (p) => {
+    const order = ['applied', 'approved', 'inspection', 'passed', 'failed']
+    const next = order[(order.indexOf(p.status) + 1) % order.length]
+    try { const { error } = await supabase.from('permits').update({ status: next }).eq('id', p.id); if (error) throw error; await fetchProjectDetails(selectedProject) } catch (e) { showToast('Failed to update', 'error') }
+  }
+  const deletePermit = async (p) => {
+    if (!window.confirm('Delete this permit?')) return
+    try { const { error } = await supabase.from('permits').delete().eq('id', p.id); if (error) throw error; await fetchProjectDetails(selectedProject); showToast('Deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
   }
 
   const addInvoice = async () => {
@@ -1424,6 +1513,28 @@ export default function OwnerDashboard({ profile }) {
             </div>
           )}
 
+          {projectTab === 'permits' && (
+            <div>
+              <button className="btn-primary" onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add Permit</button>
+              {permits.map(p => {
+                const sc = (p.status === 'passed' || p.status === 'approved') ? 'status-end' : p.status === 'failed' ? 'status-start' : 'status-mid'
+                return (
+                  <div key={p.id} className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, paddingRight: '10px' }}>
+                        <h3>{p.name}</h3>
+                        <p>{p.permit_number ? `#${p.permit_number}` : ''}{p.inspection_on ? ` · inspection ${new Date(p.inspection_on + 'T00:00:00').toLocaleDateString()}` : ''}</p>
+                        <span className={'status-pill ' + sc} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cyclePermitStatus(p)}>{p.status}</span>
+                      </div>
+                      <button onClick={() => deletePermit(p)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                    </div>
+                  </div>
+                )
+              })}
+              {permits.length === 0 && <div className="empty-state"><p>Track permits and inspections for this job. Tap a status to advance it.</p></div>}
+            </div>
+          )}
+
           {projectTab === 'log' && (
             <div>
               <button className="btn-primary" onClick={() => { setShowNewLog(true); setInlineError('') }}>+ Add Log Entry</button>
@@ -1556,6 +1667,21 @@ export default function OwnerDashboard({ profile }) {
           </div>
         )}
 
+        {showNewPermit && (
+          <div className="modal-overlay" onClick={() => { setShowNewPermit(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Add Permit</h2>
+              <div className="input-group"><label>Permit</label><input value={permitForm.name} onChange={e => setPermitForm({ ...permitForm, name: e.target.value })} placeholder="Electrical permit" /></div>
+              <div className="input-group"><label>Status</label><select value={permitForm.status} onChange={e => setPermitForm({ ...permitForm, status: e.target.value })}><option value="applied">Applied</option><option value="approved">Approved</option><option value="inspection">Inspection scheduled</option><option value="passed">Passed</option><option value="failed">Failed</option></select></div>
+              <div className="input-group"><label>Permit # (optional)</label><input value={permitForm.permit_number} onChange={e => setPermitForm({ ...permitForm, permit_number: e.target.value })} placeholder="B-2026-0481" /></div>
+              <div className="input-group"><label>Inspection date (optional)</label><input type="date" value={permitForm.inspection_on} onChange={e => setPermitForm({ ...permitForm, inspection_on: e.target.value })} /></div>
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={addPermit} disabled={loading}>{loading ? 'Saving...' : 'Add Permit'}</button>
+              <button className="btn-secondary" onClick={() => { setShowNewPermit(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
         {showNewChange && (
           <div className="modal-overlay" onClick={() => { setShowNewChange(false); setInlineError('') }}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
@@ -1596,11 +1722,71 @@ export default function OwnerDashboard({ profile }) {
     <div>
       <div className="topbar"><h1>RUN-SITE</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
       <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
-        {['home', 'jobs', 'estimates', 'invoices', 'clients', 'calendar', 'workers', 'payroll', 'reports'].map(t => (
+        {['home', 'jobs', 'estimates', 'invoices', 'clients', 'calendar', 'workers', 'payroll', 'reports', 'more'].map(t => (
           <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
       <div className="page">
+
+        {activeTab === 'more' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
+            {[['compliance', '🛡️ Insurance & Licenses', 'Track expirations'], ['warranties', '🔧 Warranties & Callbacks', 'Post-job follow-ups']].map(([key, title, sub]) => (
+              <div key={key} className="card" style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setActiveTab(key)}>
+                <div><h3>{title}</h3><p>{sub}</p></div>
+                <span style={{ color: '#888', fontSize: '22px' }}>›</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {activeTab === 'compliance' && (
+          <div>
+            <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
+            <button className="btn-primary" onClick={() => { setShowNewCompliance(true); setInlineError('') }}>+ Add Insurance / License</button>
+            {complianceItems.map(it => {
+              const days = it.expires_on ? Math.ceil((new Date(it.expires_on + 'T00:00:00') - new Date()) / 86400000) : null
+              const color = days == null ? '#888' : days < 0 ? '#DC2626' : days <= 30 ? '#E07B2A' : '#16A34A'
+              const label = days == null ? '' : days < 0 ? 'EXPIRED' : days <= 30 ? `${days}d left` : 'OK'
+              return (
+                <div key={it.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <h3>{it.name}</h3>
+                      <p style={{ textTransform: 'capitalize' }}>{it.kind}{it.reference ? ` · ${it.reference}` : ''}</p>
+                      {it.expires_on && <p style={{ fontSize: '12px', color, fontWeight: '600', marginTop: '2px' }}>Expires {new Date(it.expires_on + 'T00:00:00').toLocaleDateString()}{label ? ` · ${label}` : ''}</p>}
+                    </div>
+                    <button onClick={() => deleteCompliance(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                  </div>
+                </div>
+              )
+            })}
+            {complianceItems.length === 0 && <div className="empty-state"><p>Track your insurance and licenses here — get a heads-up before they expire.</p></div>}
+          </div>
+        )}
+
+        {activeTab === 'warranties' && (
+          <div>
+            <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
+            <button className="btn-primary" onClick={() => { setShowNewWarranty(true); setInlineError('') }}>+ Add Callback</button>
+            {warranties.map(w => {
+              const sc = w.status === 'closed' ? 'status-end' : w.status === 'scheduled' ? 'status-mid' : 'status-start'
+              return (
+                <div key={w.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, paddingRight: '10px' }}>
+                      <h3>{w.description}</h3>
+                      <p>{w.projects ? w.projects.name : ''}{w.due_on ? ` · due ${new Date(w.due_on + 'T00:00:00').toLocaleDateString()}` : ''}</p>
+                      <span className={'status-pill ' + sc} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cycleWarrantyStatus(w)}>{w.status}</span>
+                    </div>
+                    <button onClick={() => deleteWarranty(w)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                  </div>
+                </div>
+              )
+            })}
+            {warranties.length === 0 && <div className="empty-state"><p>Log callbacks and warranty work so nothing slips after the job's done. Tap a status to advance it.</p></div>}
+          </div>
+        )}
 
         {activeTab === 'home' && (
           <div>
@@ -2019,6 +2205,36 @@ export default function OwnerDashboard({ profile }) {
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewJob(false); setInlineError('') }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {showNewCompliance && (
+        <div className="modal-overlay" onClick={() => { setShowNewCompliance(false); setInlineError('') }}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+            <h2>Insurance / License</h2>
+            <div className="input-group"><label>Type</label><select value={complianceForm.kind} onChange={e => setComplianceForm({ ...complianceForm, kind: e.target.value })}><option value="insurance">Insurance</option><option value="license">License</option><option value="certification">Certification</option></select></div>
+            <div className="input-group"><label>Name</label><input value={complianceForm.name} onChange={e => setComplianceForm({ ...complianceForm, name: e.target.value })} placeholder="General Liability" /></div>
+            <div className="input-group"><label>Policy / License #</label><input value={complianceForm.reference} onChange={e => setComplianceForm({ ...complianceForm, reference: e.target.value })} placeholder="GL-100482" /></div>
+            <div className="input-group"><label>Expires</label><input type="date" value={complianceForm.expires_on} onChange={e => setComplianceForm({ ...complianceForm, expires_on: e.target.value })} /></div>
+            <div className="input-group"><label>Notes (optional)</label><input value={complianceForm.notes} onChange={e => setComplianceForm({ ...complianceForm, notes: e.target.value })} placeholder="Carrier, agent, etc." /></div>
+            {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+            <button className="btn-primary" onClick={addCompliance} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
+            <button className="btn-secondary" onClick={() => { setShowNewCompliance(false); setInlineError('') }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {showNewWarranty && (
+        <div className="modal-overlay" onClick={() => { setShowNewWarranty(false); setInlineError('') }}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+            <h2>Add Callback</h2>
+            <div className="input-group"><label>Job (optional)</label><select value={warrantyForm.project_id} onChange={e => setWarrantyForm({ ...warrantyForm, project_id: e.target.value })}><option value="">— None —</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div className="input-group"><label>What's the callback?</label><input value={warrantyForm.description} onChange={e => setWarrantyForm({ ...warrantyForm, description: e.target.value })} placeholder="Re-caulk shower (warranty)" /></div>
+            <div className="input-group"><label>Due (optional)</label><input type="date" value={warrantyForm.due_on} onChange={e => setWarrantyForm({ ...warrantyForm, due_on: e.target.value })} /></div>
+            {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+            <button className="btn-primary" onClick={addWarranty} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
+            <button className="btn-secondary" onClick={() => { setShowNewWarranty(false); setInlineError('') }}>Cancel</button>
           </div>
         </div>
       )}
