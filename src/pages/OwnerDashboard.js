@@ -443,6 +443,11 @@ export default function OwnerDashboard({ profile }) {
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
+    // Clear the previous job's detail data first, so opening job B never
+    // flashes job A's receipts/photos/etc. while these queries are in flight.
+    setReceipts([]); setTimeEntries([]); setScheduleEntries([]); setMileageEntries([])
+    setDailyLogs([]); setChangeOrders([]); setJobPhotos([]); setPunchItems([])
+    setMaterialItems([]); setJobDocuments([]); setPermits([])
     try {
       const { data: r } = await supabase.from('receipts').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
       setReceipts(r || [])
