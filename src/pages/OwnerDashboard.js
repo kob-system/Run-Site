@@ -433,7 +433,7 @@ export default function OwnerDashboard({ profile }) {
   }, [activeTab, fetchEstimates])
 
   useEffect(() => {
-    if (activeTab === 'home') { fetchInvoices(); fetchEstimates(); fetchUpcomingSchedule() }
+    if (activeTab === 'home') { fetchInvoices(); fetchEstimates(); fetchUpcomingSchedule(); fetchCompliance() }
     if (activeTab === 'clients') fetchInvoices()
     if (activeTab === 'calendar') fetchUpcomingSchedule()
     if (activeTab === 'compliance') fetchCompliance()
@@ -1905,17 +1905,35 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'home' && (
           <div>
-            {projects.length === 0 && !initialLoading && (
-              <div className="card" style={{ border: '2px solid #E07B2A', marginBottom: '4px' }}>
-                <h2 style={{ fontSize: '19px', fontWeight: '800', color: '#1C2B3A', marginBottom: '4px' }}>👋 Welcome to Run-Site</h2>
-                <p style={{ fontSize: '13px', color: '#717171', marginBottom: '16px', lineHeight: '1.5' }}>Let's get your business set up — three quick steps and you're tracking jobs, crew, and profit on every project.</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <button className="btn-primary" onClick={() => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') }}>1 · Create your first job</button>
-                  <button className="btn-secondary" onClick={() => setActiveTab('workers')}>2 · Add your crew</button>
-                  <button className="btn-secondary" onClick={() => setActiveTab('estimates')}>3 · Send your first estimate</button>
+            {!initialLoading && (() => {
+              const steps = [
+                { key: 'job', label: 'Create your first job', done: projects.length > 0, cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') } },
+                { key: 'crew', label: 'Add your crew', done: workers.length > 0, cta: () => setActiveTab('workers') },
+                { key: 'estimate', label: 'Send your first estimate', done: estimates.length > 0, cta: () => setActiveTab('estimates') },
+                { key: 'invoice', label: 'Create your first invoice', done: invoices.length > 0, cta: () => setActiveTab('invoices') },
+                { key: 'compliance', label: 'Add your insurance & license info', done: complianceItems.length > 0, cta: () => setActiveTab('compliance') },
+              ]
+              const doneCount = steps.filter(s => s.done).length
+              if (doneCount === steps.length) return null
+              return (
+                <div className="card" style={{ border: '2px solid #E07B2A', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#1C2B3A' }}>👋 Get set up</h2>
+                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#E07B2A' }}>{doneCount} of {steps.length} done</span>
+                  </div>
+                  <p style={{ fontSize: '13px', color: '#717171', marginBottom: '14px', lineHeight: '1.5' }}>A few quick steps to get the most out of Run-Site — they check off automatically as you go.</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {steps.map((s, i) => (
+                      <div key={s.key} role={s.done ? undefined : 'button'} tabIndex={s.done ? undefined : 0} onClick={s.done ? undefined : s.cta} onKeyDown={s.done ? undefined : (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.cta() } })} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '10px', border: '1px solid #eee', background: s.done ? '#F0FDF4' : 'white', cursor: s.done ? 'default' : 'pointer' }}>
+                        <span style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '700', background: s.done ? '#16A34A' : '#1C2B3A', color: 'white' }}>{s.done ? '✓' : i + 1}</span>
+                        <span style={{ flex: 1, fontSize: '14px', fontWeight: '600', color: s.done ? '#9CA3AF' : '#1C2B3A', textDecoration: s.done ? 'line-through' : 'none' }}>{s.label}</span>
+                        {!s.done && <span style={{ color: '#E07B2A', fontSize: '18px' }}>›</span>}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
             <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
               <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
               <p style={{ fontSize: '30px', fontWeight: '800', color: '#F59E0B' }}>{formatCurrency(owedTotal)}</p>
