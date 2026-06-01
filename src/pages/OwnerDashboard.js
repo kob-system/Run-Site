@@ -324,6 +324,17 @@ export default function OwnerDashboard({ profile }) {
     }
   }, [profile.id])
 
+  const fetchInvoices = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('invoices')
+        .select('*, projects(name, client_name)')
+        .eq('owner_id', profile.id)
+        .order('issued_date', { ascending: false })
+      if (error) throw error
+      setInvoices(data || [])
+    } catch (e) { console.error('Invoices fetch failed:', e) }
+  }, [profile.id])
+
   useEffect(() => {
     Promise.all([fetchProjects(), fetchWorkers()]).finally(() => setInitialLoading(false))
   }, [fetchProjects, fetchWorkers])
@@ -479,17 +490,6 @@ export default function OwnerDashboard({ profile }) {
   }
 
   // ---- Invoices (what the client owes / has paid) ----
-  const fetchInvoices = useCallback(async () => {
-    try {
-      const { data, error } = await supabase.from('invoices')
-        .select('*, projects(name, client_name)')
-        .eq('owner_id', profile.id)
-        .order('issued_date', { ascending: false })
-      if (error) throw error
-      setInvoices(data || [])
-    } catch (e) { console.error('Invoices fetch failed:', e) }
-  }, [profile.id])
-
   const addInvoice = async () => {
     if (!invoiceForm.project_id || !invoiceForm.amount) return setInlineError('Pick a job and enter an amount')
     setLoading(true); setInlineError('')
