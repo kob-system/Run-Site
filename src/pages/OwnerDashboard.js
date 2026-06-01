@@ -25,7 +25,7 @@ const PROJECT_TAB_LABELS = {
 // Estimate line-item math (pure; safe at module scope).
 const ESTIMATE_KINDS = [['materials', 'Materials'], ['labor', 'Labor'], ['other', 'Other']]
 const estItemAmount = (it) => (parseFloat(it && it.qty) || 0) * (parseFloat(it && it.unit_price) || 0)
-const estSubtotal = (items) => (items || []).reduce((s, it) => s + estItemAmount(it), 0)
+const estSubtotal = (items) => (Array.isArray(items) ? items : []).reduce((s, it) => s + estItemAmount(it), 0)
 const estTotal = (items, taxRate) => { const sub = estSubtotal(items); return sub + sub * (parseFloat(taxRate) || 0) / 100 }
 const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
 const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
@@ -909,6 +909,7 @@ export default function OwnerDashboard({ profile }) {
   }
 
   const confirmScan = () => {
+    if (!scanResult) return
     setReceiptForm(f => ({ ...f, store: scanResult.store, amount: scanResult.amount }))
     setScanResult(null)
   }
@@ -2223,7 +2224,7 @@ export default function OwnerDashboard({ profile }) {
           <div>
             <div className="input-group">
               <label>Year</label>
-              <select value={reportYear} onChange={e => setReportYear(parseInt(e.target.value))}>
+              <select value={reportYear} onChange={e => setReportYear(parseInt(e.target.value, 10))}>
                 {reportYears.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
