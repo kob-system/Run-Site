@@ -27,6 +27,7 @@ const estSubtotal = (items) => (items || []).reduce((s, it) => s + estItemAmount
 const estTotal = (items, taxRate) => { const sub = estSubtotal(items); return sub + sub * (parseFloat(taxRate) || 0) / 100 }
 const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
 const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
+const sectionLabel = { fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '18px 0 8px', padding: '0 4px' }
 
 // Sunday-start week key (YYYY-MM-DD), used to group pay into weekly paychecks.
 const dateKey = (d) => {
@@ -149,7 +150,7 @@ function JobPhoto({ path, alt, style, onClick }) {
 }
 
 export default function OwnerDashboard({ profile }) {
-  const [activeTab, setActiveTab] = useState('jobs')
+  const [activeTab, setActiveTab] = useState('home')
   const [projects, setProjects] = useState([])
   const [workers, setWorkers] = useState([])
   const [workerStats, setWorkerStats] = useState({}) // keyed by worker id
@@ -211,6 +212,7 @@ export default function OwnerDashboard({ profile }) {
   const [editingEstimateId, setEditingEstimateId] = useState(null)
   const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
   const [estimateItems, setEstimateItems] = useState([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
+  const [upcomingSchedule, setUpcomingSchedule] = useState([])
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
 
@@ -366,6 +368,19 @@ export default function OwnerDashboard({ profile }) {
     } catch (e) { console.error('Estimates fetch failed:', e) }
   }, [profile.id])
 
+  const fetchUpcomingSchedule = useCallback(async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      const { data, error } = await supabase.from('schedule_entries')
+        .select('*, projects(name), profiles!schedule_entries_worker_id_fkey(full_name)')
+        .eq('owner_id', profile.id)
+        .gte('scheduled_date', today)
+        .order('scheduled_date', { ascending: true })
+      if (error) throw error
+      setUpcomingSchedule(data || [])
+    } catch (e) { console.error('Upcoming schedule fetch failed:', e) }
+  }, [profile.id])
+
   useEffect(() => {
     Promise.all([fetchProjects(), fetchWorkers()]).finally(() => setInitialLoading(false))
   }, [fetchProjects, fetchWorkers])
@@ -389,6 +404,12 @@ export default function OwnerDashboard({ profile }) {
   useEffect(() => {
     if (activeTab === 'estimates') fetchEstimates()
   }, [activeTab, fetchEstimates])
+
+  useEffect(() => {
+    if (activeTab === 'home') { fetchInvoices(); fetchEstimates(); fetchUpcomingSchedule() }
+    if (activeTab === 'clients') fetchInvoices()
+    if (activeTab === 'calendar') fetchUpcomingSchedule()
+  }, [activeTab, fetchInvoices, fetchEstimates, fetchUpcomingSchedule])
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
@@ -1089,6 +1110,30 @@ export default function OwnerDashboard({ profile }) {
   const completedProjects = projects.filter(p => p.stage === 'end')
   const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
 
+  // ---- Home / Clients / Calendar derived data ----
+  const owedTotal = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.amount || 0), 0)
+  const openEstimateCount = estimates.filter(e => e.status !== 'accepted' && e.status !== 'declined').length
+  const budgetAlerts = activeProjects.filter(p => {
+    const s = spendOf(p.id)
+    return getBudgetPct(s.materials, p.materials_budget) >= 80 || getBudgetPct(s.labor, p.labor_budget) >= 80
+  })
+  const weekEndKey = addDaysKey(dateKey(new Date()), 7)
+  const thisWeekSchedule = upcomingSchedule.filter(s => s.scheduled_date && s.scheduled_date <= weekEndKey)
+  const clientsMap = {}
+  projects.forEach(p => {
+    const name = (p.client_name || '').trim(); if (!name) return
+    if (!clientsMap[name]) clientsMap[name] = { name, phone: '', email: '', jobs: 0, contract: 0, billed: 0, owed: 0 }
+    const c = clientsMap[name]
+    c.jobs += 1; c.contract += contractOf(p)
+    if (!c.phone && p.client_phone) c.phone = p.client_phone
+    if (!c.email && p.client_email) c.email = p.client_email
+  })
+  invoices.forEach(inv => {
+    const name = inv.projects && inv.projects.client_name ? inv.projects.client_name.trim() : null
+    if (name && clientsMap[name]) { clientsMap[name].billed += inv.amount || 0; if (inv.status !== 'paid') clientsMap[name].owed += inv.amount || 0 }
+  })
+  const clientsList = Object.values(clientsMap).sort((a, b) => b.contract - a.contract)
+
   const reportYears = [new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2]
   const reportJobs = completedProjects.filter(p => p.completed_at && new Date(p.completed_at).getFullYear() === reportYear)
 
@@ -1551,11 +1596,93 @@ export default function OwnerDashboard({ profile }) {
     <div>
       <div className="topbar"><h1>RUN-SITE</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
       <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
-        {['jobs', 'estimates', 'workers', 'payroll', 'invoices', 'reports'].map(t => (
+        {['home', 'jobs', 'estimates', 'invoices', 'clients', 'calendar', 'workers', 'payroll', 'reports'].map(t => (
           <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
       <div className="page">
+
+        {activeTab === 'home' && (
+          <div>
+            <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
+              <p style={{ fontSize: '30px', fontWeight: '800', color: '#F59E0B' }}>{formatCurrency(owedTotal)}</p>
+              <div style={{ display: 'flex', gap: '24px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '18px', fontWeight: '700' }}>{activeProjects.length}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open quotes</p><p style={{ fontSize: '18px', fontWeight: '700' }}>{openEstimateCount}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Proj. profit</p><p style={{ fontSize: '18px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(projectedProfit)}</p></div>
+              </div>
+            </div>
+            {budgetAlerts.length > 0 && (
+              <>
+                <p style={sectionLabel}>Budget alerts</p>
+                {budgetAlerts.map(p => {
+                  const s = spendOf(p.id)
+                  const over = getBudgetPct(s.materials, p.materials_budget) >= 100 || getBudgetPct(s.labor, p.labor_budget) >= 100
+                  return <div key={p.id} className={over ? 'alert-danger' : 'alert-warning'} style={{ cursor: 'pointer' }} onClick={() => fetchProjectDetails(p)}>{over ? '🔴' : '⚠️'} {p.name} — {over ? 'over budget' : 'approaching limit'}</div>
+                })}
+              </>
+            )}
+            <p style={sectionLabel}>This week</p>
+            {thisWeekSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled this week.</p></div>}
+            {thisWeekSchedule.map(s => (
+              <div key={s.id} className="card" style={{ padding: '12px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <p style={{ fontWeight: '600', fontSize: '14px' }}>{s.profiles ? s.profiles.full_name : 'Worker'} · {s.task_description}</p>
+                    <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : ''}</p>
+                  </div>
+                  <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', whiteSpace: 'nowrap', marginLeft: '10px' }}>{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {activeTab === 'clients' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Everyone you've worked with — jobs, what they're worth, and what they still owe.</p>
+            {clientsList.map(c => (
+              <div key={c.name} className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h3>{c.name}</h3>
+                    <p>{c.jobs} job{c.jobs !== 1 ? 's' : ''} · {formatCurrency(c.contract)} total</p>
+                    {c.owed > 0 && <p style={{ color: '#DC2626', fontWeight: '600', fontSize: '13px', marginTop: '2px' }}>{formatCurrency(c.owed)} owed</p>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
+                    {c.phone && <a href={`tel:${c.phone}`} style={{ background: '#16A34A', color: 'white', textDecoration: 'none', padding: '8px 11px', borderRadius: '8px', fontSize: '14px' }}>📞</a>}
+                    {c.phone && <a href={`sms:${c.phone}`} style={{ background: '#1C2B3A', color: 'white', textDecoration: 'none', padding: '8px 11px', borderRadius: '8px', fontSize: '14px' }}>💬</a>}
+                    {c.email && <a href={`mailto:${c.email}`} style={{ background: '#E07B2A', color: 'white', textDecoration: 'none', padding: '8px 11px', borderRadius: '8px', fontSize: '14px' }}>✉️</a>}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {clientsList.length === 0 && <div className="empty-state"><p>No clients yet. Add a job with a client name and they'll show up here.</p></div>}
+          </div>
+        )}
+
+        {activeTab === 'calendar' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Everything coming up across all your jobs.</p>
+            {upcomingSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Assign crew from a job's Schedule tab.</p></div>}
+            {(() => {
+              const byDay = {}
+              upcomingSchedule.forEach(s => { const k = s.scheduled_date || 'unscheduled'; (byDay[k] = byDay[k] || []).push(s) })
+              return Object.keys(byDay).sort().map(day => (
+                <div key={day}>
+                  <p className="schedule-day">{day !== 'unscheduled' ? new Date(day + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : 'Unscheduled'}</p>
+                  {byDay[day].map(s => (
+                    <div key={s.id} className="card" style={{ padding: '12px 16px' }}>
+                      <p style={{ fontWeight: '600', fontSize: '14px' }}>{s.profiles ? s.profiles.full_name : 'Worker'} · {s.task_description}</p>
+                      <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : ''}{s.start_time ? ` · ${(s.start_time || '').slice(0, 5)}–${(s.end_time || '').slice(0, 5)}` : ''}</p>
+                    </div>
+                  ))}
+                </div>
+              ))
+            })()}
+          </div>
+        )}
 
         {activeTab === 'jobs' && (
           <div>
