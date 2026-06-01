@@ -33,6 +33,9 @@ export default async function handler(req, res) {
   if (!imageBase64 || typeof imageBase64 !== 'string') {
     return res.status(400).json({ error: 'Missing image' })
   }
+  if (imageBase64.length > 7_000_000) {
+    return res.status(413).json({ error: 'Image too large. Please use a smaller photo.' })
+  }
   if (!ALLOWED_MEDIA.includes(mediaType)) {
     return res.status(415).json({ error: 'Unsupported image type' })
   }

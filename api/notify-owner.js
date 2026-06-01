@@ -41,6 +41,9 @@ export default async function handler(req, res) {
   if (!workerId) return res.status(401).json({ success: false, error: 'Unauthorized' })
 
   const { projectId, action, timestamp } = req.body || {}
+  if (action !== 'in' && action !== 'out') {
+    return res.status(400).json({ error: 'invalid action' })
+  }
 
   try {
     // Worker (name + their owner) resolved from the AUTHENTICATED id, not the body.
@@ -63,7 +66,9 @@ export default async function handler(req, res) {
 
     let jobName = 'a job'
     if (projectId) {
-      const projRows = await sbGet(`projects?id=eq.${encodeURIComponent(projectId)}&select=name`)
+      // Tenant-scope: only resolve the name if the project belongs to THIS worker's owner,
+      // so an authenticated worker can't read an arbitrary project's name by guessing a UUID.
+      const projRows = await sbGet(`projects?id=eq.${encodeURIComponent(projectId)}&owner_id=eq.${encodeURIComponent(worker.owner_id)}&select=name`)
       if (projRows && projRows[0] && projRows[0].name) jobName = projRows[0].name
     }
 
