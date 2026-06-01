@@ -50,6 +50,7 @@ export default function WorkerDashboard({ profile }) {
   const [editClockIn, setEditClockIn] = useState('')
   const [editClockOut, setEditClockOut] = useState('')
   const [history, setHistory] = useState([])
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [scheduleError, setScheduleError] = useState('')
   const [clockReady, setClockReady] = useState(false)
@@ -93,18 +94,38 @@ export default function WorkerDashboard({ profile }) {
   useEffect(() => {
     fetchAssignedProjects()
     fetchSchedule()
+    fetchHistory()   // populate the "This week" summary up front
   }, [])
 
-  // One assigned job? Auto-pick it so the worker just taps the big button.
+  // One assigned job? Always pin selection to it so a reassignment is reflected.
+  // If the selected job is no longer assigned, clear the stale selection.
   useEffect(() => {
-    if (projects.length === 1 && !selectedProject) setSelectedProject(projects[0].id)
+    if (projects.length === 1) {
+      setSelectedProject(projects[0].id)
+    } else if (selectedProject && !projects.some(p => p.id === selectedProject)) {
+      setSelectedProject('')
+    }
   }, [projects, selectedProject])
 
   // Verify clock-in status on load AND whenever connectivity returns, so an
-  // offline-at-launch worker isn't permanently gated out of clocking in.
+  // offline-at-launch worker isn't permanently gated out of clocking in. Also
+  // re-fetch jobs/schedule/history on reconnect so a worker who launched offline
+  // isn't stranded on "No jobs assigned" / a stale summary until a full reload.
   useEffect(() => {
-    if (isOnline) checkActiveEntry()
+    if (isOnline) {
+      checkActiveEntry()
+      fetchAssignedProjects()
+      fetchSchedule()
+      fetchHistory()
+    }
   }, [isOnline])
+
+  // Guard sign-out: if hours are saved on this phone but not yet synced,
+  // confirm before logging out so a worker can't accidentally lose them.
+  const handleSignOut = () => {
+    if (offlineEntry && !window.confirm("You have hours saved on this phone that haven't synced yet. Sign out anyway?")) return
+    supabase.auth.signOut()
+  }
 
   const showToast = (msg) => {
     setToast(msg)
@@ -207,18 +228,24 @@ export default function WorkerDashboard({ profile }) {
     if (isOnline && offlineEntry) attemptSync()
   }, [isOnline, offlineEntry, attemptSync])
 
-  // Timer — runs off whichever entry is active
+  // Timer — runs off whichever entry is active. Only ticks while the clock tab
+  // is showing (and the page is visible) to save battery; elapsed is always
+  // recomputed from clocked_in_at, so the display is correct the instant the
+  // worker returns to the clock tab — nothing drifts while it's paused.
   useEffect(() => {
-    let interval
     const entry = activeEntry || offlineEntry
-    if (entry) {
-      interval = setInterval(() => {
-        const diff = Math.floor((Date.now() - new Date(entry.clocked_in_at).getTime()) / 1000)
-        setTimer(diff)
-      }, 1000)
+    if (!entry) return
+    const tick = () => {
+      const diff = Math.floor((Date.now() - new Date(entry.clocked_in_at).getTime()) / 1000)
+      setTimer(diff)
     }
+    tick()   // recompute immediately so returning to the tab shows the right time at once
+    if (activeTab !== 'clock' || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+      return
+    }
+    const interval = setInterval(tick, 1000)
     return () => clearInterval(interval)
-  }, [activeEntry, offlineEntry])
+  }, [activeEntry, offlineEntry, activeTab])
 
   const fetchHistory = async () => {
     setHistoryError('')
@@ -233,6 +260,7 @@ export default function WorkerDashboard({ profile }) {
         .order('clocked_in_at', { ascending: false })
       if (error) throw error
       setHistory(data || [])
+      setHistoryLoaded(true)
     } catch (e) {
       setHistoryError("Couldn't load your history. Check your connection and try again.")
     }
@@ -406,10 +434,14 @@ export default function WorkerDashboard({ profile }) {
     setEditError('')
     if (!editClockIn) return setEditError('Clock-in time is required')
     const clockInDate = new Date(editClockIn)
+    const nowMs = Date.now()
+    if (clockInDate.getTime() > nowMs) return setEditError("Clock-in time can't be in the future.")
     const updated = { ...offlineEntry, clocked_in_at: clockInDate.toISOString() }
     if (editClockOut) {
       const clockOutDate = new Date(editClockOut)
+      if (clockOutDate.getTime() > nowMs) return setEditError("Clock-out time can't be in the future.")
       if (clockOutDate <= clockInDate) return setEditError('Clock-out must be after clock-in')
+      if (clockOutDate - clockInDate > 24 * 60 * 60 * 1000) return setEditError('That shift is over 24 hours — please check the times.')
       const totalMinutes = Math.floor((clockOutDate - clockInDate) / 60000)
       const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
       updated.clocked_out_at = clockOutDate.toISOString()
@@ -438,8 +470,24 @@ export default function WorkerDashboard({ profile }) {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
 
+  // Turn an "HH:MM" / "HH:MM:SS" clock string into a 12-hour am/pm label
+  // (e.g. "13:00:00" -> "1:00 PM"). Returns '' for null/empty/malformed input.
+  const formatScheduleTime = (t) => {
+    if (!t || typeof t !== 'string') return ''
+    const parts = t.split(':')
+    const h = parseInt(parts[0], 10)
+    const m = parseInt(parts[1], 10)
+    if (isNaN(h) || isNaN(m)) return ''
+    const ampm = h < 12 ? 'AM' : 'PM'
+    const hour12 = h % 12 === 0 ? 12 : h % 12
+    return `${hour12}:${String(m).padStart(2, '0')} ${ampm}`
+  }
+
+  const currentEntry = activeEntry || offlineEntry
+
   // This week's hours + pay from loaded history, so the worker can always see
-  // what they've banked. Week starts Sunday, local time.
+  // what they've banked. Week starts Sunday, local time. Includes the live
+  // currently-active shift (elapsed so far) so the total isn't understated.
   const weekStats = (() => {
     const now = new Date()
     const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay())
@@ -450,10 +498,16 @@ export default function WorkerDashboard({ profile }) {
         pay += e.labor_cost || 0
       }
     })
+    // Add the in-progress shift's elapsed time/pay (it's not in `history`, which
+    // only contains completed entries, and a fresh clock-in may not be there yet).
+    if (currentEntry && currentEntry.clocked_in_at && new Date(currentEntry.clocked_in_at) >= weekStart) {
+      const liveMins = Math.max(0, Math.floor((Date.now() - new Date(currentEntry.clocked_in_at)) / 60000))
+      mins += liveMins
+      pay += (liveMins / 60) * (profile.hourly_rate || 0)
+    }
     return { mins, pay }
   })()
 
-  const currentEntry = activeEntry || offlineEntry
   const isOfflineMode = !!offlineEntry && !activeEntry
 
   return (
@@ -462,14 +516,14 @@ export default function WorkerDashboard({ profile }) {
         <h1>RUN-SITE</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {!isOnline && <span style={{ fontSize: '11px', background: 'rgba(255,255,255,0.2)', padding: '3px 8px', borderRadius: '12px' }}>📶 Offline</span>}
-          <button onClick={() => supabase.auth.signOut()}>Sign Out</button>
+          <button onClick={handleSignOut}>Sign Out</button>
         </div>
       </div>
 
       <div className="tabs" style={{ margin: '16px 16px 0' }}>
         <button className={'tab ' + (activeTab === 'clock' ? 'active' : '')} onClick={() => setActiveTab('clock')}>Clock In/Out</button>
         <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>My Schedule</button>
-        <button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => { setActiveTab('history'); fetchHistory() }}>History</button>
+        <button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => setActiveTab('history')}>History</button>
       </div>
 
       <div className="page">
@@ -518,7 +572,7 @@ export default function WorkerDashboard({ profile }) {
                     {loading ? 'Clocking Out...' : 'Clock Out'}
                   </button>
                   {isOfflineMode && (
-                    <button onClick={() => { setEditError(''); setShowEditOffline(true); setEditClockIn(toLocalDatetimeInput(offlineEntry.clocked_in_at)) }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', cursor: 'pointer', display: 'block', margin: '0 auto', minHeight: '44px' }}>
+                    <button onClick={() => { setEditError(''); setShowEditOffline(true); setEditClockIn(toLocalDatetimeInput(offlineEntry.clocked_in_at)); setEditClockOut('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', cursor: 'pointer', display: 'block', margin: '0 auto', minHeight: '44px' }}>
                       ✏️ Edit clock-in time
                     </button>
                   )}
@@ -547,7 +601,7 @@ export default function WorkerDashboard({ profile }) {
                     <p className="schedule-day">{new Date(entry.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
                     <h3>{entry.projects?.name}</h3>
                     <p>{entry.task_description}</p>
-                    {entry.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{entry.start_time} — {entry.end_time}</p>}
+                    {entry.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{formatScheduleTime(entry.start_time)}{entry.end_time ? ` — ${formatScheduleTime(entry.end_time)}` : ''}</p>}
                   </div>
                 ))
             }
@@ -558,8 +612,8 @@ export default function WorkerDashboard({ profile }) {
           <div>
             <div className="card" style={{ background: '#1C2B3A', color: 'white', textAlign: 'center', marginBottom: '12px' }}>
               <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>This week</p>
-              <p style={{ fontSize: '28px', fontWeight: '800' }}>{formatTime(weekStats.mins)}</p>
-              {profile.hourly_rate ? <p style={{ fontSize: '14px', color: '#16A34A', fontWeight: '700' }}>≈ ${weekStats.pay.toFixed(2)} this week</p> : null}
+              <p style={{ fontSize: '28px', fontWeight: '800' }}>{historyLoaded ? formatTime(weekStats.mins) : '—'}</p>
+              {profile.hourly_rate ? <p style={{ fontSize: '14px', color: '#16A34A', fontWeight: '700' }}>≈ {historyLoaded ? `$${weekStats.pay.toFixed(2)}` : '—'} this week</p> : null}
             </div>
             {historyError
               ? <div className="alert-danger">{historyError} <button onClick={fetchHistory} style={{ background: 'none', border: 'none', color: 'white', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry</button></div>
@@ -598,7 +652,7 @@ export default function WorkerDashboard({ profile }) {
 
       {/* EDIT OFFLINE ENTRY MODAL */}
       {showEditOffline && (
-        <div className="modal-overlay" onClick={() => { setShowEditOffline(false); setEditError('') }}>
+        <div className="modal-overlay" onClick={() => { setShowEditOffline(false); setEditError(''); setEditClockOut('') }}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>Edit Clock-In</h2>
             <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '16px' }}>Saved offline. You can correct the time or add a clock-out if needed.</p>
@@ -612,7 +666,7 @@ export default function WorkerDashboard({ profile }) {
             </div>
             {editError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{editError}</p>}
             <button className="btn-primary" onClick={saveOfflineEdit}>Save</button>
-            <button className="btn-secondary" onClick={() => { setShowEditOffline(false); setEditError('') }}>Cancel</button>
+            <button className="btn-secondary" onClick={() => { setShowEditOffline(false); setEditError(''); setEditClockOut('') }}>Cancel</button>
           </div>
         </div>
       )}
