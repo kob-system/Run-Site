@@ -13,9 +13,10 @@ const CATEGORY_LABELS = {
 const DEFAULT_MILEAGE_RATE = 0.70 // IRS standard business mileage rate — edit per trip to the current year's rate
 
 // Project detail sub-tabs (scrollable on narrow screens).
-const PROJECT_TABS = ['receipts', 'time', 'photos', 'changes', 'log', 'mileage', 'schedule', 'budget']
+const PROJECT_TABS = ['receipts', 'time', 'photos', 'documents', 'punch', 'materials', 'changes', 'log', 'mileage', 'schedule', 'budget']
 const PROJECT_TAB_LABELS = {
-  receipts: 'Receipts', time: 'Time', photos: 'Photos', changes: 'Change Orders',
+  receipts: 'Receipts', time: 'Time', photos: 'Photos', documents: 'Documents',
+  punch: 'Punch List', materials: 'Shopping List', changes: 'Change Orders',
   log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
 }
 
@@ -190,6 +191,12 @@ export default function OwnerDashboard({ profile }) {
   const [dailyLogs, setDailyLogs] = useState([])
   const [changeOrders, setChangeOrders] = useState([])
   const [jobPhotos, setJobPhotos] = useState([])
+  const [punchItems, setPunchItems] = useState([])
+  const [materialItems, setMaterialItems] = useState([])
+  const [jobDocuments, setJobDocuments] = useState([])
+  const [punchInput, setPunchInput] = useState('')
+  const [materialInput, setMaterialInput] = useState({ name: '', qty: '' })
+  const [uploadingDoc, setUploadingDoc] = useState(false)
   const [invoices, setInvoices] = useState([])
   const [showNewLog, setShowNewLog] = useState(false)
   const [showNewChange, setShowNewChange] = useState(false)
@@ -400,6 +407,12 @@ export default function OwnerDashboard({ profile }) {
       setChangeOrders(cor || [])
       const { data: ph } = await supabase.from('job_photos').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
       setJobPhotos(ph || [])
+      const { data: pu } = await supabase.from('punch_items').select('*').eq('project_id', project.id).order('created_at', { ascending: true })
+      setPunchItems(pu || [])
+      const { data: mt } = await supabase.from('material_items').select('*').eq('project_id', project.id).order('created_at', { ascending: true })
+      setMaterialItems(mt || [])
+      const { data: dc } = await supabase.from('job_documents').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
+      setJobDocuments(dc || [])
     } catch (e) {
       showToast('Failed to load job details', 'error')
     }
@@ -491,6 +504,73 @@ export default function OwnerDashboard({ profile }) {
   }
 
   // ---- Job photos (image stored in the private 'receipts' bucket) ----
+  // ---- Punch list ----
+  const addPunch = async () => {
+    if (!punchInput.trim()) return
+    try {
+      const { error } = await supabase.from('punch_items').insert({ owner_id: profile.id, project_id: selectedProject.id, description: punchInput.trim() })
+      if (error) throw error
+      setPunchInput(''); await fetchProjectDetails(selectedProject)
+    } catch (e) { showToast('Failed to add item', 'error') }
+  }
+  const togglePunch = async (item) => {
+    try {
+      const { error } = await supabase.from('punch_items').update({ done: !item.done }).eq('id', item.id)
+      if (error) throw error
+      setPunchItems(items => items.map(it => it.id === item.id ? { ...it, done: !it.done } : it))
+    } catch (e) { showToast('Failed to update', 'error') }
+  }
+  const deletePunch = async (item) => {
+    try { const { error } = await supabase.from('punch_items').delete().eq('id', item.id); if (error) throw error; setPunchItems(items => items.filter(it => it.id !== item.id)) } catch (e) { showToast('Failed to delete', 'error') }
+  }
+
+  // ---- Shopping list (materials) ----
+  const addMaterial = async () => {
+    if (!materialInput.name.trim()) return
+    try {
+      const { error } = await supabase.from('material_items').insert({ owner_id: profile.id, project_id: selectedProject.id, name: materialInput.name.trim(), qty: materialInput.qty.trim() || null })
+      if (error) throw error
+      setMaterialInput({ name: '', qty: '' }); await fetchProjectDetails(selectedProject)
+    } catch (e) { showToast('Failed to add item', 'error') }
+  }
+  const toggleMaterial = async (item) => {
+    try {
+      const { error } = await supabase.from('material_items').update({ bought: !item.bought }).eq('id', item.id)
+      if (error) throw error
+      setMaterialItems(items => items.map(it => it.id === item.id ? { ...it, bought: !it.bought } : it))
+    } catch (e) { showToast('Failed to update', 'error') }
+  }
+  const deleteMaterial = async (item) => {
+    try { const { error } = await supabase.from('material_items').delete().eq('id', item.id); if (error) throw error; setMaterialItems(items => items.filter(it => it.id !== item.id)) } catch (e) { showToast('Failed to delete', 'error') }
+  }
+
+  // ---- Job documents (file in 'receipts' bucket) ----
+  const addDocument = async (e) => {
+    const file = e.target.files[0]; if (!file) return
+    setUploadingDoc(true)
+    try {
+      const fileName = `${profile.id}/docs/${Date.now()}_${file.name}`
+      const { error: upErr } = await supabase.storage.from('receipts').upload(fileName, file)
+      if (upErr) throw upErr
+      const { error } = await supabase.from('job_documents').insert({ owner_id: profile.id, project_id: selectedProject.id, name: file.name, file_url: fileName })
+      if (error) throw error
+      await fetchProjectDetails(selectedProject); showToast('Document added ✓')
+    } catch (err) { showToast('Upload failed', 'error') }
+    setUploadingDoc(false)
+  }
+  const openDocument = async (doc) => {
+    try {
+      if (/^https?:\/\//.test(doc.file_url)) { window.open(doc.file_url, '_blank'); return }
+      const { data } = await supabase.storage.from('receipts').createSignedUrl(doc.file_url, 300)
+      if (data && data.signedUrl) window.open(data.signedUrl, '_blank')
+      else showToast('Could not open file', 'error')
+    } catch (e) { showToast('Could not open file', 'error') }
+  }
+  const deleteDocument = async (doc) => {
+    if (!window.confirm('Delete this document?')) return
+    try { const { error } = await supabase.from('job_documents').delete().eq('id', doc.id); if (error) throw error; await fetchProjectDetails(selectedProject); showToast('Document deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
+  }
+
   const addJobPhoto = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -1216,6 +1296,60 @@ export default function OwnerDashboard({ profile }) {
                 ))}
               </div>
               {jobPhotos.length === 0 && <div className="empty-state"><p>No photos yet. Snap before/after shots — great for clients and your portfolio.</p></div>}
+            </div>
+          )}
+
+          {projectTab === 'documents' && (
+            <div>
+              <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
+                {uploadingDoc ? 'Uploading…' : '📎 Add Document'}
+                <input type="file" onChange={addDocument} disabled={uploadingDoc} style={{ display: 'none' }} />
+              </label>
+              {jobDocuments.map(doc => (
+                <div key={doc.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => openDocument(doc)}>
+                    <h3 style={{ color: '#E07B2A' }}>📄 {doc.name}</h3>
+                    <p style={{ fontSize: '11px', color: '#717171' }}>{doc.created_at ? new Date(doc.created_at).toLocaleDateString() : ''} · tap to open</p>
+                  </div>
+                  <button onClick={() => deleteDocument(doc)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '20px', cursor: 'pointer', padding: '0 6px' }}>×</button>
+                </div>
+              ))}
+              {jobDocuments.length === 0 && <div className="empty-state"><p>No documents yet. Add the contract, permit, or plans for this job.</p></div>}
+            </div>
+          )}
+
+          {projectTab === 'punch' && (
+            <div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
+              </div>
+              {punchItems.map(it => (
+                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                  <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
+                  <button onClick={() => deletePunch(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                </div>
+              ))}
+              {punchItems.length === 0 && <div className="empty-state"><p>Nothing left on the punch list. Add what's left before you call it done.</p></div>}
+            </div>
+          )}
+
+          {projectTab === 'materials' && (
+            <div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
+              </div>
+              {materialItems.map(it => (
+                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                  <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
+                  <button onClick={() => deleteMaterial(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                </div>
+              ))}
+              {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them.</p></div>}
             </div>
           )}
 
