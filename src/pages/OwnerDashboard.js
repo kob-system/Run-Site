@@ -3,6 +3,8 @@ import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
 import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
+import { downloadCsv } from '../utils/csv'
+import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 
 // Deduction categories an accountant wants broken out at tax time.
 const RECEIPT_CATEGORIES = ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other']
@@ -1043,20 +1045,27 @@ export default function OwnerDashboard({ profile }) {
     showToast('Report exported ✓')
   }
 
-  const downloadCsv = (rows, filename) => {
-    const csv = rows.map(r => r.map(cell => {
-      const v = String(cell)
-      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v
-    }).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+  // downloadCsv extracted to ../utils/csv (imported above).
+
+  const exportQboInvoices = async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase.from('invoices')
+        .select('*, projects(name, client_name)')
+        .eq('owner_id', profile.id)
+        .order('issued_date', { ascending: true })
+      if (error) throw error
+      if (!data || !data.length) { showToast('No invoices to export', 'error'); setLoading(false); return }
+      downloadCsv(buildQboInvoicesCsv(data), 'run-site-quickbooks-invoices.csv')
+      showToast('QuickBooks invoices exported ✓')
+    } catch (e) { showToast('Export failed', 'error') }
+    setLoading(false)
+  }
+  const exportQboCustomers = () => {
+    const rows = buildQboCustomersCsv(projects)
+    if (rows.length <= 1) { showToast('No customers to export', 'error'); return }
+    downloadCsv(rows, 'run-site-quickbooks-customers.csv')
+    showToast('QuickBooks customers exported ✓')
   }
 
   // A full, accountant-ready summary for the year: income from completed jobs,
@@ -2134,6 +2143,12 @@ export default function OwnerDashboard({ profile }) {
               <select value={reportYear} onChange={e => setReportYear(parseInt(e.target.value))}>
                 {reportYears.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
+            </div>
+            <div className="card">
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '1px' }}>Send to QuickBooks</p>
+              <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '10px' }}>Download, then in QuickBooks: <b>⚙ Settings → Import Data → Invoices</b> (or Customers) and match the columns.</p>
+              <button className="btn-secondary" onClick={exportQboInvoices} disabled={loading} style={{ marginBottom: '8px' }}>⬇ Invoices for QuickBooks (CSV)</button>
+              <button className="btn-secondary" onClick={exportQboCustomers}>⬇ Customers for QuickBooks (CSV)</button>
             </div>
             {reportJobs.length > 0 ? (
               <>
