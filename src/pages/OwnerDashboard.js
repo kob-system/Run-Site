@@ -98,7 +98,7 @@ function PhotoViewer({ receipt, onClose, onDelete }) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h2 style={{ fontSize: '18px', fontWeight: '700' }}>{receipt.description}</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
+          <button aria-label="Close" onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
         </div>
         {receipt.photo_url
           ? (imgUrl
@@ -1304,7 +1304,7 @@ export default function OwnerDashboard({ profile }) {
     return (
       <div>
         <div className="topbar">
-          <button onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
+          <button aria-label="Back" onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
           <span className={'status-pill status-' + selectedProject.stage}>{selectedProject.stage}</span>
         </div>
@@ -1403,7 +1403,7 @@ export default function OwnerDashboard({ profile }) {
             <div>
               <button className="btn-primary" onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add Receipt</button>
               {receipts.map(r => (
-                <div key={r.id} className="card" onClick={() => setPhotoViewer(r)} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
+                <div key={r.id} className="card" role="button" tabIndex={0} onClick={() => setPhotoViewer(r)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPhotoViewer(r) } }} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
                       <h3>{r.description}</h3>
@@ -1509,11 +1509,11 @@ export default function OwnerDashboard({ profile }) {
               </label>
               {jobDocuments.map(doc => (
                 <div key={doc.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => openDocument(doc)}>
+                  <div style={{ flex: 1, cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => openDocument(doc)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDocument(doc) } }}>
                     <h3 style={{ color: '#E07B2A' }}>📄 {doc.name}</h3>
                     <p style={{ fontSize: '11px', color: '#717171' }}>{doc.created_at ? new Date(doc.created_at).toLocaleDateString() : ''} · tap to open</p>
                   </div>
-                  <button onClick={() => deleteDocument(doc)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '20px', cursor: 'pointer', padding: '0 6px' }}>×</button>
+                  <button aria-label="Delete document" onClick={() => deleteDocument(doc)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '20px', cursor: 'pointer', padding: '0 6px' }}>×</button>
                 </div>
               ))}
               {jobDocuments.length === 0 && <div className="empty-state"><p>No documents yet. Add the contract, permit, or plans for this job.</p></div>}
@@ -1530,7 +1530,7 @@ export default function OwnerDashboard({ profile }) {
                 <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
                   <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
                   <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
-                  <button onClick={() => deletePunch(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                  <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
                 </div>
               ))}
               {punchItems.length === 0 && <div className="empty-state"><p>Nothing left on the punch list. Add what's left before you call it done.</p></div>}
@@ -1548,7 +1548,7 @@ export default function OwnerDashboard({ profile }) {
                 <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
                   <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
                   <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
-                  <button onClick={() => deleteMaterial(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                  <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
                 </div>
               ))}
               {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them.</p></div>}
@@ -1592,9 +1592,9 @@ export default function OwnerDashboard({ profile }) {
                       <div style={{ flex: 1, paddingRight: '10px' }}>
                         <h3>{p.name}</h3>
                         <p>{p.permit_number ? `#${p.permit_number}` : ''}{p.inspection_on ? ` · inspection ${new Date(p.inspection_on + 'T00:00:00').toLocaleDateString()}` : ''}</p>
-                        <span className={'status-pill ' + sc} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cyclePermitStatus(p)}>{p.status}</span>
+                        <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={`Status: ${p.status}. Activate to advance.`} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cyclePermitStatus(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cyclePermitStatus(p) } }}>{p.status}</span>
                       </div>
-                      <button onClick={() => deletePermit(p)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                      <button aria-label="Remove permit" onClick={() => deletePermit(p)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
                     </div>
                   </div>
                 )
@@ -1770,7 +1770,7 @@ export default function OwnerDashboard({ profile }) {
             <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: '20px 20px 0 0', padding: '20px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h2 style={{ fontSize: '18px', fontWeight: '700' }}>{photoLightbox.caption || 'Job photo'}</h2>
-                <button onClick={() => setPhotoLightbox(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
+                <button aria-label="Close" onClick={() => setPhotoLightbox(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
               </div>
               <JobPhoto path={photoLightbox.photo_url} alt={photoLightbox.caption} style={{ width: '100%', borderRadius: '12px', objectFit: 'contain', maxHeight: '60vh', background: '#eef1f5' }} />
               <p style={{ fontSize: '12px', color: '#717171', marginTop: '10px' }}>{photoLightbox.created_at ? new Date(photoLightbox.created_at).toLocaleDateString() : ''}</p>
@@ -1800,7 +1800,7 @@ export default function OwnerDashboard({ profile }) {
           <div>
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
             {[['insights', '📊 Insights', 'Charts: money owed, collected, win rate, profit'], ['compliance', '🛡️ Insurance & Licenses', 'Track expirations'], ['warranties', '🔧 Warranties & Callbacks', 'Post-job follow-ups']].map(([key, title, sub]) => (
-              <div key={key} className="card" style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setActiveTab(key)}>
+              <div key={key} className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setActiveTab(key)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(key) } }}>
                 <div><h3>{title}</h3><p>{sub}</p></div>
                 <span style={{ color: '#888', fontSize: '22px' }}>›</span>
               </div>
@@ -1824,7 +1824,7 @@ export default function OwnerDashboard({ profile }) {
                       <p style={{ textTransform: 'capitalize' }}>{it.kind}{it.reference ? ` · ${it.reference}` : ''}</p>
                       {it.expires_on && <p style={{ fontSize: '12px', color, fontWeight: '600', marginTop: '2px' }}>Expires {new Date(it.expires_on + 'T00:00:00').toLocaleDateString()}{label ? ` · ${label}` : ''}</p>}
                     </div>
-                    <button onClick={() => deleteCompliance(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                    <button aria-label="Delete item" onClick={() => deleteCompliance(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
                   </div>
                 </div>
               )
@@ -1845,9 +1845,9 @@ export default function OwnerDashboard({ profile }) {
                     <div style={{ flex: 1, paddingRight: '10px' }}>
                       <h3>{w.description}</h3>
                       <p>{w.projects ? w.projects.name : ''}{w.due_on ? ` · due ${new Date(w.due_on + 'T00:00:00').toLocaleDateString()}` : ''}</p>
-                      <span className={'status-pill ' + sc} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cycleWarrantyStatus(w)}>{w.status}</span>
+                      <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={`Status: ${w.status}. Activate to advance.`} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cycleWarrantyStatus(w)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleWarrantyStatus(w) } }}>{w.status}</span>
                     </div>
-                    <button onClick={() => deleteWarranty(w)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                    <button aria-label="Delete callback" onClick={() => deleteWarranty(w)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
                   </div>
                 </div>
               )
@@ -1920,7 +1920,7 @@ export default function OwnerDashboard({ profile }) {
                 {budgetAlerts.map(p => {
                   const s = spendOf(p.id)
                   const over = getBudgetPct(s.materials, p.materials_budget) >= 100 || getBudgetPct(s.labor, p.labor_budget) >= 100
-                  return <div key={p.id} className={over ? 'alert-danger' : 'alert-warning'} style={{ cursor: 'pointer' }} onClick={() => fetchProjectDetails(p)}>{over ? '🔴' : '⚠️'} {p.name} — {over ? 'over budget' : 'approaching limit'}</div>
+                  return <div key={p.id} className={over ? 'alert-danger' : 'alert-warning'} role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }}>{over ? '🔴' : '⚠️'} {p.name} — {over ? 'over budget' : 'approaching limit'}</div>
                 })}
               </>
             )}
@@ -2002,7 +2002,7 @@ export default function OwnerDashboard({ profile }) {
                   const matPct = getBudgetPct(s.materials, p.materials_budget)
                   const labPct = getBudgetPct(s.labor, p.labor_budget)
                   return (
-                    <div key={p.id} className="card" onClick={() => fetchProjectDetails(p)} style={{ cursor: 'pointer' }}>
+                    <div key={p.id} className="card" role="button" tabIndex={0} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }} style={{ cursor: 'pointer' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <div><h3>{p.name}</h3><p>{p.client_name}</p></div>
                         <span className={'status-pill status-' + p.stage}>{p.stage}</span>
@@ -2026,7 +2026,7 @@ export default function OwnerDashboard({ profile }) {
               <div>
                 <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 8px', padding: '0 4px' }}>Completed</p>
                 {completedProjects.map(p => (
-                  <div key={p.id} className="card" onClick={() => fetchProjectDetails(p)} style={{ cursor: 'pointer', background: '#f9fafb' }}>
+                  <div key={p.id} className="card" role="button" tabIndex={0} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }} style={{ cursor: 'pointer', background: '#f9fafb' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <h3 style={{ color: '#666' }}>{p.name}</h3>
@@ -2382,7 +2382,7 @@ export default function OwnerDashboard({ profile }) {
                   <span style={{ color: '#888' }}>×</span>
                   <input type="number" value={it.unit_price} onChange={e => setEstimateItem(i, 'unit_price', e.target.value)} placeholder="Unit $" style={{ flex: 1, minWidth: '0', padding: '8px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
                   <select value={it.kind} onChange={e => setEstimateItem(i, 'kind', e.target.value)} style={{ padding: '8px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '13px' }}>{ESTIMATE_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-                  {estimateItems.length > 1 && <button onClick={() => removeEstimateRow(i)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '20px', cursor: 'pointer', padding: '0 4px', lineHeight: '1' }}>×</button>}
+                  {estimateItems.length > 1 && <button aria-label="Remove line" onClick={() => removeEstimateRow(i)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '20px', cursor: 'pointer', padding: '0 4px', lineHeight: '1' }}>×</button>}
                 </div>
                 <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', textAlign: 'right', marginTop: '4px' }}>{formatCurrency(estItemAmount(it))}</p>
               </div>
