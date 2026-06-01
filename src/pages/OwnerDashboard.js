@@ -12,6 +12,13 @@ const CATEGORY_LABELS = {
 }
 const DEFAULT_MILEAGE_RATE = 0.70 // IRS standard business mileage rate — edit per trip to the current year's rate
 
+// Project detail sub-tabs (scrollable on narrow screens).
+const PROJECT_TABS = ['receipts', 'time', 'photos', 'changes', 'log', 'mileage', 'schedule', 'budget']
+const PROJECT_TAB_LABELS = {
+  receipts: 'Receipts', time: 'Time', photos: 'Photos', changes: 'Change Orders',
+  log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
+}
+
 // Sunday-start week key (YYYY-MM-DD), used to group pay into weekly paychecks.
 const dateKey = (d) => {
   const x = new Date(d)
@@ -111,6 +118,27 @@ function PhotoViewer({ receipt, onClose, onDelete }) {
   )
 }
 
+// Renders a job photo whose source may be a full URL (seed/demo data) or a
+// storage path in the private 'receipts' bucket (real uploads → signed URL).
+function JobPhoto({ path, alt, style, onClick }) {
+  const [url, setUrl] = useState(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    let active = true
+    setUrl(null); setErr(false)
+    if (!path) { setErr(true); return }
+    if (/^https?:\/\//.test(path)) { setUrl(path); return }
+    supabase.storage.from('receipts').createSignedUrl(path, 3600)
+      .then(({ data }) => { if (active) { if (data && data.signedUrl) setUrl(data.signedUrl); else setErr(true) } })
+      .catch(() => { if (active) setErr(true) })
+    return () => { active = false }
+  }, [path])
+  const base = { background: '#eef1f5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }
+  if (err) return <div onClick={onClick} style={{ ...base, ...style }}>📷</div>
+  if (!url) return <div onClick={onClick} style={{ ...base, ...style }} />
+  return <img src={url} alt={alt || 'Job photo'} onClick={onClick} style={style} />
+}
+
 export default function OwnerDashboard({ profile }) {
   const [activeTab, setActiveTab] = useState('jobs')
   const [projects, setProjects] = useState([])
@@ -124,7 +152,7 @@ export default function OwnerDashboard({ profile }) {
   const [scheduleEntries, setScheduleEntries] = useState([])
   const [showNewJob, setShowNewJob] = useState(false)
   const [showEditJob, setShowEditJob] = useState(false)
-  const [editJobForm, setEditJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
+  const [editJobForm, setEditJobForm] = useState({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [showNewReceipt, setShowNewReceipt] = useState(false)
   const [showNewSchedule, setShowNewSchedule] = useState(false)
   const [showAssignWorker, setShowAssignWorker] = useState(null)
@@ -141,7 +169,7 @@ export default function OwnerDashboard({ profile }) {
   const [toastType, setToastType] = useState('success')
   const [inlineError, setInlineError] = useState('')
   const [reportYear, setReportYear] = useState(new Date().getFullYear())
-  const [jobForm, setJobForm] = useState({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
+  const [jobForm, setJobForm] = useState({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
   const [scheduleForm, setScheduleForm] = useState({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
   const [mileageEntries, setMileageEntries] = useState([])
@@ -149,6 +177,20 @@ export default function OwnerDashboard({ profile }) {
   const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
   const [payroll, setPayroll] = useState([])
   const [paychecks, setPaychecks] = useState([])
+  // Getting-paid + field features
+  const [coByProject, setCoByProject] = useState({}) // approved change-order $ per project id
+  const [dailyLogs, setDailyLogs] = useState([])
+  const [changeOrders, setChangeOrders] = useState([])
+  const [jobPhotos, setJobPhotos] = useState([])
+  const [invoices, setInvoices] = useState([])
+  const [showNewLog, setShowNewLog] = useState(false)
+  const [showNewChange, setShowNewChange] = useState(false)
+  const [showNewInvoice, setShowNewInvoice] = useState(false)
+  const [photoLightbox, setPhotoLightbox] = useState(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [logForm, setLogForm] = useState({ log_date: '', weather: '', note: '' })
+  const [changeForm, setChangeForm] = useState({ description: '', amount: '', status: 'approved' })
+  const [invoiceForm, setInvoiceForm] = useState({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '' })
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
 
@@ -252,12 +294,13 @@ export default function OwnerDashboard({ profile }) {
   // columns. This keeps profit accurate, counts every receipt category, and
   // means editing/deleting a record self-corrects the totals automatically.
   const fetchSpend = useCallback(async (projectList) => {
-    if (!projectList?.length) { setSpendByProject({}); return }
+    if (!projectList?.length) { setSpendByProject({}); setCoByProject({}); return }
     try {
       const ids = projectList.map(p => p.id)
-      const [{ data: rcpts }, { data: times }] = await Promise.all([
+      const [{ data: rcpts }, { data: times }, { data: cos }] = await Promise.all([
         supabase.from('receipts').select('project_id, amount, category').eq('owner_id', profile.id),
-        supabase.from('time_entries').select('project_id, labor_cost').in('project_id', ids).not('clocked_out_at', 'is', null)
+        supabase.from('time_entries').select('project_id, labor_cost').in('project_id', ids).not('clocked_out_at', 'is', null),
+        supabase.from('change_orders').select('project_id, amount, status').eq('owner_id', profile.id)
       ])
       const spend = {}
       ids.forEach(id => { spend[id] = { materials: 0, labor: 0, other: 0 } })
@@ -270,7 +313,12 @@ export default function OwnerDashboard({ profile }) {
         if (!spend[t.project_id]) spend[t.project_id] = { materials: 0, labor: 0, other: 0 }
         spend[t.project_id].labor += t.labor_cost || 0
       })
+      const co = {}
+      ;(cos || []).forEach(c => {
+        if (c.status === 'approved') co[c.project_id] = (co[c.project_id] || 0) + (c.amount || 0)
+      })
       setSpendByProject(spend)
+      setCoByProject(co)
     } catch (e) {
       console.error('Spend fetch failed:', e)
     }
@@ -292,6 +340,10 @@ export default function OwnerDashboard({ profile }) {
     if (activeTab === 'payroll' && workers.length) fetchPayroll()
   }, [activeTab, workers, fetchPayroll])
 
+  useEffect(() => {
+    if (activeTab === 'invoices') fetchInvoices()
+  }, [activeTab, fetchInvoices])
+
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
     try {
@@ -303,6 +355,12 @@ export default function OwnerDashboard({ profile }) {
       setScheduleEntries(s || [])
       const { data: m } = await supabase.from('mileage_entries').select('*').eq('project_id', project.id).order('trip_date', { ascending: false })
       setMileageEntries(m || [])
+      const { data: lg } = await supabase.from('daily_logs').select('*').eq('project_id', project.id).order('log_date', { ascending: false })
+      setDailyLogs(lg || [])
+      const { data: cor } = await supabase.from('change_orders').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
+      setChangeOrders(cor || [])
+      const { data: ph } = await supabase.from('job_photos').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
+      setJobPhotos(ph || [])
     } catch (e) {
       showToast('Failed to load job details', 'error')
     }
@@ -343,6 +401,129 @@ export default function OwnerDashboard({ profile }) {
     }
   }
 
+  // ---- Daily logs ----
+  const addLog = async () => {
+    if (!logForm.note) return setInlineError('Write a quick note first')
+    setLoading(true); setInlineError('')
+    try {
+      const { error } = await supabase.from('daily_logs').insert({
+        owner_id: profile.id, project_id: selectedProject.id,
+        log_date: logForm.log_date || new Date().toISOString().split('T')[0],
+        weather: logForm.weather || null, note: logForm.note
+      })
+      if (error) throw error
+      setShowNewLog(false); setLogForm({ log_date: '', weather: '', note: '' })
+      await fetchProjectDetails(selectedProject); showToast('Log saved ✓')
+    } catch (e) { setInlineError('Failed to save log. Try again.') }
+    setLoading(false)
+  }
+  const deleteLog = async (entry) => {
+    if (!window.confirm('Delete this log entry?')) return
+    try {
+      const { error } = await supabase.from('daily_logs').delete().eq('id', entry.id)
+      if (error) throw error
+      await fetchProjectDetails(selectedProject); showToast('Log deleted ✓')
+    } catch (e) { showToast('Failed to delete log', 'error') }
+  }
+
+  // ---- Change orders ----
+  const addChangeOrder = async () => {
+    if (!changeForm.description || !changeForm.amount) return setInlineError('Describe the change and its price')
+    setLoading(true); setInlineError('')
+    try {
+      const { error } = await supabase.from('change_orders').insert({
+        owner_id: profile.id, project_id: selectedProject.id,
+        description: changeForm.description, amount: parseFloat(changeForm.amount || 0),
+        status: changeForm.status
+      })
+      if (error) throw error
+      setShowNewChange(false); setChangeForm({ description: '', amount: '', status: 'approved' })
+      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Change order added ✓')
+    } catch (e) { setInlineError('Failed to add change order. Try again.') }
+    setLoading(false)
+  }
+  const deleteChangeOrder = async (co) => {
+    if (!window.confirm('Delete this change order?')) return
+    try {
+      const { error } = await supabase.from('change_orders').delete().eq('id', co.id)
+      if (error) throw error
+      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Change order deleted ✓')
+    } catch (e) { showToast('Failed to delete change order', 'error') }
+  }
+
+  // ---- Job photos (image stored in the private 'receipts' bucket) ----
+  const addJobPhoto = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploadingPhoto(true)
+    try {
+      const fileName = `${profile.id}/jobphotos/${Date.now()}_${file.name}`
+      const { error: upErr } = await supabase.storage.from('receipts').upload(fileName, file)
+      if (upErr) throw upErr
+      const { error } = await supabase.from('job_photos').insert({
+        owner_id: profile.id, project_id: selectedProject.id, photo_url: fileName, caption: null
+      })
+      if (error) throw error
+      await fetchProjectDetails(selectedProject); showToast('Photo added ✓')
+    } catch (err) { showToast('Photo upload failed', 'error') }
+    setUploadingPhoto(false)
+  }
+  const deleteJobPhoto = async (photo) => {
+    if (!window.confirm('Delete this photo?')) return
+    try {
+      const { error } = await supabase.from('job_photos').delete().eq('id', photo.id)
+      if (error) throw error
+      setPhotoLightbox(null)
+      await fetchProjectDetails(selectedProject); showToast('Photo deleted ✓')
+    } catch (e) { showToast('Failed to delete photo', 'error') }
+  }
+
+  // ---- Invoices (what the client owes / has paid) ----
+  const fetchInvoices = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('invoices')
+        .select('*, projects(name, client_name)')
+        .eq('owner_id', profile.id)
+        .order('issued_date', { ascending: false })
+      if (error) throw error
+      setInvoices(data || [])
+    } catch (e) { console.error('Invoices fetch failed:', e) }
+  }, [profile.id])
+
+  const addInvoice = async () => {
+    if (!invoiceForm.project_id || !invoiceForm.amount) return setInlineError('Pick a job and enter an amount')
+    setLoading(true); setInlineError('')
+    try {
+      const { error } = await supabase.from('invoices').insert({
+        owner_id: profile.id, project_id: invoiceForm.project_id,
+        label: invoiceForm.label || 'Invoice', amount: parseFloat(invoiceForm.amount || 0),
+        issued_date: invoiceForm.issued_date || new Date().toISOString().split('T')[0],
+        due_date: invoiceForm.due_date || null, notes: invoiceForm.notes || null, status: 'unpaid'
+      })
+      if (error) throw error
+      setShowNewInvoice(false); setInvoiceForm({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '' })
+      await fetchInvoices(); showToast('Invoice created ✓')
+    } catch (e) { setInlineError('Failed to create invoice. Try again.') }
+    setLoading(false)
+  }
+  const markInvoicePaid = async (inv) => {
+    setLoading(true)
+    try {
+      const { error } = await supabase.from('invoices').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', inv.id)
+      if (error) throw error
+      await fetchInvoices(); showToast('Marked paid ✓')
+    } catch (e) { showToast('Failed to update invoice', 'error') }
+    setLoading(false)
+  }
+  const deleteInvoice = async (inv) => {
+    if (!window.confirm('Delete this invoice?')) return
+    try {
+      const { error } = await supabase.from('invoices').delete().eq('id', inv.id)
+      if (error) throw error
+      await fetchInvoices(); showToast('Invoice deleted ✓')
+    } catch (e) { showToast('Failed to delete invoice', 'error') }
+  }
+
   const createJob = async () => {
     if (!jobForm.name) return setInlineError('Job name is required')
     setLoading(true)
@@ -351,13 +532,14 @@ export default function OwnerDashboard({ profile }) {
       const total = computeContractPrice(jobForm.materials_budget, jobForm.labor_budget, jobForm.profit_target)
       const { error } = await supabase.from('projects').insert({
         owner_id: profile.id, name: jobForm.name, client_name: jobForm.client_name,
+        client_phone: jobForm.client_phone || null, client_email: jobForm.client_email || null, client_address: jobForm.client_address || null,
         budget: total, materials_budget: parseFloat(jobForm.materials_budget || 0),
         labor_budget: parseFloat(jobForm.labor_budget || 0), profit_target: parseFloat(jobForm.profit_target || 0),
         stage: 'start'
       })
       if (error) throw error
       setShowNewJob(false)
-      setJobForm({ name: '', client_name: '', materials_budget: '', labor_budget: '', profit_target: '' })
+      setJobForm({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
       await fetchProjects()
       showToast('Job created ✓')
     } catch (e) {
@@ -515,9 +697,9 @@ export default function OwnerDashboard({ profile }) {
     const tot = { rev: 0, mat: 0, lab: 0, oth: 0, prof: 0 }
     reportJobs.forEach(p => {
       const s = spendOf(p.id)
-      const rev = r2(p.budget), mat = r2(s.materials), lab = r2(s.labor), oth = r2(s.other)
+      const rev = r2(contractOf(p)), mat = r2(s.materials), lab = r2(s.labor), oth = r2(s.other)
       const profit = r2(profitOf(p))
-      const margin = computeMargin(profit, p.budget)
+      const margin = computeMargin(profit, contractOf(p))
       tot.rev += rev; tot.mat += mat; tot.lab += lab; tot.oth += oth; tot.prof += profit
       rows.push([
         p.name || '', p.client_name || '',
@@ -587,7 +769,7 @@ export default function OwnerDashboard({ profile }) {
       const mileageDeduction = (miles || []).reduce((s, m) => s + (m.miles || 0) * (m.rate || 0), 0)
       const laborTotal = (timesRes.data || []).reduce((s, t) => s + (t.labor_cost || 0), 0)
       const expensesTotal = Object.values(byCat).reduce((s, v) => s + v, 0)
-      const income = reportJobs.reduce((s, p) => s + (p.budget || 0), 0)
+      const income = reportJobs.reduce((s, p) => s + contractOf(p), 0)
       const deductions = expensesTotal + laborTotal + mileageDeduction
 
       const rows = []
@@ -596,7 +778,7 @@ export default function OwnerDashboard({ profile }) {
       rows.push([])
       rows.push(['INCOME — completed jobs'])
       rows.push(['Job', 'Client', 'Completed', 'Revenue'])
-      reportJobs.forEach(p => rows.push([p.name || '', p.client_name || '', p.completed_at ? new Date(p.completed_at).toLocaleDateString() : '', r2(p.budget).toFixed(2)]))
+      reportJobs.forEach(p => rows.push([p.name || '', p.client_name || '', p.completed_at ? new Date(p.completed_at).toLocaleDateString() : '', r2(contractOf(p)).toFixed(2)]))
       rows.push(['', '', 'TOTAL INCOME', r2(income).toFixed(2)])
       rows.push([])
       rows.push(['DEDUCTIBLE EXPENSES — by category'])
@@ -667,6 +849,9 @@ export default function OwnerDashboard({ profile }) {
     setEditJobForm({
       name: selectedProject.name || '',
       client_name: selectedProject.client_name || '',
+      client_phone: selectedProject.client_phone || '',
+      client_email: selectedProject.client_email || '',
+      client_address: selectedProject.client_address || '',
       materials_budget: selectedProject.materials_budget || '',
       labor_budget: selectedProject.labor_budget || '',
       profit_target: selectedProject.profit_target || ''
@@ -686,6 +871,7 @@ export default function OwnerDashboard({ profile }) {
       const total = materials + labor + profit
       const updated = {
         name: editJobForm.name, client_name: editJobForm.client_name,
+        client_phone: editJobForm.client_phone || null, client_email: editJobForm.client_email || null, client_address: editJobForm.client_address || null,
         materials_budget: materials, labor_budget: labor, profit_target: profit, budget: total
       }
       const { error } = await supabase.from('projects').update(updated).eq('id', selectedProject.id)
@@ -703,8 +889,11 @@ export default function OwnerDashboard({ profile }) {
   const getBudgetPct = (spent, budget) => budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
   const getBudgetClass = (pct) => pct >= 100 ? 'danger' : pct >= 80 ? 'warning' : ''
   const spendOf = (pid) => spendByProject[pid] || { materials: 0, labor: 0, other: 0 }
-  // Profit = contract price (budget) minus everything actually spent.
-  const profitOf = (p) => computeProfit(p.budget, spendOf(p.id))
+  const coOf = (pid) => coByProject[pid] || 0
+  // Contract price the client owes = base contract + approved change orders.
+  const contractOf = (p) => (p.budget || 0) + coOf(p.id)
+  // Profit = contract price (incl. approved change orders) minus everything spent.
+  const profitOf = (p) => computeProfit(contractOf(p), spendOf(p.id))
 
   const activeProjects = projects.filter(p => p.stage !== 'end')
   const completedProjects = projects.filter(p => p.stage === 'end')
@@ -729,14 +918,35 @@ export default function OwnerDashboard({ profile }) {
         </div>
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
-        <div className="tabs" style={{ margin: '16px 16px 0' }}>
-          {['receipts', 'time', 'mileage', 'budget', 'schedule'].map(t => (
-            <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
+        <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
+          {PROJECT_TABS.map(t => (
+            <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)}>{PROJECT_TAB_LABELS[t]}</button>
           ))}
         </div>
         <div className="page">
           {projectTab === 'budget' && (
             <div>
+              {(selectedProject.client_name || selectedProject.client_phone || selectedProject.client_email || selectedProject.client_address) && (
+                <div className="card">
+                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CLIENT</p>
+                  {selectedProject.client_name && <p style={{ fontWeight: '700', fontSize: '16px', color: '#1C2B3A' }}>{selectedProject.client_name}</p>}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                    {selectedProject.client_phone && <a href={`tel:${selectedProject.client_phone}`} style={{ flex: '1 1 0', minWidth: '88px', textAlign: 'center', background: '#16A34A', color: 'white', textDecoration: 'none', padding: '10px', borderRadius: '8px', fontSize: '13px', fontWeight: '600' }}>📞 Call</a>}
+                    {selectedProject.client_phone && <a href={`sms:${selectedProject.client_phone}`} style={{ flex: '1 1 0', minWidth: '88px', textAlign: 'center', background: '#1C2B3A', color: 'white', textDecoration: 'none', padding: '10px', borderRadius: '8px', fontSize: '13px', fontWeight: '600' }}>💬 Text</a>}
+                    {selectedProject.client_email && <a href={`mailto:${selectedProject.client_email}`} style={{ flex: '1 1 0', minWidth: '88px', textAlign: 'center', background: '#E07B2A', color: 'white', textDecoration: 'none', padding: '10px', borderRadius: '8px', fontSize: '13px', fontWeight: '600' }}>✉️ Email</a>}
+                    {selectedProject.client_address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedProject.client_address)}`} target="_blank" rel="noopener noreferrer" style={{ flex: '1 1 0', minWidth: '88px', textAlign: 'center', background: '#4B5563', color: 'white', textDecoration: 'none', padding: '10px', borderRadius: '8px', fontSize: '13px', fontWeight: '600' }}>📍 Map</a>}
+                  </div>
+                  {selectedProject.client_address && <p style={{ fontSize: '12px', color: '#717171', marginTop: '8px' }}>{selectedProject.client_address}</p>}
+                </div>
+              )}
+              {coOf(selectedProject.id) > 0 && (
+                <div className="card">
+                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CONTRACT + CHANGE ORDERS</p>
+                  <p style={{ fontSize: '13px', color: '#4B5563' }}>Base contract <span style={{ float: 'right', fontWeight: '600' }}>{formatCurrency(selectedProject.budget)}</span></p>
+                  <p style={{ fontSize: '13px', color: '#16A34A', marginTop: '4px' }}>Approved change orders <span style={{ float: 'right', fontWeight: '600' }}>+{formatCurrency(coOf(selectedProject.id))}</span></p>
+                  <p style={{ fontSize: '15px', fontWeight: '700', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f0f0f0' }}>Adjusted contract <span style={{ float: 'right' }}>{formatCurrency(contractOf(selectedProject))}</span></p>
+                </div>
+              )}
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>MATERIALS</p>
                 <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(sp.materials)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.materials_budget)}</span></p>
@@ -883,6 +1093,65 @@ export default function OwnerDashboard({ profile }) {
             </div>
           )}
 
+          {projectTab === 'photos' && (
+            <div>
+              <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
+                {uploadingPhoto ? 'Uploading…' : '📷 Add Photo'}
+                <input type="file" accept="image/*" capture="environment" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
+                {jobPhotos.map(ph => (
+                  <JobPhoto key={ph.id} path={ph.photo_url} alt={ph.caption} onClick={() => setPhotoLightbox(ph)}
+                    style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px', cursor: 'pointer' }} />
+                ))}
+              </div>
+              {jobPhotos.length === 0 && <div className="empty-state"><p>No photos yet. Snap before/after shots — great for clients and your portfolio.</p></div>}
+            </div>
+          )}
+
+          {projectTab === 'changes' && (
+            <div>
+              <button className="btn-primary" onClick={() => { setShowNewChange(true); setInlineError('') }}>+ Add Change Order</button>
+              {changeOrders.some(c => c.status === 'approved') && (
+                <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Approved extras</p>
+                  <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>+{formatCurrency(changeOrders.filter(c => c.status === 'approved').reduce((s, c) => s + (c.amount || 0), 0))}</p>
+                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>added to what the client owes</p>
+                </div>
+              )}
+              {changeOrders.map(c => (
+                <div key={c.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, paddingRight: '10px' }}>
+                      <h3>{c.description}</h3>
+                      <span className={'status-pill ' + (c.status === 'approved' ? 'status-end' : c.status === 'declined' ? 'status-start' : 'status-mid')} style={{ marginTop: '4px' }}>{c.status}</span>
+                    </div>
+                    <p style={{ fontWeight: '700', color: c.status === 'approved' ? '#16A34A' : '#888', fontSize: '16px' }}>{formatCurrency(c.amount)}</p>
+                  </div>
+                  <button onClick={() => deleteChangeOrder(c)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
+                </div>
+              ))}
+              {changeOrders.length === 0 && <div className="empty-state"><p>No change orders yet. Log extra work the client approves so you get paid for it.</p></div>}
+            </div>
+          )}
+
+          {projectTab === 'log' && (
+            <div>
+              <button className="btn-primary" onClick={() => { setShowNewLog(true); setInlineError('') }}>+ Add Log Entry</button>
+              {dailyLogs.map(l => (
+                <div key={l.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <p className="schedule-day" style={{ margin: 0 }}>{l.log_date ? new Date(l.log_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}</p>
+                    {l.weather && <span style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600' }}>{l.weather}</span>}
+                  </div>
+                  <p style={{ marginTop: '6px', whiteSpace: 'pre-wrap' }}>{l.note}</p>
+                  <button onClick={() => deleteLog(l)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
+                </div>
+              ))}
+              {dailyLogs.length === 0 && <div className="empty-state"><p>No log entries yet. Jot down what happened on site — handy for memory and disputes.</p></div>}
+            </div>
+          )}
+
           {projectTab === 'schedule' && (
             <div>
               <button className="btn-primary" onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule Worker</button>
@@ -970,6 +1239,9 @@ export default function OwnerDashboard({ profile }) {
               <h2>Edit Job</h2>
               <div className="input-group"><label>Job Name</label><input value={editJobForm.name} onChange={e => setEditJobForm({ ...editJobForm, name: e.target.value })} placeholder="Kitchen remodel" /></div>
               <div className="input-group"><label>Client</label><input value={editJobForm.client_name} onChange={e => setEditJobForm({ ...editJobForm, client_name: e.target.value })} placeholder="Client name" /></div>
+              <div className="input-group"><label>Client Phone</label><input type="tel" value={editJobForm.client_phone} onChange={e => setEditJobForm({ ...editJobForm, client_phone: e.target.value })} placeholder="(518) 555-0199" /></div>
+              <div className="input-group"><label>Client Email</label><input type="email" value={editJobForm.client_email} onChange={e => setEditJobForm({ ...editJobForm, client_email: e.target.value })} placeholder="john@email.com" /></div>
+              <div className="input-group"><label>Job Address</label><input value={editJobForm.client_address} onChange={e => setEditJobForm({ ...editJobForm, client_address: e.target.value })} placeholder="24 Pinewood Dr, Troy NY" /></div>
               <div className="input-group"><label>Materials Budget ($)</label><input type="number" value={editJobForm.materials_budget} onChange={e => setEditJobForm({ ...editJobForm, materials_budget: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Labor Budget ($)</label><input type="number" value={editJobForm.labor_budget} onChange={e => setEditJobForm({ ...editJobForm, labor_budget: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Profit Target ($)</label><input type="number" value={editJobForm.profit_target} onChange={e => setEditJobForm({ ...editJobForm, profit_target: e.target.value })} placeholder="0.00" /></div>
@@ -977,6 +1249,49 @@ export default function OwnerDashboard({ profile }) {
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={saveEditJob} disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
               <button className="btn-secondary" onClick={() => { setShowEditJob(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {showNewLog && (
+          <div className="modal-overlay" onClick={() => { setShowNewLog(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Add Log Entry</h2>
+              <div className="input-group"><label>Date</label><input type="date" value={logForm.log_date} onChange={e => setLogForm({ ...logForm, log_date: e.target.value })} /></div>
+              <div className="input-group"><label>Weather (optional)</label><input value={logForm.weather} onChange={e => setLogForm({ ...logForm, weather: e.target.value })} placeholder="Sunny, 70°" /></div>
+              <div className="input-group"><label>What happened on site?</label><textarea rows={4} value={logForm.note} onChange={e => setLogForm({ ...logForm, note: e.target.value })} placeholder="Framed the addition. Inspector signed off. Waiting on cabinet delivery." /></div>
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={addLog} disabled={loading}>{loading ? 'Saving...' : 'Save Log'}</button>
+              <button className="btn-secondary" onClick={() => { setShowNewLog(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {showNewChange && (
+          <div className="modal-overlay" onClick={() => { setShowNewChange(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Add Change Order</h2>
+              <div className="input-group"><label>What's the change?</label><input value={changeForm.description} onChange={e => setChangeForm({ ...changeForm, description: e.target.value })} placeholder="Add tile backsplash" /></div>
+              <div className="input-group"><label>Price ($)</label><input type="number" value={changeForm.amount} onChange={e => setChangeForm({ ...changeForm, amount: e.target.value })} placeholder="850" /></div>
+              <div className="input-group"><label>Status</label><select value={changeForm.status} onChange={e => setChangeForm({ ...changeForm, status: e.target.value })}><option value="approved">Approved</option><option value="pending">Pending</option><option value="declined">Declined</option></select></div>
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Approved change orders add to what the client owes and to your projected profit.</p>
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={addChangeOrder} disabled={loading}>{loading ? 'Saving...' : 'Add Change Order'}</button>
+              <button className="btn-secondary" onClick={() => { setShowNewChange(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {photoLightbox && (
+          <div className="modal-overlay" onClick={() => setPhotoLightbox(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: '20px 20px 0 0', padding: '20px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: '700' }}>{photoLightbox.caption || 'Job photo'}</h2>
+                <button onClick={() => setPhotoLightbox(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
+              </div>
+              <JobPhoto path={photoLightbox.photo_url} alt={photoLightbox.caption} style={{ width: '100%', borderRadius: '12px', objectFit: 'contain', maxHeight: '60vh', background: '#eef1f5' }} />
+              <p style={{ fontSize: '12px', color: '#717171', marginTop: '10px' }}>{photoLightbox.created_at ? new Date(photoLightbox.created_at).toLocaleDateString() : ''}</p>
+              <button onClick={() => deleteJobPhoto(photoLightbox)} style={{ marginTop: '16px', width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #DC2626', background: 'white', color: '#DC2626', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>Delete photo</button>
             </div>
           </div>
         )}
@@ -991,8 +1306,8 @@ export default function OwnerDashboard({ profile }) {
   return (
     <div>
       <div className="topbar"><h1>RUN-SITE</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
-      <div className="tabs" style={{ margin: '16px 16px 0' }}>
-        {['jobs', 'workers', 'payroll', 'reports'].map(t => (
+      <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
+        {['jobs', 'workers', 'payroll', 'invoices', 'reports'].map(t => (
           <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
         ))}
       </div>
@@ -1141,6 +1456,65 @@ export default function OwnerDashboard({ profile }) {
           </div>
         )}
 
+        {activeTab === 'invoices' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
+              Bill clients and track what you're owed. Tap "Mark Paid" when the money comes in.
+            </p>
+            {(() => {
+              const unpaid = invoices.filter(i => i.status !== 'paid')
+              const paid = invoices.filter(i => i.status === 'paid')
+              const owed = unpaid.reduce((s, i) => s + (i.amount || 0), 0)
+              const collected = paid.reduce((s, i) => s + (i.amount || 0), 0)
+              return (
+                <>
+                  <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <div>
+                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Outstanding</p>
+                        <p style={{ fontSize: '26px', fontWeight: '800', color: '#F59E0B' }}>{formatCurrency(owed)}</p>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Collected</p>
+                        <p style={{ fontSize: '26px', fontWeight: '800', color: '#16A34A' }}>{formatCurrency(collected)}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <button className="btn-primary" onClick={() => { setShowNewInvoice(true); setInlineError('') }}>+ New Invoice</button>
+                  {unpaid.length > 0 && <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 8px', padding: '0 4px' }}>Owed to you</p>}
+                  {unpaid.map(inv => (
+                    <div key={inv.id} className="card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, paddingRight: '10px' }}>
+                          <h3>{inv.label} · {formatCurrency(inv.amount)}</h3>
+                          <p>{inv.projects ? inv.projects.name : ''}{inv.projects && inv.projects.client_name ? ` · ${inv.projects.client_name}` : ''}</p>
+                          <p style={{ fontSize: '11px', color: '#717171' }}>{inv.due_date ? `Due ${new Date(inv.due_date + 'T00:00:00').toLocaleDateString()}` : (inv.issued_date ? `Sent ${new Date(inv.issued_date + 'T00:00:00').toLocaleDateString()}` : '')}</p>
+                        </div>
+                        <button onClick={() => markInvoicePaid(inv)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark Paid</button>
+                      </div>
+                      <button onClick={() => deleteInvoice(inv)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '12px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px' }}>Delete</button>
+                    </div>
+                  ))}
+                  {paid.length > 0 && <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 8px', padding: '0 4px' }}>Paid</p>}
+                  {paid.map(inv => (
+                    <div key={inv.id} className="card" style={{ background: '#f9fafb' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <h3 style={{ color: '#666' }}>{inv.label} · {formatCurrency(inv.amount)}</h3>
+                          <p>{inv.projects ? inv.projects.name : ''}{inv.projects && inv.projects.client_name ? ` · ${inv.projects.client_name}` : ''}</p>
+                          {inv.paid_at && <p style={{ fontSize: '11px', color: '#717171' }}>Paid {new Date(inv.paid_at).toLocaleDateString()}</p>}
+                        </div>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#16A34A' }}>Paid ✓</span>
+                      </div>
+                    </div>
+                  ))}
+                  {invoices.length === 0 && <div className="empty-state"><p>No invoices yet. Create one to bill a client and track what you're owed.</p></div>}
+                </>
+              )
+            })()}
+          </div>
+        )}
+
         {activeTab === 'reports' && (
           <div>
             <div className="input-group">
@@ -1157,7 +1531,7 @@ export default function OwnerDashboard({ profile }) {
                   <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>{reportYear} Summary</p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Jobs Completed</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{reportJobs.length}</p></div>
-                    <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Revenue</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + (p.budget || 0), 0))}</p></div>
+                    <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Revenue</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + contractOf(p), 0))}</p></div>
                     <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Materials</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + spendOf(p.id).materials, 0))}</p></div>
                     <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Labor</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + spendOf(p.id).labor, 0))}</p></div>
                     <div><p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>Total Other</p><p style={{ fontSize: '20px', fontWeight: '700' }}>{formatCurrency(reportJobs.reduce((s, p) => s + spendOf(p.id).other, 0))}</p></div>
@@ -1172,7 +1546,7 @@ export default function OwnerDashboard({ profile }) {
                 {reportJobs.map(p => {
                   const s = spendOf(p.id)
                   const profit = profitOf(p)
-                  const margin = computeMargin(profit, p.budget)
+                  const margin = computeMargin(profit, contractOf(p))
                   return (
                     <div key={p.id} className="card">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
@@ -1180,7 +1554,7 @@ export default function OwnerDashboard({ profile }) {
                         <span style={{ fontSize: '14px', fontWeight: '700', color: profit >= 0 ? '#16A34A' : '#DC2626' }}>{margin}%</span>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '13px' }}>
-                        <div><span style={{ color: '#888' }}>Revenue</span><p style={{ fontWeight: '600' }}>{formatCurrency(p.budget)}</p></div>
+                        <div><span style={{ color: '#888' }}>Revenue</span><p style={{ fontWeight: '600' }}>{formatCurrency(contractOf(p))}</p></div>
                         <div><span style={{ color: '#888' }}>Profit</span><p style={{ fontWeight: '600', color: profit >= 0 ? '#16A34A' : '#DC2626' }}>{formatCurrency(profit)}</p></div>
                         <div><span style={{ color: '#888' }}>Materials</span><p style={{ fontWeight: '600' }}>{formatCurrency(s.materials)}</p></div>
                         <div><span style={{ color: '#888' }}>Labor</span><p style={{ fontWeight: '600' }}>{formatCurrency(s.labor)}</p></div>
@@ -1232,12 +1606,32 @@ export default function OwnerDashboard({ profile }) {
             <h2>New Job</h2>
             <div className="input-group"><label>Job Name</label><input value={jobForm.name} onChange={e => setJobForm({ ...jobForm, name: e.target.value })} placeholder="18 Dutch Village" /></div>
             <div className="input-group"><label>Client Name</label><input value={jobForm.client_name} onChange={e => setJobForm({ ...jobForm, client_name: e.target.value })} placeholder="John Smith" /></div>
+            <div className="input-group"><label>Client Phone</label><input type="tel" value={jobForm.client_phone} onChange={e => setJobForm({ ...jobForm, client_phone: e.target.value })} placeholder="(518) 555-0199" /></div>
+            <div className="input-group"><label>Client Email</label><input type="email" value={jobForm.client_email} onChange={e => setJobForm({ ...jobForm, client_email: e.target.value })} placeholder="john@email.com" /></div>
+            <div className="input-group"><label>Job Address</label><input value={jobForm.client_address} onChange={e => setJobForm({ ...jobForm, client_address: e.target.value })} placeholder="24 Pinewood Dr, Troy NY" /></div>
             <div className="input-group"><label>Materials Budget ($)</label><input type="number" value={jobForm.materials_budget} onChange={e => setJobForm({ ...jobForm, materials_budget: e.target.value })} placeholder="3000" /></div>
             <div className="input-group"><label>Labor Budget ($)</label><input type="number" value={jobForm.labor_budget} onChange={e => setJobForm({ ...jobForm, labor_budget: e.target.value })} placeholder="1000" /></div>
             <div className="input-group"><label>Profit Target ($)</label><input type="number" value={jobForm.profit_target} onChange={e => setJobForm({ ...jobForm, profit_target: e.target.value })} placeholder="1000" /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewJob(false); setInlineError('') }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {showNewInvoice && (
+        <div className="modal-overlay" onClick={() => { setShowNewInvoice(false); setInlineError('') }}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+            <h2>New Invoice</h2>
+            <div className="input-group"><label>Job</label><select value={invoiceForm.project_id} onChange={e => setInvoiceForm({ ...invoiceForm, project_id: e.target.value })}><option value="">-- Choose a job --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div className="input-group"><label>Label</label><input value={invoiceForm.label} onChange={e => setInvoiceForm({ ...invoiceForm, label: e.target.value })} placeholder="Deposit / Progress / Final" /></div>
+            <div className="input-group"><label>Amount ($)</label><input type="number" value={invoiceForm.amount} onChange={e => setInvoiceForm({ ...invoiceForm, amount: e.target.value })} placeholder="2500" /></div>
+            <div className="input-group"><label>Issued Date</label><input type="date" value={invoiceForm.issued_date} onChange={e => setInvoiceForm({ ...invoiceForm, issued_date: e.target.value })} /></div>
+            <div className="input-group"><label>Due Date</label><input type="date" value={invoiceForm.due_date} onChange={e => setInvoiceForm({ ...invoiceForm, due_date: e.target.value })} /></div>
+            <div className="input-group"><label>Notes (optional)</label><input value={invoiceForm.notes} onChange={e => setInvoiceForm({ ...invoiceForm, notes: e.target.value })} placeholder="50% deposit to start" /></div>
+            {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+            <button className="btn-primary" onClick={addInvoice} disabled={loading}>{loading ? 'Creating...' : 'Create Invoice'}</button>
+            <button className="btn-secondary" onClick={() => { setShowNewInvoice(false); setInlineError('') }}>Cancel</button>
           </div>
         </div>
       )}
