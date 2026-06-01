@@ -95,6 +95,11 @@ export default function WorkerDashboard({ profile }) {
     fetchSchedule()
   }, [])
 
+  // One assigned job? Auto-pick it so the worker just taps the big button.
+  useEffect(() => {
+    if (projects.length === 1 && !selectedProject) setSelectedProject(projects[0].id)
+  }, [projects, selectedProject])
+
   // Verify clock-in status on load AND whenever connectivity returns, so an
   // offline-at-launch worker isn't permanently gated out of clocking in.
   useEffect(() => {
@@ -433,6 +438,21 @@ export default function WorkerDashboard({ profile }) {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
 
+  // This week's hours + pay from loaded history, so the worker can always see
+  // what they've banked. Week starts Sunday, local time.
+  const weekStats = (() => {
+    const now = new Date()
+    const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay())
+    let mins = 0, pay = 0
+    history.forEach(e => {
+      if (e.clocked_out_at && new Date(e.clocked_in_at) >= weekStart) {
+        mins += e.total_minutes || 0
+        pay += e.labor_cost || 0
+      }
+    })
+    return { mins, pay }
+  })()
+
   const currentEntry = activeEntry || offlineEntry
   const isOfflineMode = !!offlineEntry && !activeEntry
 
@@ -465,16 +485,25 @@ export default function WorkerDashboard({ profile }) {
                   ? isOfflineMode ? '📶 Clocked in (offline)' : 'Currently clocked in'
                   : 'Not clocked in'}
               </p>
-              <div className="timer-display">{formatTimerDisplay(timer)}</div>
+              {currentEntry
+                ? <div className="timer-display">{formatTimerDisplay(timer)}</div>
+                : <p style={{ fontSize: '15px', color: '#6B7280', margin: '10px 0 16px' }}>Tap the big button below when you get to the job.</p>}
 
               {!currentEntry && (
-                <div className="input-group" style={{ marginBottom: '12px' }}>
-                  <label htmlFor="select-job">Select Job</label>
-                  <select id="select-job" value={selectedProject} onChange={e => { setSelectedProject(e.target.value); setError('') }}>
-                    <option value="">-- Choose a job --</option>
-                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
+                projects.length === 1 ? (
+                  <div style={{ marginBottom: '14px' }}>
+                    <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '2px' }}>Your job</p>
+                    <p style={{ fontSize: '18px', fontWeight: '700', color: '#1C2B3A' }}>📍 {projects[0].name}</p>
+                  </div>
+                ) : (
+                  <div className="input-group" style={{ marginBottom: '12px' }}>
+                    <label htmlFor="select-job">Select Job</label>
+                    <select id="select-job" value={selectedProject} onChange={e => { setSelectedProject(e.target.value); setError('') }}>
+                      <option value="">-- Choose a job --</option>
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                )
               )}
 
               {statusError && !currentEntry && (
@@ -495,7 +524,7 @@ export default function WorkerDashboard({ profile }) {
                   )}
                 </div>
               ) : (
-                <button className="btn-primary" onClick={clockIn} disabled={loading || (isOnline && !clockReady)}>
+                <button className="btn-primary" onClick={clockIn} disabled={loading || (isOnline && !clockReady)} style={{ fontSize: '18px', padding: '18px', minHeight: '60px' }}>
                   {loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
                 </button>
               )}
@@ -527,6 +556,11 @@ export default function WorkerDashboard({ profile }) {
 
         {activeTab === 'history' && (
           <div>
+            <div className="card" style={{ background: '#1C2B3A', color: 'white', textAlign: 'center', marginBottom: '12px' }}>
+              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>This week</p>
+              <p style={{ fontSize: '28px', fontWeight: '800' }}>{formatTime(weekStats.mins)}</p>
+              {profile.hourly_rate ? <p style={{ fontSize: '14px', color: '#16A34A', fontWeight: '700' }}>≈ ${weekStats.pay.toFixed(2)} this week</p> : null}
+            </div>
             {historyError
               ? <div className="alert-danger">{historyError} <button onClick={fetchHistory} style={{ background: 'none', border: 'none', color: 'white', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry</button></div>
               : history.length === 0
