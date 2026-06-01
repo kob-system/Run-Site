@@ -438,6 +438,7 @@ export default function OwnerDashboard({ profile }) {
     if (activeTab === 'calendar') fetchUpcomingSchedule()
     if (activeTab === 'compliance') fetchCompliance()
     if (activeTab === 'warranties') fetchWarranties()
+    if (activeTab === 'insights') { fetchInvoices(); fetchEstimates() }
   }, [activeTab, fetchInvoices, fetchEstimates, fetchUpcomingSchedule, fetchCompliance, fetchWarranties])
 
   const fetchProjectDetails = async (project) => {
@@ -1249,6 +1250,41 @@ export default function OwnerDashboard({ profile }) {
   })
   const clientsList = Object.values(clientsMap).sort((a, b) => b.contract - a.contract)
 
+  // ---- Insights (charts) derived data ----
+  const arNow = Date.now()
+  const arBuckets = [
+    { label: 'Current', total: 0, color: '#16A34A' },
+    { label: '1–30 days', total: 0, color: '#E07B2A' },
+    { label: '31–60 days', total: 0, color: '#D97706' },
+    { label: '60+ days', total: 0, color: '#DC2626' },
+  ]
+  invoices.filter(i => i.status !== 'paid').forEach(i => {
+    const due = i.due_date ? new Date(i.due_date + 'T00:00:00').getTime() : arNow
+    const overdue = Math.floor((arNow - due) / 86400000)
+    const b = overdue <= 0 ? 0 : overdue <= 30 ? 1 : overdue <= 60 ? 2 : 3
+    arBuckets[b].total += i.amount || 0
+  })
+  const arTotal = arBuckets.reduce((s, b) => s + b.total, 0)
+  const nowD = new Date()
+  const revMonths = []
+  for (let k = 5; k >= 0; k--) {
+    const d = new Date(nowD.getFullYear(), nowD.getMonth() - k, 1)
+    revMonths.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('en-US', { month: 'short' }), total: 0 })
+  }
+  invoices.filter(i => i.status === 'paid' && i.paid_at).forEach(i => {
+    const d = new Date(i.paid_at)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const m = revMonths.find(x => x.key === key)
+    if (m) m.total += i.amount || 0
+  })
+  const revMax = Math.max(1, ...revMonths.map(m => m.total))
+  const estAccepted = estimates.filter(e => e.status === 'accepted').length
+  const estDeclined = estimates.filter(e => e.status === 'declined').length
+  const estOpen = estimates.filter(e => e.status === 'draft' || e.status === 'sent').length
+  const winRate = (estAccepted + estDeclined) ? Math.round((estAccepted / (estAccepted + estDeclined)) * 100) : null
+  const profitJobs = completedProjects.map(p => ({ name: p.name, profit: profitOf(p) }))
+  const profitMax = Math.max(1, ...profitJobs.map(j => Math.abs(j.profit)))
+
   const reportYears = [new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2]
   const reportJobs = completedProjects.filter(p => p.completed_at && new Date(p.completed_at).getFullYear() === reportYear)
 
@@ -1757,7 +1793,7 @@ export default function OwnerDashboard({ profile }) {
         {activeTab === 'more' && (
           <div>
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
-            {[['compliance', '🛡️ Insurance & Licenses', 'Track expirations'], ['warranties', '🔧 Warranties & Callbacks', 'Post-job follow-ups']].map(([key, title, sub]) => (
+            {[['insights', '📊 Insights', 'Charts: money owed, collected, win rate, profit'], ['compliance', '🛡️ Insurance & Licenses', 'Track expirations'], ['warranties', '🔧 Warranties & Callbacks', 'Post-job follow-ups']].map(([key, title, sub]) => (
               <div key={key} className="card" style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setActiveTab(key)}>
                 <div><h3>{title}</h3><p>{sub}</p></div>
                 <span style={{ color: '#888', fontSize: '22px' }}>›</span>
@@ -1811,6 +1847,53 @@ export default function OwnerDashboard({ profile }) {
               )
             })}
             {warranties.length === 0 && <div className="empty-state"><p>Log callbacks and warranty work so nothing slips after the job's done. Tap a status to advance it.</p></div>}
+          </div>
+        )}
+
+        {activeTab === 'insights' && (
+          <div>
+            <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
+            <div className="card">
+              <p style={sectionLabel}>Money owed to you (A/R aging)</p>
+              <p style={{ fontSize: '24px', fontWeight: '800', color: '#1C2B3A', marginBottom: '12px' }}>{formatCurrency(arTotal)}</p>
+              {arBuckets.map(b => (
+                <div key={b.label} style={{ marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#4B5563', marginBottom: '3px' }}><span>{b.label}</span><span>{formatCurrency(b.total)}</span></div>
+                  <div className="budget-bar"><div className="budget-bar-fill" style={{ width: (arTotal ? (b.total / arTotal * 100) : 0) + '%', background: b.color }} /></div>
+                </div>
+              ))}
+              {arTotal === 0 && <p style={{ fontSize: '13px', color: '#888' }}>Nothing outstanding — you're all collected up.</p>}
+            </div>
+            <div className="card">
+              <p style={sectionLabel}>Collected — last 6 months</p>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '120px', marginTop: '8px' }}>
+                {revMonths.map(m => (
+                  <div key={m.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                    <span style={{ fontSize: '10px', color: '#888', marginBottom: '2px' }}>{m.total > 0 ? formatCurrency(m.total).replace('.00', '') : ''}</span>
+                    <div style={{ width: '70%', background: '#1C2B3A', borderRadius: '6px 6px 0 0', height: `${Math.max(2, (m.total / revMax) * 100)}%`, minHeight: '2px' }} />
+                    <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>{m.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="card">
+              <p style={sectionLabel}>Quote win rate</p>
+              {winRate == null
+                ? <p style={{ fontSize: '13px', color: '#888' }}>No decided quotes yet.</p>
+                : <p style={{ fontSize: '28px', fontWeight: '800', color: '#16A34A' }}>{winRate}%</p>}
+              <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>{estAccepted} won · {estDeclined} lost · {estOpen} open</p>
+            </div>
+            {profitJobs.length > 0 && (
+              <div className="card">
+                <p style={sectionLabel}>Profit by completed job</p>
+                {profitJobs.map(j => (
+                  <div key={j.name} style={{ marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#4B5563', marginBottom: '3px' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '68%' }}>{j.name}</span><span style={{ color: j.profit >= 0 ? '#16A34A' : '#DC2626', fontWeight: '600' }}>{formatCurrency(j.profit)}</span></div>
+                    <div className="budget-bar"><div className="budget-bar-fill" style={{ width: (Math.abs(j.profit) / profitMax * 100) + '%', background: j.profit >= 0 ? '#16A34A' : '#DC2626' }} /></div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
