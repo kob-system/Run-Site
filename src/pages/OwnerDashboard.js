@@ -365,7 +365,7 @@ export default function OwnerDashboard({ profile }) {
         .order('issued_date', { ascending: false })
       if (error) throw error
       setInvoices(data || [])
-    } catch (e) { console.error('Invoices fetch failed:', e) }
+    } catch (e) { console.error('Invoices fetch failed:', e); showToast('Could not load invoices. Check your connection and try again.', 'error') }
   }, [profile.id])
 
   const fetchEstimates = useCallback(async () => {
@@ -376,7 +376,7 @@ export default function OwnerDashboard({ profile }) {
         .order('created_at', { ascending: false })
       if (error) throw error
       setEstimates(data || [])
-    } catch (e) { console.error('Estimates fetch failed:', e) }
+    } catch (e) { console.error('Estimates fetch failed:', e); showToast('Could not load estimates. Check your connection and try again.', 'error') }
   }, [profile.id])
 
   const fetchUpcomingSchedule = useCallback(async () => {
@@ -389,7 +389,7 @@ export default function OwnerDashboard({ profile }) {
         .order('scheduled_date', { ascending: true })
       if (error) throw error
       setUpcomingSchedule(data || [])
-    } catch (e) { console.error('Upcoming schedule fetch failed:', e) }
+    } catch (e) { console.error('Upcoming schedule fetch failed:', e); showToast('Could not load the schedule. Check your connection and try again.', 'error') }
   }, [profile.id])
 
   const fetchCompliance = useCallback(async () => {
@@ -397,7 +397,7 @@ export default function OwnerDashboard({ profile }) {
       const { data, error } = await supabase.from('compliance_items').select('*').eq('owner_id', profile.id).order('expires_on', { ascending: true })
       if (error) throw error
       setComplianceItems(data || [])
-    } catch (e) { console.error('Compliance fetch failed:', e) }
+    } catch (e) { console.error('Compliance fetch failed:', e); showToast('Could not load insurance & licenses. Check your connection and try again.', 'error') }
   }, [profile.id])
 
   const fetchWarranties = useCallback(async () => {
@@ -405,7 +405,7 @@ export default function OwnerDashboard({ profile }) {
       const { data, error } = await supabase.from('warranties').select('*, projects(name)').eq('owner_id', profile.id).order('created_at', { ascending: false })
       if (error) throw error
       setWarranties(data || [])
-    } catch (e) { console.error('Warranties fetch failed:', e) }
+    } catch (e) { console.error('Warranties fetch failed:', e); showToast('Could not load warranties. Check your connection and try again.', 'error') }
   }, [profile.id])
 
   useEffect(() => {
