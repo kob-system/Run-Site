@@ -34,7 +34,11 @@ JP is asleep; Claude works autonomously to perfect every inch of the app. JP is 
 
 - ☑️ MODE CONFIRMED (JP, leaving for work): **bank-changes mode** — keep banking tested, build-checked LOCAL commits all day; DO NOT deploy. Live demo stays exactly as-is (safe to show Josh anytime). JP will **remote into this computer** to reach this session; computer stays on + plugged in. The 2-browser ambiguity is moot until we deploy together.
 
-**WHEN JP REMOTES IN (deploy session):** push held commits ONE AT A TIME, reload the LOGGED-IN owner dashboard after each, confirm it renders (not white). Then continue the audit backlog.
+- 🎯 ELEVATED BAR (JP, 2026-06-01: "push the limits… as well done as possible so once I launch to companies I don't have to come down"): target = **production-grade, launch-ready for multiple paying contractor companies**, not just demo-polish. Beyond the audit backlog, harden: (a) error handling on EVERY Supabase call — surface failures, never silent [5 secondary-tab FETCHES done (toast on catch); REMAINING: mutation handlers + fetchSpend/fetchPayroll/fetchProjectDetails per-query errors]; (b) loading/empty/error states on every screen; (c) money-math correctness (tax-in-profit + income-basis items); (d) first-run/onboarding for a brand-NEW empty company (no seed data) — does the app guide them?; (e) multi-tenant data isolation sanity (RLS holds for a stranger's signup); (f) mobile responsiveness + consistency/copy; (g) more tests. All as SAFE-ADDITIVE bank-mode commits; flag behavioral/money changes for the verified deploy session.
+
+- 📌 STEER (JP, at work, 2026-06-01 PM): **WORKER simplicity is the priority** ("super super simple" for non-techy crews). JP is OK with me building autonomously + him reviewing at home (no need to watch it render live) — still bank-mode, deploy when home. DONE this session: worker auto-select-single-job (no dropdown), friendly idle prompt instead of 00:00:00, bigger Clock In button, "This week" hours+pay on History (commit held). REMAINING worker ideas: photo/note prompt on clock-out (needs worker photo upload — bigger lift), optional worker first-run nudge. Owner "attention feed" + "business profile" = deferred (JP leaned worker-first; revisit when he's home).
+
+**WHEN JP REMOTES IN (deploy session):** push held commits ONE AT A TIME, reload the LOGGED-IN owner dashboard after each, confirm it renders (not white); also log in as a worker (mike@firstclassdemo.com) to eyeball the simplified clock screen + This-week summary. Then continue the audit + launch-ready backlog.
 
 **AUDIT BACKLOG — work through, mark done as you go:**
 - CRASH — [x] est.items non-array crash → FIXED (5c35214, held). [ ] VERIFY-ONLY: `fetchProjectDetails` line ~449 `time_entries .select('*, profiles(full_name)')` is a BARE embed; likely safe (table seems to have a single profiles FK) but its CREATE TABLE isn't in repo migrations — if `time_entries` has BOTH owner_id+worker_id FKs this returns HTTP 300 and the Time tab blanks → then add `profiles!time_entries_worker_id_fkey(full_name)`. Confirm FK count against live DB FIRST (a wrong hint name breaks it).
@@ -42,6 +46,48 @@ JP is asleep; Claude works autonomously to perfect every inch of the app. JP is 
 - UX — [ ] `fetchProjectDetails` ~444: doesn't clear detail arrays before the awaits and ignores per-query errors → opening job B flashes job A's data; a failed sub-query leaves stale data silently. Fix: reset arrays at top (SAFE part) + check each error. [ ] `selectedProject` goes stale after edits (hand-merged) → re-select fresh row from refreshed `projects`. [ ] Secondary tabs (estimates/invoices/compliance/warranties/calendar) show empty-state with no loading flag → flash of "No X yet"; add per-tab loading flag (SAFE-ADDITIVE). [ ] Receipt scan: cancel after scan-upload orphans the storage file; best-effort remove on cancel (low pri).
 - A11Y (all SAFE-ADDITIVE except modals) — [x] icon-only buttons (×, ←, delete) aria-label → DONE. [x] clickable `<div className="card">` rows role="button"+tabIndex+onKeyDown → DONE. [x] click-to-cycle status pills role="button"+tabIndex+aria-label+keydown → DONE. (All 18 edits in held commit, build-checked.) [ ] form `<label>`s not associated to inputs (no htmlFor/id) → associate via id/htmlFor (NOT wrapping — wrapping restructures DOM). [ ] modals: role="dialog"/aria-modal + focus trap + Escape + restore focus (MODERATE — needs logged-in verify).
 - AUDIT CONFIRMED CLEAN (no bug): TDZ ordering, date off-by-one (T00:00:00 already used for date-only cols), divide-by-zero guards, change-orders flow into contract price, `warranties` has only one profiles FK (no embed ambiguity).
+
+**DEEP AUDIT (JP's run, 2026-06-01 PM) — 3 parallel auditors: worker / backend-security / efficiency.**
+- FIXED + BANKED this session: worker app (accurate This-week hours incl. live shift, reconnect refresh, battery-gated timer, offline-edit future/24h guards, sign-out guard, 12h schedule times) + backend hardening (notify-owner action allow-list + tenant-scoped project-name lookup, scan-receipt ~5MB size cap, supabaseClient env-var guard).
+- ⚖️ DECISIONS FOR JP — the "inefficient/not-smart → find alternatives" items, NOT yet done (discuss when home):
+  - SECURITY/INTEGRITY (before real payroll / scale): (1) `labor_cost`/`total_minutes` computed on the worker's device + written directly → tamperable payroll; move to a DB trigger + lock those columns (RISKY/DB). (2) `/api/find-owner` is an UNAUTHENTICATED email-enumeration oracle returning the owner UUID → return `{exists}` only + resolve owner server-side at signup + rate-limit (MODERATE, touches signup linkage in Login.js/App.js). (3) No rate-limit on OCR + email endpoints → a logged-in user can burn the Anthropic/Resend budget; add a per-user counter (MODERATE). (4) Multi-tenant isolation rests ENTIRELY on RLS — confirm RLS on every table + the `receipts` bucket, add a standing cross-tenant test (memory says locked 2026-05-30; make it a test).
+  - EFFICIENCY (owner dashboard; need logged-in verify): (5) job-open runs 12 SERIAL queries → `Promise.all` (~10x faster open); (6) lists re-fetch on every tab switch → load-once + refresh-after-mutation; (7) money/AR/clients/chart aggregations recompute every keystroke → `useMemo`; (8) `select('*')` everywhere → explicit columns; (9) split the 2,455-line OwnerDashboard (modals first, behavior-preserving); (10) on-screen totals sum raw floats while CSV rounds → can differ by 1¢, unify.
+  - SMART UX ADDS: (11) "+ Invoice this job" from the job itself (vs re-picking in the Invoices tab); (12) edit an invoice / cycle a change-order's status (today = delete+recreate); (13) `acceptEstimate` folds sales tax into the profit target — decide whether contract price should include tax.
+
+## 0.6 OVERNIGHT RUN 2 — night of 2026-06-01→02 (DEPLOY+VERIFY mode)
+
+JP asleep; wants to wake to something AMAZING + visible self-improvement. **KEY CHANGE vs Run 1:** JP is LOGGED INTO the demo (session live in Chrome), Vercel + Supabase open, and explicitly wants me to USE the Chrome extension to navigate his web. So I am in **DEPLOY+VERIFY mode now, not bank-mode.**
+
+**Operating rules:**
+- DEPLOY each change → VERIFY via the Chrome extension: reload runsite-pearl.vercel.app, confirm the bundle hash CHANGED, the owner dashboard RENDERS (not white — check `document.getElementById('root').children.length` + body text), and spot-check the touched screens by clicking through. (React mounts async — re-check after a beat; an instant post-navigate read shows blank falsely.)
+- If a deploy WHITE-SCREENS the logged-in app → `git revert HEAD` + push immediately. NEVER leave the live client demo broken.
+- If JP's session DROPPED (logged out) → STOP deploying; bank commits + do research/non-deploy work until back.
+- Supabase DB work: drive the SQL editor via the extension (Monaco base64 injection; DROP/ALTER triggers a "Potential issue" dialog → click its "Run query"). Confirm his Supabase session is live first.
+- Small, build-checked (`CI=true`), individually-verified commits. Co-Authored-By line. Re-arm the ScheduleWakeup loop EVERY tick.
+
+**Plan (build overnight, each deployed+verified):**
+1. ⭐ **TAB GROUPING** (JP's idea — the headline): job's 12 sub-tabs → 4 buckets [**Daily**: Time/Photos/Daily Log/Receipts/Mileage · **Lists**: Punch/Shopping/Schedule · **Money**: Budget/Change Orders · **Docs**: Documents/Permits]; 10 main tabs → ~6 [Home · Jobs · **Money**(Est/Inv/Reports/Payroll) · **People**(Clients/Workers) · Calendar · More]. Mobile-first, tap-bucket→items, daily stuff fastest. Buckets are JP-tweakable in AM.
+2. ⚡ **SPEED**: fetchProjectDetails 11 serial queries → `Promise.all` (~10x faster job open).
+3. 🔒 **PAYROLL INTEGRITY** (Supabase): DB trigger computes total_minutes + labor_cost from clock times + server rate; lock those columns from client writes.
+4. 🤖 **RESEARCH-DRIVEN**: a background research+critique workflow (field-service app IA/adoption/mobile-UX/a11y + competitor teardown + Run-Site critique) returns a prioritized improvement list → implement the best, each deployed+verified. Re-critique periodically (self-improve).
+5. Continue the audit backlog + "decisions" items as they fit.
+
+**PROGRESS LOG (overnight 2, newest last):**
+- (start) The 12 earlier-banked wins are now DEPLOYED + verified live (bundle 46b38874): Home/Jobs/job-detail/Estimates/Insights all render clean. Launching research+critique workflow + re-arming loop.
+- ✅ RESEARCH+CRITIQUE workflow (w4ihq7qpl) DONE → full report in **`RESEARCH-FINDINGS.md`**. Self-improvement: agents critiqued our bucket plan → recut by LIFECYCLE + promote Clock·Photo·Log above buckets; bigger insight = adoption is won in the WORKER app (thinnest surface), not the owner-console reorg.
+
+**RESEARCH-REPRIORITIZED BUILD QUEUE** (ordered; build → deploy → verify; ✅=owner-side live-verifiable, ⚠️=worker-side build-verify only + JP eyeballs AM). Pull next item each tick; always verify; roll back any owner white-screen:
+1. ✅ **Tab grouping (headline)** — job sub-tabs → LIFECYCLE buckets [Today's Work: Time/Photos/Daily Log/Receipts/Mileage · Plan & Lists: Schedule/Shopping/Punch · Money: Budget/Change Orders · Docs: Documents/Permits] WITH **Clock·Photo·Daily Log promoted as always-visible buttons ABOVE the buckets** (3-tap rule). Fold in Permits→Docs + rename in-job "Schedule"→"Job Timeline". Live-verify each bucket opens its tabs.
+2. ✅ **Main-menu grouping** — top tabs → Home · Jobs · Money(Est/Inv/Reports/Payroll) · People(Clients/Workers) · Calendar · More. Live-verify.
+3. ✅ **Context-aware FAB** quick-create — owner. Live-verify.
+4. ⚠️ **GPS WIIFM microcopy** — Time/Mileage (owner=live-verify) + worker Clock-In (build-verify). Pure copy + GPS on/off dot tied to clock state.
+5. ⚠️ **Visible sync-status UI** — worker offline pill ("Online·all saved"/"Offline·N pending") + per-item pending/synced/failed badge + one-tap retry (reads existing queue; don't touch sync engine).
+6. ⚠️ **Worker "My Day" home + read-only job card (directions/notes/gate codes) + first-class Photo button** (the top-impact build).
+7. ⚠️ **Voice-to-text** mic (Web Speech API) on Daily Log / notes / punch items.
+8. ✅ **Speed**: fetchProjectDetails 11 serial queries → Promise.all. Live-verify a job's tabs still load.
+9. 🔒 **Payroll integrity** Supabase trigger (server-side total_minutes + labor_cost; lock columns). DB via SQL editor.
+10. ⚠️ **Profit role-gate from the crew** — needs-care, verify RLS.
+11. ⚠️ **Worker bottom-nav + glove targets** (≥56px, icon+text, high-contrast).
 
 ## 1. Current state (verify before building)
 
