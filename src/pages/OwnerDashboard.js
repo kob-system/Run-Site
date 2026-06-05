@@ -1357,6 +1357,7 @@ export default function OwnerDashboard({ profile }) {
         <div className="page">
           {projectTab === 'budget' && (
             <div>
+              <button className="btn-primary" onClick={() => { setInvoiceForm({ project_id: selectedProject.id, label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' }); setShowNewInvoice(true); setInlineError('') }} style={{ background: '#16A34A', marginBottom: '12px' }}>+ Invoice this job</button>
               {(selectedProject.client_name || selectedProject.client_phone || selectedProject.client_email || selectedProject.client_address) && (
                 <div className="card">
                   <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CLIENT</p>
