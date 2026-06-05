@@ -311,6 +311,7 @@ export default function WorkerDashboard({ profile }) {
 
   const clockIn = async () => {
     if (!selectedProject) return setError('Select a job first')
+    const pendingDone = getOfflineEntry(); if (pendingDone && pendingDone.clocked_out_at) return setError("Your last finished shift hasn't synced yet — get signal to save it before starting a new one.")
     setLoading(true)
     setError('')
 
@@ -360,6 +361,7 @@ export default function WorkerDashboard({ profile }) {
   }
 
   const clockOut = async () => {
+    if (!window.confirm('End your shift now?')) return
     setLoading(true)
     setError('')
     const entry = activeEntry || offlineEntry
@@ -590,8 +592,8 @@ export default function WorkerDashboard({ profile }) {
                   )}
                 </div>
               ) : (
-                <button className="btn-primary" onClick={clockIn} disabled={loading || (isOnline && !clockReady)} style={{ fontSize: '18px', padding: '18px', minHeight: '60px' }}>
-                  {loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
+                <button className="btn-primary" onClick={clockIn} disabled={loading || (isOnline && !clockReady) || projects.length === 0} style={{ fontSize: '18px', padding: '18px', minHeight: '60px' }}>
+                  {projects.length === 0 ? 'Ask your boss to assign a job' : loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
                 </button>
               )}
               <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '14px', lineHeight: '1.5', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
@@ -612,6 +614,7 @@ export default function WorkerDashboard({ profile }) {
                     <div key={p.id} className="card" style={{ textAlign: 'left' }}>
                       <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{p.name}</h3>
                       {p.client_address && <p style={{ fontSize: '13px', color: '#6B7280', marginTop: '2px' }}>{p.client_address}</p>}
+                      {!p.client_address && <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>No address on file — ask your boss to add it.</p>}
                       {sched && sched.task_description && <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{sched.task_description}{sched.start_time ? ` · ${formatScheduleTime(sched.start_time)}` : ''}</p>}
                       {p.client_address && (
                         <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.client_address)}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: '10px', background: '#16A34A', color: 'white', textDecoration: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: '700', minHeight: '44px' }}>📍 Get Directions</a>
