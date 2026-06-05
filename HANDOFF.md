@@ -89,6 +89,9 @@ JP asleep; wants to wake to something AMAZING + visible self-improvement. **KEY 
 10. ⚠️ **Profit role-gate from the crew** — needs-care, verify RLS.
 11. ⚠️ **Worker bottom-nav + glove targets** (≥56px, icon+text, high-contrast).
 
+**BUILT (overnight 2, newest last):**
+- ✅ #1 TAB GROUPING (job detail) — DEPLOYED + VERIFIED LIVE (bundle ae363cd6). Lifecycle buckets (Today's Work / Plan & Lists / Money / Docs) + Clock·Photo·Log quick buttons above; nav-only (content blocks untouched). Verified live: opening a job shows the grouped nav; Money→Budget content, 📷 Photo→Photos content both work. (`PROJECT_TABS` const now unused — harmless, ESLint disabled.) NEXT: #2 main-menu grouping.
+
 ## 1. Current state (verify before building)
 
 - **Production:** `main` → `runsite-pearl.vercel.app` (Vercel team `kobrossisystems-4821s-projects`, project `runsite`). Auto-deploys on push to `main`.
