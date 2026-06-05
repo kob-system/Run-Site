@@ -602,6 +602,25 @@ export default function WorkerDashboard({ profile }) {
             {projects.length === 0 && !currentEntry && clockReady && (
               <div className="empty-state"><p>No jobs assigned yet. Ask your boss to assign you to a job.</p></div>
             )}
+
+            {projects.length > 0 && (
+              <div style={{ marginTop: '20px' }}>
+                <p style={{ fontSize: '12px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 4px 8px' }}>Your jobs</p>
+                {projects.map(p => {
+                  const sched = schedule.find(s => s.project_id === p.id)
+                  return (
+                    <div key={p.id} className="card" style={{ textAlign: 'left' }}>
+                      <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{p.name}</h3>
+                      {p.client_address && <p style={{ fontSize: '13px', color: '#6B7280', marginTop: '2px' }}>{p.client_address}</p>}
+                      {sched && sched.task_description && <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{sched.task_description}{sched.start_time ? ` · ${formatScheduleTime(sched.start_time)}` : ''}</p>}
+                      {p.client_address && (
+                        <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.client_address)}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: '10px', background: '#16A34A', color: 'white', textDecoration: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: '700', minHeight: '44px' }}>📍 Get Directions</a>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
