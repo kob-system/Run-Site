@@ -21,6 +21,20 @@ const PROJECT_TAB_LABELS = {
   punch: 'Punch List', materials: 'Shopping List', changes: 'Change Orders',
   permits: 'Permits', log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
 }
+// Job sub-tabs grouped by LIFECYCLE (not data-type) so a busy crew scans a few
+// buckets instead of 12 tabs. The 3 daily actions are also promoted above as
+// always-visible quick buttons (Clock/Photo/Log are never more than one tap).
+const PROJECT_BUCKETS = [
+  { key: 'today', label: "Today's Work", tabs: ['time', 'photos', 'log', 'receipts', 'mileage'] },
+  { key: 'plan', label: 'Plan & Lists', tabs: ['schedule', 'materials', 'punch'] },
+  { key: 'money', label: 'Money', tabs: ['budget', 'changes'] },
+  { key: 'docs', label: 'Docs', tabs: ['documents', 'permits'] },
+]
+const PROJECT_QUICK = [
+  { tab: 'time', label: '⏱ Clock' },
+  { tab: 'photos', label: '📷 Photo' },
+  { tab: 'log', label: '📋 Log' },
+]
 
 // Estimate line-item math (pure; safe at module scope).
 const ESTIMATE_KINDS = [['materials', 'Materials'], ['labor', 'Labor'], ['other', 'Other']]
@@ -1310,11 +1324,31 @@ export default function OwnerDashboard({ profile }) {
         </div>
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
-        <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
-          {PROJECT_TABS.map(t => (
-            <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)}>{PROJECT_TAB_LABELS[t]}</button>
-          ))}
-        </div>
+        {(() => {
+          const activeBucket = PROJECT_BUCKETS.find(b => b.tabs.includes(projectTab)) || PROJECT_BUCKETS[0]
+          return (
+            <div style={{ margin: '16px 16px 0' }}>
+              {/* Daily actions — always one tap, never buried in a bucket */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                {PROJECT_QUICK.map(q => (
+                  <button key={q.tab} onClick={() => setProjectTab(q.tab)} style={{ flex: 1, minHeight: '48px', padding: '10px 4px', borderRadius: '10px', border: projectTab === q.tab ? '2px solid #E07B2A' : '1px solid #ddd', background: projectTab === q.tab ? '#FFF7ED' : 'white', fontSize: '13px', fontWeight: '700', color: '#1C2B3A', cursor: 'pointer' }}>{q.label}</button>
+                ))}
+              </div>
+              {/* Lifecycle buckets — pick one to reveal its tabs */}
+              <div className="tabs tabs-scroll">
+                {PROJECT_BUCKETS.map(b => (
+                  <button key={b.key} className={'tab ' + (activeBucket.key === b.key ? 'active' : '')} onClick={() => setProjectTab(b.tabs[0])}>{b.label}</button>
+                ))}
+              </div>
+              {/* Tabs inside the active bucket */}
+              <div className="tabs tabs-scroll" style={{ marginTop: '4px' }}>
+                {activeBucket.tabs.map(t => (
+                  <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)} style={{ fontSize: '12px' }}>{PROJECT_TAB_LABELS[t]}</button>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         <div className="page">
           {projectTab === 'budget' && (
             <div>
