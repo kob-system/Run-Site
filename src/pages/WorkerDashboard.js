@@ -515,7 +515,16 @@ export default function WorkerDashboard({ profile }) {
       <div className="topbar">
         <h1>RUN-SITE</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {!isOnline && <span style={{ fontSize: '11px', background: 'rgba(255,255,255,0.2)', padding: '3px 8px', borderRadius: '12px' }}>📶 Offline</span>}
+          {(() => {
+            // Always-visible sync status so a worker can SEE their hours are
+            // saved (an invisible queue erodes trust). Reads existing state only.
+            let label, color
+            if (syncing) { label = '⏳ Saving…'; color = '#FCD34D' }
+            else if (offlineEntry) { label = isOnline ? '⏳ 1 to save' : '📶 Offline · 1 to save'; color = '#FCD34D' }
+            else if (!isOnline) { label = '📶 Offline'; color = 'rgba(255,255,255,0.85)' }
+            else { label = '✓ All saved'; color = '#86EFAC' }
+            return <span style={{ fontSize: '11px', fontWeight: '700', background: 'rgba(255,255,255,0.15)', padding: '4px 10px', borderRadius: '12px', color }}>{label}</span>
+          })()}
           <button onClick={handleSignOut}>Sign Out</button>
         </div>
       </div>
