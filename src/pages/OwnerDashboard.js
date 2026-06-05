@@ -239,6 +239,21 @@ export default function OwnerDashboard({ profile }) {
   const [warrantyForm, setWarrantyForm] = useState({ project_id: '', description: '', status: 'open', due_on: '' })
   const [permitForm, setPermitForm] = useState({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
 
+  // Onboarding "exposure tour" — orients brand-new owners by pointing them to
+  // where the core sections live (Jobs, Estimates, Invoices, Workers, Receipts).
+  // It never asks them to create anything: a step counts as "seen" the first
+  // time that section is VISITED. Progress is persisted per-user in localStorage;
+  // the card is non-blocking and dismissible, and melts away once every step is
+  // seen, the owner hides it, or the account is older than two weeks.
+  const onboardingStorageKey = `runsite_onboarding_${profile.id}`
+  const [onboarding, setOnboarding] = useState(() => {
+    try {
+      const raw = localStorage.getItem(onboardingStorageKey)
+      if (raw) { const p = JSON.parse(raw); return { seen: p.seen || {}, dismissed: !!p.dismissed } }
+    } catch { /* corrupt or unavailable storage — fall back to a fresh tour */ }
+    return { seen: {}, dismissed: false }
+  })
+
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
 
   const fetchProjects = useCallback(async () => {
@@ -454,6 +469,27 @@ export default function OwnerDashboard({ profile }) {
     if (activeTab === 'warranties') fetchWarranties()
     if (activeTab === 'insights') { fetchInvoices(); fetchEstimates() }
   }, [activeTab, fetchInvoices, fetchEstimates, fetchUpcomingSchedule, fetchCompliance, fetchWarranties])
+
+  // Onboarding exposure tour — mark a step "seen" the first time its section is
+  // visited. These effects watch navigation state only (never data entry), and
+  // their dependency arrays reference only state/props declared above — no
+  // useCallback is referenced, so there is no temporal-dead-zone risk on render.
+  useEffect(() => {
+    if (!['jobs', 'estimates', 'invoices', 'workers'].includes(activeTab)) return
+    setOnboarding(o => (o.seen[activeTab] ? o : { ...o, seen: { ...o.seen, [activeTab]: true } }))
+  }, [activeTab])
+
+  // Receipts has no top-level tab — it lives inside a job. Opening the
+  // receipt-scan modal is the moment the owner sees where scanning lives.
+  useEffect(() => {
+    if (!showNewReceipt) return
+    setOnboarding(o => (o.seen.receipts ? o : { ...o, seen: { ...o.seen, receipts: true } }))
+  }, [showNewReceipt])
+
+  // Persist tour progress per-user (key: runsite_onboarding_<userId>).
+  useEffect(() => {
+    try { localStorage.setItem(onboardingStorageKey, JSON.stringify(onboarding)) } catch { /* ignore */ }
+  }, [onboarding, onboardingStorageKey])
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
@@ -1945,31 +1981,43 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'home' && (
           <div>
-            {!initialLoading && (() => {
+            {(() => {
+              // Exposure tour: show only to brand-new accounts (created within
+              // ~14 days). A missing created_at is treated as new, so a genuinely
+              // new owner always sees it. Hidden once the owner taps "Hide".
+              const ageDays = profile.created_at ? (Date.now() - new Date(profile.created_at).getTime()) / 86400000 : 0
+              if (ageDays > 14 || onboarding.dismissed) return null
               const steps = [
-                { key: 'job', label: 'Create your first job', done: projects.length > 0, cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') } },
-                { key: 'crew', label: 'Add your crew', done: workers.length > 0, cta: () => setActiveTab('workers') },
-                { key: 'estimate', label: 'Send your first estimate', done: estimates.length > 0, cta: () => setActiveTab('estimates') },
-                { key: 'invoice', label: 'Create your first invoice', done: invoices.length > 0, cta: () => setActiveTab('invoices') },
-                { key: 'compliance', label: 'Add your insurance & license info', done: complianceItems.length > 0, cta: () => setActiveTab('compliance') },
+                { key: 'jobs', label: 'Jobs', desc: 'Every project, budget, and photo in one place', go: () => setActiveTab('jobs') },
+                { key: 'estimates', label: 'Estimates', desc: 'Quote new work and win it', go: () => setActiveTab('estimates') },
+                { key: 'invoices', label: 'Invoices', desc: 'Bill clients and track who still owes you', go: () => setActiveTab('invoices') },
+                { key: 'workers', label: 'Workers', desc: 'Your crew, their rates, and their hours', go: () => setActiveTab('workers') },
+                { key: 'receipts', label: 'Scan a receipt', desc: 'Open any job → Receipts → + Add Receipt', go: () => setActiveTab('jobs') },
               ]
-              const doneCount = steps.filter(s => s.done).length
-              if (doneCount === steps.length) return null
+              const seenCount = steps.filter(s => onboarding.seen[s.key]).length
+              // Melts away once the owner has visited every section.
+              if (seenCount === steps.length) return null
               return (
                 <div className="card" style={{ border: '2px solid #E07B2A', marginBottom: '4px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#1C2B3A' }}>👋 Get set up</h2>
-                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#E07B2A' }}>{doneCount} of {steps.length} done</span>
+                    <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#1C2B3A' }}>👋 Take the tour</h2>
+                    <button onClick={() => setOnboarding(o => ({ ...o, dismissed: true }))} style={{ background: 'none', border: 'none', color: '#888', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '4px 4px 4px 12px' }}>Hide</button>
                   </div>
-                  <p style={{ fontSize: '13px', color: '#717171', marginBottom: '14px', lineHeight: '1.5' }}>A few quick steps to get the most out of Run-Site — they check off automatically as you go.</p>
+                  <p style={{ fontSize: '13px', color: '#717171', marginBottom: '14px', lineHeight: '1.5' }}>A quick look at where everything lives — nothing to fill in. Tap one to jump in; it checks off the first time you visit. {seenCount} of {steps.length} seen.</p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {steps.map((s, i) => (
-                      <div key={s.key} role={s.done ? undefined : 'button'} tabIndex={s.done ? undefined : 0} onClick={s.done ? undefined : s.cta} onKeyDown={s.done ? undefined : (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.cta() } })} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '10px', border: '1px solid #eee', background: s.done ? '#F0FDF4' : 'white', cursor: s.done ? 'default' : 'pointer' }}>
-                        <span style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '700', background: s.done ? '#16A34A' : '#1C2B3A', color: 'white' }}>{s.done ? '✓' : i + 1}</span>
-                        <span style={{ flex: 1, fontSize: '14px', fontWeight: '600', color: s.done ? '#9CA3AF' : '#1C2B3A', textDecoration: s.done ? 'line-through' : 'none' }}>{s.label}</span>
-                        {!s.done && <span style={{ color: '#E07B2A', fontSize: '18px' }}>›</span>}
-                      </div>
-                    ))}
+                    {steps.map((s, i) => {
+                      const seen = !!onboarding.seen[s.key]
+                      return (
+                        <div key={s.key} role={seen ? undefined : 'button'} tabIndex={seen ? undefined : 0} onClick={seen ? undefined : s.go} onKeyDown={seen ? undefined : (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.go() } })} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '10px', border: '1px solid #eee', background: seen ? '#F0FDF4' : 'white', cursor: seen ? 'default' : 'pointer' }}>
+                          <span style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '700', background: seen ? '#16A34A' : '#1C2B3A', color: 'white' }}>{seen ? '✓' : i + 1}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: '14px', fontWeight: '600', color: seen ? '#9CA3AF' : '#1C2B3A', textDecoration: seen ? 'line-through' : 'none' }}>{s.label}</p>
+                            <p style={{ fontSize: '12px', color: seen ? '#C7CDD4' : '#888', marginTop: '1px' }}>{s.desc}</p>
+                          </div>
+                          {!seen && <span style={{ color: '#E07B2A', fontSize: '18px' }}>›</span>}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )
