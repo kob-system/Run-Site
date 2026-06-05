@@ -90,7 +90,10 @@ JP asleep; wants to wake to something AMAZING + visible self-improvement. **KEY 
 11. ⚠️ **Worker bottom-nav + glove targets** (≥56px, icon+text, high-contrast).
 
 **BUILT (overnight 2, newest last):**
-- ✅ #1 TAB GROUPING (job detail) — DEPLOYED + VERIFIED LIVE (bundle ae363cd6). Lifecycle buckets (Today's Work / Plan & Lists / Money / Docs) + Clock·Photo·Log quick buttons above; nav-only (content blocks untouched). Verified live: opening a job shows the grouped nav; Money→Budget content, 📷 Photo→Photos content both work. (`PROJECT_TABS` const now unused — harmless, ESLint disabled.) NEXT: #2 main-menu grouping.
+- ✅ #1 TAB GROUPING (job detail) — DEPLOYED + VERIFIED LIVE (bundle ae363cd6). Lifecycle buckets (Today's Work / Plan & Lists / Money / Docs) + Clock·Photo·Log quick buttons above; nav-only (content blocks untouched). Verified live: opening a job shows the grouped nav; Money→Budget content, 📷 Photo→Photos content both work. (`PROJECT_TABS` const now unused — harmless, ESLint disabled.)
+- ✅ #8 SPEED (Promise.all parallel job-detail load) — DEPLOYED + VERIFIED LIVE (bundle 3b5574f1). Verified on Kitchen Remodel: Receipts ($620.50 Ferguson, $1,840 Home Depot) + the FK-embedded Schedule (Mike Reyes, Mon Jun 1) both load correctly in parallel. No error toast = Promise.all resolves clean.
+- ⏸️ HELD #2 main-menu grouping for JP's design call: burying frequent Estimates/Invoices under a "Money" bucket adds a tap to the owner's core get-paid flow (the research's own "don't make buckets a nav wall" warning). Better to pick the exact buckets with JP than auto-refactor his central nav.
+- NEXT: worker-adoption wins (⚠️ worker app = build-verify only + owner-bundle-health check; JP eyeballs in AM): #4 GPS trust-copy → #5 visible sync status → #6 "My Day" home.
 
 ## 1. Current state (verify before building)
 
