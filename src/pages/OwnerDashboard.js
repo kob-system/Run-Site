@@ -463,28 +463,33 @@ export default function OwnerDashboard({ profile }) {
     setDailyLogs([]); setChangeOrders([]); setJobPhotos([]); setPunchItems([])
     setMaterialItems([]); setJobDocuments([]); setPermits([])
     try {
-      const { data: r } = await supabase.from('receipts').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
-      setReceipts(r || [])
-      const { data: t } = await supabase.from('time_entries').select('*, profiles(full_name)').eq('project_id', project.id).order('clocked_in_at', { ascending: false })
-      setTimeEntries(t || [])
-      const { data: s } = await supabase.from('schedule_entries').select('*, profiles!schedule_entries_worker_id_fkey(full_name)').eq('project_id', project.id).order('scheduled_date', { ascending: true })
-      setScheduleEntries(s || [])
-      const { data: m } = await supabase.from('mileage_entries').select('*').eq('project_id', project.id).order('trip_date', { ascending: false })
-      setMileageEntries(m || [])
-      const { data: lg } = await supabase.from('daily_logs').select('*').eq('project_id', project.id).order('log_date', { ascending: false })
-      setDailyLogs(lg || [])
-      const { data: cor } = await supabase.from('change_orders').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
-      setChangeOrders(cor || [])
-      const { data: ph } = await supabase.from('job_photos').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
-      setJobPhotos(ph || [])
-      const { data: pu } = await supabase.from('punch_items').select('*').eq('project_id', project.id).order('created_at', { ascending: true })
-      setPunchItems(pu || [])
-      const { data: mt } = await supabase.from('material_items').select('*').eq('project_id', project.id).order('created_at', { ascending: true })
-      setMaterialItems(mt || [])
-      const { data: dc } = await supabase.from('job_documents').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
-      setJobDocuments(dc || [])
-      const { data: pm } = await supabase.from('permits').select('*').eq('project_id', project.id).order('created_at', { ascending: false })
-      setPermits(pm || [])
+      const pid = project.id
+      // Load all 11 detail tables in parallel (was 11 serial round-trips → ~10x
+      // faster job open). Same queries/filters/order; just no longer waterfalled.
+      const [r, t, s, m, lg, cor, ph, pu, mt, dc, pm] = await Promise.all([
+        supabase.from('receipts').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
+        supabase.from('time_entries').select('*, profiles(full_name)').eq('project_id', pid).order('clocked_in_at', { ascending: false }),
+        supabase.from('schedule_entries').select('*, profiles!schedule_entries_worker_id_fkey(full_name)').eq('project_id', pid).order('scheduled_date', { ascending: true }),
+        supabase.from('mileage_entries').select('*').eq('project_id', pid).order('trip_date', { ascending: false }),
+        supabase.from('daily_logs').select('*').eq('project_id', pid).order('log_date', { ascending: false }),
+        supabase.from('change_orders').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
+        supabase.from('job_photos').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
+        supabase.from('punch_items').select('*').eq('project_id', pid).order('created_at', { ascending: true }),
+        supabase.from('material_items').select('*').eq('project_id', pid).order('created_at', { ascending: true }),
+        supabase.from('job_documents').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
+        supabase.from('permits').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
+      ])
+      setReceipts(r.data || [])
+      setTimeEntries(t.data || [])
+      setScheduleEntries(s.data || [])
+      setMileageEntries(m.data || [])
+      setDailyLogs(lg.data || [])
+      setChangeOrders(cor.data || [])
+      setJobPhotos(ph.data || [])
+      setPunchItems(pu.data || [])
+      setMaterialItems(mt.data || [])
+      setJobDocuments(dc.data || [])
+      setPermits(pm.data || [])
     } catch (e) {
       showToast('Failed to load job details', 'error')
     }
