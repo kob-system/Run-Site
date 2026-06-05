@@ -539,6 +539,9 @@ export default function WorkerDashboard({ profile }) {
                   ? isOfflineMode ? '📶 Clocked in (offline)' : 'Currently clocked in'
                   : 'Not clocked in'}
               </p>
+              <p style={{ fontSize: '12px', fontWeight: '600', color: currentEntry ? '#16A34A' : '#9CA3AF', marginBottom: '4px' }}>
+                {currentEntry ? '📍 GPS on — stamping your start/stop' : '📍 GPS off'}
+              </p>
               {currentEntry
                 ? <div className="timer-display">{formatTimerDisplay(timer)}</div>
                 : <p style={{ fontSize: '15px', color: '#6B7280', margin: '10px 0 16px' }}>Tap the big button below when you get to the job.</p>}
@@ -582,6 +585,9 @@ export default function WorkerDashboard({ profile }) {
                   {loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
                 </button>
               )}
+              <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '14px', lineHeight: '1.5', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
+                🔒 Your location only stamps your start and stop so your hours can never be disputed. GPS is off when you're clocked out.
+              </p>
             </div>
 
             {projects.length === 0 && !currentEntry && clockReady && (
