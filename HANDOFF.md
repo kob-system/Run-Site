@@ -109,7 +109,7 @@ JP asleep; wants to wake to something AMAZING + visible self-improvement. **KEY 
 - **Production:** `main` → `runsite-pearl.vercel.app` (Vercel team `kobrossisystems-4821s-projects`, project `runsite`). Auto-deploys on push to `main`.
 - **Repo:** github.com/kob-system/Run-Site. Local: `C:\Users\Jpkob\Desktop\run-site` (primary). Second main-only clone at `C:\Users\Jpkob\vibe code\Run-Site`.
 - **Stack:** Create React App (CRA) + Supabase (Postgres/Auth/Storage/RLS, ref `yvwpesvjfdofsxvtooha`) + Vercel serverless (`api/`) + Resend (email) + Claude API (receipt OCR). PWA.
-- **Demo login (seeded, don't wipe):** `Firstclasspropertyservices7@gmail.com` / `FirstClass2026`. Workers: `mike@firstclassdemo.com`, `dave@firstclassdemo.com` / `demo-pass`.
+- **Demo login (seeded, don't wipe):** credentials moved OUT of this public repo into JP's private brain (`work/run-site/run-site-app-brain.md`). ⚠️ The old passwords were public in git history — **rotate them in Supabase**.
 - **DB:** migrations `FIX-DATABASE-4..7.sql` all applied. ~19 tables, all owner-RLS. Files (photos/docs) live in the private `receipts` storage bucket.
 - **Verify quickly:** load the site, confirm it renders (not a white screen), check `main` HEAD == deployed bundle. `git log --oneline -5`.
 
