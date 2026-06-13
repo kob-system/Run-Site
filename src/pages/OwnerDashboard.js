@@ -201,6 +201,8 @@ export default function OwnerDashboard({ profile }) {
   const [mileageEntries, setMileageEntries] = useState([])
   const [showNewMileage, setShowNewMileage] = useState(false)
   const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
+  const [showNewTime, setShowNewTime] = useState(false)
+  const [timeForm, setTimeForm] = useState({ worker_id: '', work_date: '', start_time: '', end_time: '' })
   const [payroll, setPayroll] = useState([])
   const [paychecks, setPaychecks] = useState([])
   // Getting-paid + field features
@@ -492,6 +494,61 @@ export default function OwnerDashboard({ profile }) {
       setPermits(pm.data || [])
     } catch (e) {
       showToast('Failed to load job details', 'error')
+    }
+  }
+
+  // Owner manually logs a worker's time on a job (for crew who don't clock in
+  // via the worker app). Mirrors the worker clock-out cost math:
+  // labor_cost = (minutes / 60) * the worker's hourly_rate.
+  const addTimeEntry = async () => {
+    if (!timeForm.worker_id) return setInlineError('Pick a worker')
+    if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return setInlineError('Date, start and end time are required')
+    const startAt = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
+    const endAt = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
+    if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) return setInlineError('Invalid date or time')
+    if (endAt <= startAt) return setInlineError('End time must be after start time')
+    const worker = workers.find(w => w.id === timeForm.worker_id)
+    const totalMinutes = Math.floor((endAt - startAt) / 60000)
+    const laborCost = (totalMinutes / 60) * (worker?.hourly_rate || 0)
+    setLoading(true)
+    setInlineError('')
+    try {
+      const { error } = await supabase.from('time_entries').insert({
+        project_id: selectedProject.id,
+        worker_id: timeForm.worker_id,
+        clocked_in_at: startAt.toISOString(),
+        clocked_out_at: endAt.toISOString(),
+        total_minutes: totalMinutes,
+        labor_cost: laborCost
+      })
+      if (error) throw error
+      setShowNewTime(false)
+      setTimeForm({ worker_id: '', work_date: '', start_time: '', end_time: '' })
+      await fetchProjectDetails(selectedProject)
+      showToast('Time added ✓')
+    } catch (e) {
+      setInlineError('Failed to add time. Try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Remove a worker from the owner's crew. Soft-unlink (owner_id → null) rather
+  // than delete: the worker's account and any hours already logged on jobs stay
+  // intact (time_entries.worker_id cascades on delete, so a hard delete would
+  // erase their labor from past job-cost history). They can re-link later.
+  const removeWorker = async (w) => {
+    if (!window.confirm(`Remove ${w.full_name} from your crew?\n\nHours they already logged on jobs stay intact, but they'll no longer show here or be assignable. They can re-link anytime by entering your email when they sign in.`)) return
+    setLoading(true)
+    try {
+      const { error } = await supabase.from('profiles').update({ owner_id: null }).eq('id', w.id)
+      if (error) throw error
+      setWorkers(prev => prev.filter(x => x.id !== w.id))
+      showToast('Worker removed ✓')
+    } catch (e) {
+      showToast('Failed to remove worker', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -1461,6 +1518,7 @@ export default function OwnerDashboard({ profile }) {
 
           {projectTab === 'time' && (
             <div>
+              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add Time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1737,6 +1795,32 @@ export default function OwnerDashboard({ profile }) {
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addMileage} disabled={loading}>{loading ? 'Saving...' : 'Add Mileage'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewMileage(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {showNewTime && (
+          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Add Time</h2>
+              <div className="input-group"><label>Worker</label><select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — $${w.hourly_rate}/hr` : ''}</option>)}</select></div>
+              <div className="input-group"><label>Date</label><input type="date" value={timeForm.work_date} onChange={e => setTimeForm({ ...timeForm, work_date: e.target.value })} /></div>
+              <div className="input-group"><label>Start time</label><input type="time" value={timeForm.start_time} onChange={e => setTimeForm({ ...timeForm, start_time: e.target.value })} /></div>
+              <div className="input-group"><label>End time</label><input type="time" value={timeForm.end_time} onChange={e => setTimeForm({ ...timeForm, end_time: e.target.value })} /></div>
+              {(() => {
+                if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return null
+                const s = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
+                const en = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
+                if (isNaN(s.getTime()) || isNaN(en.getTime()) || en <= s) return null
+                const mins = Math.floor((en - s) / 60000)
+                const w = workers.find(x => x.id === timeForm.worker_id)
+                const cost = (mins / 60) * (w?.hourly_rate || 0)
+                return <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>{formatTime(mins)} · {formatCurrency(cost)}{(w && !w.hourly_rate) ? ' — set this worker’s hourly rate (Workers tab) to track labor cost' : ''}</p>
+              })()}
+              {workers.length === 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>Add a worker first (Workers tab) before logging time.</p>}
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving...' : 'Add Time'}</button>
+              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
         )}
@@ -2147,6 +2231,7 @@ export default function OwnerDashboard({ profile }) {
                     <div style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
                       <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Edit Rate</button>
                       <button onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign</button>
+                      <button onClick={() => removeWorker(w)} style={{ background: 'transparent', color: '#DC2626', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Remove</button>
                     </div>
                   </div>
                 </div>
