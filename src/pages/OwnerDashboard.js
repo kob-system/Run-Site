@@ -1529,7 +1529,8 @@ export default function OwnerDashboard({ profile }) {
             <div>
               <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
                 {uploadingPhoto ? 'Uploading…' : '📷 Add Photo'}
-                <input type="file" accept="image/*" capture="environment" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
+                {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
+                <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
                 {jobPhotos.map(ph => (
