@@ -55,6 +55,8 @@ export default function WorkerDashboard({ profile }) {
   const [scheduleError, setScheduleError] = useState('')
   const [clockReady, setClockReady] = useState(false)
   const [statusError, setStatusError] = useState('')
+  // Which job is mid-upload, so the "Uploading…" state shows on just that card.
+  const [uploadingPhotoFor, setUploadingPhotoFor] = useState(null)
 
   // Refs so the sync lock / retry timer / mounted check are synchronous and not
   // subject to stale-closure bugs the way React state is.
@@ -281,6 +283,33 @@ export default function WorkerDashboard({ profile }) {
     } catch (e) {
       setError('Could not load jobs. Check your connection.')
     }
+  }
+
+  // Crew adds a jobsite photo from the field — camera OR photo library (the
+  // file input has no `capture` attr, so the phone offers both). Uploads under
+  // the OWNER's storage folder (`${owner_id}/jobphotos/...`) so the owner can
+  // read it back with the existing own-folder storage policy; the job_photos
+  // insert is allowed by the worker_insert_job_photos RLS policy
+  // (FIX-DATABASE-10) which checks this worker is assigned to the project.
+  const addWorkerPhoto = async (e, project) => {
+    const file = e.target.files[0]
+    e.target.value = '' // let the worker re-pick the same file if needed
+    if (!file) return
+    if (!navigator.onLine) { showToast('📶 Offline — connect to send photos'); return }
+    setUploadingPhotoFor(project.id)
+    try {
+      const fileName = `${project.owner_id}/jobphotos/${Date.now()}_${file.name}`
+      const { error: upErr } = await supabase.storage.from('receipts').upload(fileName, file)
+      if (upErr) throw upErr
+      const { error } = await supabase.from('job_photos').insert({
+        owner_id: project.owner_id, project_id: project.id, photo_url: fileName, caption: null
+      })
+      if (error) throw error
+      showToast('Photo sent to your boss ✓')
+    } catch (err) {
+      showToast('Photo upload failed — try again')
+    }
+    setUploadingPhotoFor(null)
   }
 
   const fetchSchedule = async () => {
@@ -616,9 +645,16 @@ export default function WorkerDashboard({ profile }) {
                       {p.client_address && <p style={{ fontSize: '13px', color: '#6B7280', marginTop: '2px' }}>{p.client_address}</p>}
                       {!p.client_address && <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>No address on file — ask your boss to add it.</p>}
                       {sched && sched.task_description && <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{sched.task_description}{sched.start_time ? ` · ${formatScheduleTime(sched.start_time)}` : ''}</p>}
-                      {p.client_address && (
-                        <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.client_address)}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: '10px', background: '#16A34A', color: 'white', textDecoration: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: '700', minHeight: '44px' }}>📍 Get Directions</a>
-                      )}
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '10px' }}>
+                        {p.client_address && (
+                          <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.client_address)}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', background: '#16A34A', color: 'white', textDecoration: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: '700', minHeight: '44px', boxSizing: 'border-box' }}>📍 Get Directions</a>
+                        )}
+                        {/* Camera OR photo library — no `capture` attr means the phone offers both. */}
+                        <label style={{ display: 'inline-flex', alignItems: 'center', background: uploadingPhotoFor === p.id ? '#9CA3AF' : '#1C2B3A', color: 'white', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: '700', minHeight: '44px', boxSizing: 'border-box', cursor: uploadingPhotoFor === p.id ? 'default' : 'pointer' }}>
+                          {uploadingPhotoFor === p.id ? 'Uploading…' : '📷 Add Photo'}
+                          <input type="file" accept="image/*" onChange={(e) => addWorkerPhoto(e, p)} disabled={uploadingPhotoFor === p.id} style={{ display: 'none' }} />
+                        </label>
+                      </div>
                     </div>
                   )
                 })}
