@@ -201,6 +201,8 @@ export default function OwnerDashboard({ profile }) {
   const [mileageEntries, setMileageEntries] = useState([])
   const [showNewMileage, setShowNewMileage] = useState(false)
   const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
+  const [showNewTime, setShowNewTime] = useState(false)
+  const [timeForm, setTimeForm] = useState({ worker_id: '', work_date: '', start_time: '', end_time: '' })
   const [payroll, setPayroll] = useState([])
   const [paychecks, setPaychecks] = useState([])
   // Getting-paid + field features
@@ -211,6 +213,13 @@ export default function OwnerDashboard({ profile }) {
   const [punchItems, setPunchItems] = useState([])
   const [materialItems, setMaterialItems] = useState([])
   const [jobDocuments, setJobDocuments] = useState([])
+  // Owner-initiated worker invites (copy link, text it to the hire)
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteName, setInviteName] = useState('')
+  const [inviteLink, setInviteLink] = useState('')
+  const [inviteCopied, setInviteCopied] = useState(false)
+  // Worker time-off requests (owner approves / denies)
+  const [timeOff, setTimeOff] = useState([])
   const [punchInput, setPunchInput] = useState('')
   const [materialInput, setMaterialInput] = useState({ name: '', qty: '' })
   const [uploadingDoc, setUploadingDoc] = useState(false)
@@ -241,6 +250,16 @@ export default function OwnerDashboard({ profile }) {
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
 
+  // Friendly date range for time-off ("Jun 18" or "Jun 18 – Jun 20").
+  // T00:00:00 keeps date-only columns from drifting a day in local time.
+  const formatDateRange = (start, end) => {
+    const opts = { month: 'short', day: 'numeric' }
+    const s = new Date(start + 'T00:00:00').toLocaleDateString('en-US', opts)
+    if (!end || end === start) return s
+    const e = new Date(end + 'T00:00:00').toLocaleDateString('en-US', opts)
+    return `${s} – ${e}`
+  }
+
   const fetchProjects = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('projects').select('*').eq('owner_id', profile.id).order('created_at', { ascending: false })
@@ -258,6 +277,19 @@ export default function OwnerDashboard({ profile }) {
       setWorkers(data || [])
     } catch (e) {
       showToast('Failed to load workers', 'error')
+    }
+  }, [profile.id])
+
+  // Time-off requests addressed to this owner. Worker names are resolved
+  // from the already-loaded `workers` list in render (no profiles embed,
+  // which would be ambiguous here — two FKs to profiles).
+  const fetchTimeOff = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('time_off_requests').select('*').eq('owner_id', profile.id).order('created_at', { ascending: false })
+      if (error) throw error
+      setTimeOff(data || [])
+    } catch (e) {
+      // non-fatal — the rest of the Workers tab still works
     }
   }, [profile.id])
 
@@ -423,8 +455,8 @@ export default function OwnerDashboard({ profile }) {
   }, [profile.id])
 
   useEffect(() => {
-    Promise.all([fetchProjects(), fetchWorkers()]).finally(() => setInitialLoading(false))
-  }, [fetchProjects, fetchWorkers])
+    Promise.all([fetchProjects(), fetchWorkers(), fetchTimeOff()]).finally(() => setInitialLoading(false))
+  }, [fetchProjects, fetchWorkers, fetchTimeOff])
 
   useEffect(() => {
     if (workers.length) fetchWorkerStats(workers)
@@ -492,6 +524,117 @@ export default function OwnerDashboard({ profile }) {
       setPermits(pm.data || [])
     } catch (e) {
       showToast('Failed to load job details', 'error')
+    }
+  }
+
+  // Owner manually logs a worker's time on a job (for crew who don't clock in
+  // via the worker app). Mirrors the worker clock-out cost math:
+  // labor_cost = (minutes / 60) * the worker's hourly_rate.
+  const addTimeEntry = async () => {
+    if (!timeForm.worker_id) return setInlineError('Pick a worker')
+    if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return setInlineError('Date, start and end time are required')
+    const startAt = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
+    const endAt = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
+    if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) return setInlineError('Invalid date or time')
+    if (endAt <= startAt) return setInlineError('End time must be after start time')
+    const worker = workers.find(w => w.id === timeForm.worker_id)
+    const totalMinutes = Math.floor((endAt - startAt) / 60000)
+    const laborCost = (totalMinutes / 60) * (worker?.hourly_rate || 0)
+    setLoading(true)
+    setInlineError('')
+    try {
+      const { error } = await supabase.from('time_entries').insert({
+        project_id: selectedProject.id,
+        worker_id: timeForm.worker_id,
+        clocked_in_at: startAt.toISOString(),
+        clocked_out_at: endAt.toISOString(),
+        total_minutes: totalMinutes,
+        labor_cost: laborCost
+      })
+      if (error) throw error
+      setShowNewTime(false)
+      setTimeForm({ worker_id: '', work_date: '', start_time: '', end_time: '' })
+      await fetchProjectDetails(selectedProject)
+      showToast('Time added ✓')
+    } catch (e) {
+      setInlineError('Failed to add time. Try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Remove a worker from the owner's crew. Soft-unlink (owner_id → null) rather
+  // than delete: the worker's account and any hours already logged on jobs stay
+  // intact (time_entries.worker_id cascades on delete, so a hard delete would
+  // erase their labor from past job-cost history). They can re-link later.
+  const removeWorker = async (w) => {
+    if (!window.confirm(`Remove ${w.full_name} from your crew?\n\nHours they already logged on jobs stay intact, but they'll no longer show here or be assignable. They can re-link anytime by entering your email when they sign in.`)) return
+    setLoading(true)
+    try {
+      const { error } = await supabase.from('profiles').update({ owner_id: null }).eq('id', w.id)
+      if (error) throw error
+      setWorkers(prev => prev.filter(x => x.id !== w.id))
+      showToast('Worker removed ✓')
+    } catch (e) {
+      showToast('Failed to remove worker', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Generate a one-time invite link the owner texts to a new hire. The
+  // worker opens `/?invite=<token>`, sets a password, and is auto-linked
+  // to this owner — no typing the boss's email, no orphaned accounts.
+  const createInvite = async () => {
+    if (!inviteName.trim()) { setInlineError('Enter the worker’s name first.'); return }
+    setLoading(true)
+    setInlineError('')
+    try {
+      const token = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Date.now().toString(36) + Math.random().toString(36).slice(2)
+      const { error } = await supabase.from('worker_invites').insert({
+        owner_id: profile.id, token, worker_name: inviteName.trim()
+      })
+      if (error) throw error
+      setInviteLink(`${window.location.origin}/?invite=${token}`)
+      setInviteCopied(false)
+    } catch (e) {
+      setInlineError('Could not create the invite. Try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const copyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteLink)
+      setInviteCopied(true)
+      showToast('Invite link copied ✓')
+    } catch {
+      // Clipboard blocked (older mobile browser) — the link is shown on
+      // screen for a manual long-press copy; flag it as "ready" anyway.
+      setInviteCopied(true)
+    }
+  }
+
+  const resetInvite = () => {
+    setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('')
+  }
+
+  // Owner approves or denies a worker's time-off request.
+  const decideTimeOff = async (req, status) => {
+    setLoading(true)
+    try {
+      const decided_at = new Date().toISOString()
+      const { error } = await supabase.from('time_off_requests').update({ status, decided_at }).eq('id', req.id)
+      if (error) throw error
+      setTimeOff(prev => prev.map(r => r.id === req.id ? { ...r, status, decided_at } : r))
+      showToast(status === 'approved' ? 'Time off approved ✓' : 'Request denied')
+    } catch (e) {
+      showToast('Failed to update request', 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -1461,6 +1604,7 @@ export default function OwnerDashboard({ profile }) {
 
           {projectTab === 'time' && (
             <div>
+              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add Time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1738,6 +1882,32 @@ export default function OwnerDashboard({ profile }) {
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addMileage} disabled={loading}>{loading ? 'Saving...' : 'Add Mileage'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewMileage(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {showNewTime && (
+          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Add Time</h2>
+              <div className="input-group"><label>Worker</label><select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — $${w.hourly_rate}/hr` : ''}</option>)}</select></div>
+              <div className="input-group"><label>Date</label><input type="date" value={timeForm.work_date} onChange={e => setTimeForm({ ...timeForm, work_date: e.target.value })} /></div>
+              <div className="input-group"><label>Start time</label><input type="time" value={timeForm.start_time} onChange={e => setTimeForm({ ...timeForm, start_time: e.target.value })} /></div>
+              <div className="input-group"><label>End time</label><input type="time" value={timeForm.end_time} onChange={e => setTimeForm({ ...timeForm, end_time: e.target.value })} /></div>
+              {(() => {
+                if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return null
+                const s = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
+                const en = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
+                if (isNaN(s.getTime()) || isNaN(en.getTime()) || en <= s) return null
+                const mins = Math.floor((en - s) / 60000)
+                const w = workers.find(x => x.id === timeForm.worker_id)
+                const cost = (mins / 60) * (w?.hourly_rate || 0)
+                return <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>{formatTime(mins)} · {formatCurrency(cost)}{(w && !w.hourly_rate) ? ' — set this worker’s hourly rate (Workers tab) to track labor cost' : ''}</p>
+              })()}
+              {workers.length === 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>Add a worker first (Workers tab) before logging time.</p>}
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving...' : 'Add Time'}</button>
+              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
         )}
@@ -2117,9 +2287,60 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'workers' && (
           <div>
+            {!showInvite && (
+              <button onClick={() => setShowInvite(true)} className="btn-primary" style={{ marginBottom: '12px' }}>+ Add Worker</button>
+            )}
+            {showInvite && (
+              <div className="card" style={{ marginBottom: '12px', background: '#FFF9F4', border: '1px solid #F0C9A8' }}>
+                {!inviteLink ? (
+                  <>
+                    <h3 style={{ marginBottom: '4px' }}>Invite a worker</h3>
+                    <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Enter their name and we’ll make a private sign-up link you can text them. No app account needed on your end.</p>
+                    <div className="input-group">
+                      <label htmlFor="invite-name">Worker’s name</label>
+                      <input id="invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
+                    </div>
+                    {inlineError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{inlineError}</div>}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
+                      <button onClick={resetInvite} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 style={{ marginBottom: '4px' }}>Link ready for {inviteName} 🎉</h3>
+                    <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text this link to {inviteName}. They tap it, set a password, and they’re on your crew automatically.</p>
+                    <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', wordBreak: 'break-all', marginBottom: '10px' }}>{inviteLink}</div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button onClick={copyInvite} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Copied ✓' : 'Copy link'}</button>
+                      <button onClick={resetInvite} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
-              Workers sign up at the app and enter your email to link to your account.
+              Add a worker with an invite link above, or they can sign up themselves and enter your email.
             </p>
+            {timeOff.filter(r => r.status === 'pending').length > 0 && (
+              <div className="card" style={{ marginBottom: '12px', border: '1px solid #F0C9A8' }}>
+                <h3 style={{ marginBottom: '8px' }}>Time-off requests</h3>
+                {timeOff.filter(r => r.status === 'pending').map(r => {
+                  const wk = workers.find(x => x.id === r.worker_id)
+                  return (
+                    <div key={r.id} style={{ paddingTop: '8px', marginTop: '8px', borderTop: '1px solid #f0f0f0' }}>
+                      <p style={{ fontWeight: '600' }}>{wk ? wk.full_name : 'A worker'}</p>
+                      <p style={{ fontSize: '13px', color: '#1C2B3A' }}>{formatDateRange(r.start_date, r.end_date)}</p>
+                      {r.reason && <p style={{ fontSize: '13px', color: '#888', marginTop: '2px' }}>“{r.reason}”</p>}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                        <button onClick={() => decideTimeOff(r, 'approved')} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>Approve</button>
+                        <button onClick={() => decideTimeOff(r, 'denied')} disabled={loading} style={{ background: 'transparent', color: '#DC2626', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '6px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>Deny</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             {workers.map(w => {
               const stats = workerStats[w.id]
               return (
@@ -2148,6 +2369,7 @@ export default function OwnerDashboard({ profile }) {
                     <div style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
                       <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Edit Rate</button>
                       <button onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign</button>
+                      <button onClick={() => removeWorker(w)} style={{ background: 'transparent', color: '#DC2626', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Remove</button>
                     </div>
                   </div>
                 </div>

@@ -3,11 +3,14 @@ import { supabase } from './supabaseClient'
 import Login from './pages/Login'
 import OwnerDashboard from './pages/OwnerDashboard'
 import WorkerDashboard from './pages/WorkerDashboard'
+import Billing from './pages/Billing'
 import './App.css'
 
 export default function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
+  // undefined = subscription not yet read; null = no row / n/a (e.g. workers).
+  const [sub, setSub] = useState(undefined)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
 
@@ -58,6 +61,22 @@ export default function App() {
         }
       }
       setProfile(data)
+
+      // Owners carry a subscription; read it so the billing gate can decide.
+      // Workers and any read failure (e.g. table not migrated yet) -> null,
+      // which only ever paywalls when REACT_APP_BILLING_ENFORCED is on.
+      if (data && data.role === 'owner') {
+        try {
+          const { data: s } = await supabase
+            .from('subscriptions')
+            .select('status,current_period_end')
+            .eq('owner_id', user.id)
+            .maybeSingle()
+          setSub(s || null)
+        } catch { setSub(null) }
+      } else {
+        setSub(null)
+      }
     } catch (e) {
       // A real read/insert failure (network/RLS) — distinct from a genuinely
       // absent profile. Show a retry screen, not the sign-out recovery.
@@ -70,7 +89,23 @@ export default function App() {
   if (loading) return <div className="loading">Loading Run-Site...</div>
   if (!session) return <Login />
   if (profile?.role === 'worker') return <WorkerDashboard profile={profile} />
-  if (profile) return <OwnerDashboard profile={profile} />
+  if (profile) {
+    const enforced = process.env.REACT_APP_BILLING_ENFORCED === 'true'
+    const wantsBilling =
+      new URLSearchParams(window.location.search).has('billing') ||
+      window.location.hash === '#billing'
+    const active =
+      sub &&
+      ['active', 'trialing', 'comp'].includes(sub.status) &&
+      (!sub.current_period_end || new Date(sub.current_period_end) > new Date())
+
+    // Only when enforcement is ON: wait for the subscription read before
+    // deciding, so we never flash the dashboard and then yank it to a paywall.
+    if (enforced && sub === undefined) return <div className="loading">Loading Run-Site...</div>
+    if (enforced && !active) return <Billing profile={profile} mode="paywall" />
+    if (wantsBilling) return <Billing profile={profile} mode="manage" />
+    return <OwnerDashboard profile={profile} />
+  }
   if (loadError) return (
     <div className="loading">
       <p>We couldn't reach your account. Check your connection.</p>

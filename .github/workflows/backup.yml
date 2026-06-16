@@ -1,0 +1,87 @@
+name: Weekly encrypted backup
+
+# Backs up the Run-Site database + the receipts storage bucket, encrypts both
+# with GPG, and pushes them off-site via rclone. This is the INDEPENDENT backup
+# (Supabase's own daily backups only retain ~7 days; this is the long-term,
+# off-vendor copy of contractors' tax/money data).
+#
+# Runs every Sunday 07:00 UTC, and on demand (workflow_dispatch).
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_DB_URL            postgres connection string (Supabase -> Project
+#                              Settings -> Database -> Connection string -> URI,
+#                              with the real password; keep ?sslmode=require)
+#   SUPABASE_URL               https://<ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  service role key (server-side only)
+#   BACKUP_PASSPHRASE          strong passphrase used to GPG-encrypt the dumps
+#   RCLONE_CONF_BASE64         base64 of your rclone.conf (defines the remote)
+#   RCLONE_REMOTE              destination, e.g.  b2:runsite-backups
+#
+# Restore (when you ever need it):
+#   gpg -d db-YYYY-MM-DD.sql.gz.gpg | gunzip | psql "$SUPABASE_DB_URL"
+#   gpg -d storage-YYYY-MM-DD.tar.gz.gpg | tar xzf -
+
+on:
+  schedule:
+    - cron: '0 7 * * 0'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pg_dump (Postgres 15 client) + rclone
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-15
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Set date stamp
+        run: echo "STAMP=$(date +%F)" >> "$GITHUB_ENV"
+
+      - name: Dump database (encrypted)
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          pg_dump --no-owner --no-privileges "$SUPABASE_DB_URL" \
+            | gzip \
+            | gpg --batch --yes --symmetric --cipher-algo AES256 \
+                  --passphrase "$BACKUP_PASSPHRASE" \
+                  -o "db-${STAMP}.sql.gz.gpg"
+          ls -lh "db-${STAMP}.sql.gz.gpg"
+
+      - name: Dump receipts storage bucket (encrypted, best-effort)
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          node scripts/backup-storage.mjs
+          if [ -d _storage_backup ]; then
+            tar czf - _storage_backup \
+              | gpg --batch --yes --symmetric --cipher-algo AES256 \
+                    --passphrase "$BACKUP_PASSPHRASE" \
+                    -o "storage-${STAMP}.tar.gz.gpg"
+            ls -lh "storage-${STAMP}.tar.gz.gpg"
+          fi
+
+      - name: Upload off-site (rclone)
+        env:
+          RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+          RCLONE_REMOTE: ${{ secrets.RCLONE_REMOTE }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.config/rclone
+          echo "$RCLONE_CONF_BASE64" | base64 -d > ~/.config/rclone/rclone.conf
+          for f in db-${STAMP}.sql.gz.gpg storage-${STAMP}.tar.gz.gpg; do
+            [ -f "$f" ] && rclone copy "$f" "${RCLONE_REMOTE}/${STAMP}/" --no-traverse
+          done
+          echo "Backup uploaded to ${RCLONE_REMOTE}/${STAMP}/"

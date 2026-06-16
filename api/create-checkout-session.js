@@ -1,0 +1,98 @@
+// Creates a Stripe Checkout Session (subscription mode) for the AUTHENTICATED
+// owner. The client only sends the plan name ('monthly' | 'yearly'); the actual
+// price ids live in server env vars so they can't be tampered with. The owner's
+// Supabase id rides along as client_reference_id AND on the subscription
+// metadata, so the webhook can map the Stripe customer back to the account.
+//
+// No Stripe SDK — we call the REST API with fetch + form-encoding, matching the
+// rest of api/ (notify-owner, scan-receipt) and keeping the bundle dependency-free.
+const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY
+const PRICES = {
+  monthly: process.env.STRIPE_PRICE_MONTHLY,
+  yearly: process.env.STRIPE_PRICE_YEARLY,
+}
+const APP_URL = process.env.APP_URL || 'https://runsite-pearl.vercel.app'
+
+async function getUser(req) {
+  const auth = req.headers.authorization || ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
+  if (!token || !SUPABASE_URL || !SERVICE_KEY) return null
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${token}` },
+    })
+    if (!r.ok) return null
+    const u = await r.json()
+    return u && u.id ? { id: u.id, email: u.email } : null
+  } catch { return null }
+}
+
+async function sbGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+  })
+  if (!r.ok) throw new Error('Supabase lookup failed: ' + r.status)
+  return r.json()
+}
+
+async function stripe(path, params) {
+  const r = await fetch('https://api.stripe.com/v1/' + path, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + STRIPE_SECRET,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams(params),
+  })
+  const data = await r.json()
+  if (!r.ok) throw new Error((data && data.error && data.error.message) || 'Stripe error ' + r.status)
+  return data
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).end()
+  if (!STRIPE_SECRET || !SUPABASE_URL || !SERVICE_KEY) {
+    return res.status(500).json({ error: 'Billing not configured' })
+  }
+
+  const user = await getUser(req)
+  if (!user) return res.status(401).json({ error: 'Unauthorized' })
+
+  const plan = req.body && req.body.plan
+  const priceId = PRICES[plan]
+  if (!priceId) return res.status(400).json({ error: 'Unknown plan' })
+
+  try {
+    // Reuse an existing Stripe customer if this owner already has one, so we
+    // don't create a duplicate customer on a re-subscribe.
+    let existingCustomer = null
+    try {
+      const rows = await sbGet(
+        `subscriptions?owner_id=eq.${encodeURIComponent(user.id)}&select=stripe_customer_id`
+      )
+      if (rows && rows[0] && rows[0].stripe_customer_id) existingCustomer = rows[0].stripe_customer_id
+    } catch { /* table may not exist yet; fall through to email */ }
+
+    const params = {
+      mode: 'subscription',
+      'line_items[0][price]': priceId,
+      'line_items[0][quantity]': '1',
+      client_reference_id: user.id,
+      'subscription_data[metadata][owner_id]': user.id,
+      'metadata[owner_id]': user.id,
+      allow_promotion_codes: 'true',
+      success_url: `${APP_URL}/?billing=success`,
+      cancel_url: `${APP_URL}/?billing=cancel`,
+    }
+    if (existingCustomer) params.customer = existingCustomer
+    else if (user.email) params.customer_email = user.email
+
+    const session = await stripe('checkout/sessions', params)
+    return res.json({ url: session.url })
+  } catch (err) {
+    console.error('create-checkout-session error:', err)
+    return res.status(502).json({ error: 'Could not start checkout' })
+  }
+}

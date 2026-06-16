@@ -57,6 +57,11 @@ export default function WorkerDashboard({ profile }) {
   const [statusError, setStatusError] = useState('')
   // Which job is mid-upload, so the "Uploading…" state shows on just that card.
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState(null)
+  // Time-off requests this worker has filed (with owner's decision).
+  const [timeOff, setTimeOff] = useState([])
+  const [timeOffForm, setTimeOffForm] = useState({ start_date: '', end_date: '', reason: '' })
+  const [timeOffError, setTimeOffError] = useState('')
+  const [timeOffSubmitting, setTimeOffSubmitting] = useState(false)
 
   // Refs so the sync lock / retry timer / mounted check are synchronous and not
   // subject to stale-closure bugs the way React state is.
@@ -97,6 +102,7 @@ export default function WorkerDashboard({ profile }) {
     fetchAssignedProjects()
     fetchSchedule()
     fetchHistory()   // populate the "This week" summary up front
+    fetchTimeOff()
   }, [])
 
   // One assigned job? Always pin selection to it so a reassignment is reflected.
@@ -320,6 +326,45 @@ export default function WorkerDashboard({ profile }) {
       setSchedule(data || [])
     } catch (e) {
       setScheduleError("Couldn't load your schedule. Check your connection.")
+    }
+  }
+
+  const fetchTimeOff = async () => {
+    try {
+      const { data, error } = await supabase.from('time_off_requests').select('*').eq('worker_id', profile.id).order('created_at', { ascending: false })
+      if (error) throw error
+      setTimeOff(data || [])
+    } catch (e) {
+      // non-fatal — the form still works
+    }
+  }
+
+  const submitTimeOff = async (e) => {
+    e.preventDefault()
+    setTimeOffError('')
+    if (!profile.owner_id) { setTimeOffError("You're not linked to a boss yet, so there's no one to send this to."); return }
+    const { start_date, end_date, reason } = timeOffForm
+    if (!start_date) { setTimeOffError('Pick a start date.'); return }
+    const end = end_date || start_date
+    if (end < start_date) { setTimeOffError('The end date can’t be before the start date.'); return }
+    setTimeOffSubmitting(true)
+    try {
+      const { data, error } = await supabase.from('time_off_requests').insert({
+        owner_id: profile.owner_id,
+        worker_id: profile.id,
+        start_date,
+        end_date: end,
+        reason: reason.trim() || null,
+        status: 'pending'
+      }).select()
+      if (error) throw error
+      if (data && data[0]) setTimeOff(prev => [data[0], ...prev])
+      setTimeOffForm({ start_date: '', end_date: '', reason: '' })
+      showToast('Request sent to your boss ✓')
+    } catch (err) {
+      setTimeOffError('Could not send your request. Try again.')
+    } finally {
+      setTimeOffSubmitting(false)
     }
   }
 
@@ -564,6 +609,7 @@ export default function WorkerDashboard({ profile }) {
         <button className={'tab ' + (activeTab === 'clock' ? 'active' : '')} onClick={() => setActiveTab('clock')}>Clock In/Out</button>
         <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>My Schedule</button>
         <button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => setActiveTab('history')}>History</button>
+        <button className={'tab ' + (activeTab === 'timeoff' ? 'active' : '')} onClick={() => setActiveTab('timeoff')}>Time Off</button>
       </div>
 
       <div className="page">
@@ -677,6 +723,52 @@ export default function WorkerDashboard({ profile }) {
                     {entry.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{formatScheduleTime(entry.start_time)}{entry.end_time ? ` — ${formatScheduleTime(entry.end_time)}` : ''}</p>}
                   </div>
                 ))
+            }
+          </div>
+        )}
+
+        {activeTab === 'timeoff' && (
+          <div>
+            <form onSubmit={submitTimeOff} className="card" style={{ marginBottom: '12px' }}>
+              <h3 style={{ marginBottom: '8px' }}>Request time off</h3>
+              <div className="input-group">
+                <label htmlFor="to-start">First day off</label>
+                <input id="to-start" type="date" value={timeOffForm.start_date} onChange={e => setTimeOffForm(f => ({ ...f, start_date: e.target.value }))} />
+              </div>
+              <div className="input-group">
+                <label htmlFor="to-end">Last day off <span style={{ color: '#888', fontWeight: '400' }}>(same day? leave blank)</span></label>
+                <input id="to-end" type="date" value={timeOffForm.end_date} onChange={e => setTimeOffForm(f => ({ ...f, end_date: e.target.value }))} />
+              </div>
+              <div className="input-group">
+                <label htmlFor="to-reason">Reason <span style={{ color: '#888', fontWeight: '400' }}>(optional)</span></label>
+                <input id="to-reason" type="text" value={timeOffForm.reason} onChange={e => setTimeOffForm(f => ({ ...f, reason: e.target.value }))} placeholder="Doctor’s appointment" />
+              </div>
+              {timeOffError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{timeOffError}</div>}
+              <button type="submit" className="btn-primary" disabled={timeOffSubmitting} style={{ width: '100%' }}>{timeOffSubmitting ? 'Sending…' : 'Send request'}</button>
+            </form>
+            {timeOff.length === 0
+              ? <div className="empty-state"><p>No time-off requests yet</p></div>
+              : timeOff.map(r => {
+                  const badge = r.status === 'approved'
+                    ? { bg: '#f0fdf4', bd: '#16A34A', fg: '#15803d', label: 'Approved' }
+                    : r.status === 'denied'
+                      ? { bg: '#fef2f2', bd: '#DC2626', fg: '#b91c1c', label: 'Denied' }
+                      : { bg: '#FFF4ED', bd: '#E07B2A', fg: '#c2620f', label: 'Pending' }
+                  const opts = { month: 'short', day: 'numeric' }
+                  const s = new Date(r.start_date + 'T00:00:00').toLocaleDateString('en-US', opts)
+                  const en = (!r.end_date || r.end_date === r.start_date) ? null : new Date(r.end_date + 'T00:00:00').toLocaleDateString('en-US', opts)
+                  return (
+                    <div key={r.id} className="card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <p style={{ fontWeight: '600', color: '#1C2B3A' }}>{en ? `${s} – ${en}` : s}</p>
+                          {r.reason && <p style={{ fontSize: '13px', color: '#888', marginTop: '2px' }}>{r.reason}</p>}
+                        </div>
+                        <span style={{ background: badge.bg, border: `1px solid ${badge.bd}`, color: badge.fg, borderRadius: '999px', padding: '3px 10px', fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap' }}>{badge.label}</span>
+                      </div>
+                    </div>
+                  )
+                })
             }
           </div>
         )}
