@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 
 export default function Login() {
@@ -12,6 +12,39 @@ export default function Login() {
   const [company, setCompany] = useState('')
   const [role, setRole] = useState('owner')
   const [ownerEmail, setOwnerEmail] = useState('')
+  // Owner-initiated invite (?invite=<token>): when present we already
+  // know the owner, so we skip the "Boss's Email" lookup and lock the
+  // signup to a worker joining that specific crew.
+  const [inviteToken, setInviteToken] = useState(null)
+  const [inviteOwnerId, setInviteOwnerId] = useState(null)
+  const [inviteCompany, setInviteCompany] = useState('')
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('invite')
+    if (!token) return
+    ;(async () => {
+      try {
+        const resp = await fetch('/api/resolve-invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        })
+        const data = await resp.json()
+        if (data && data.valid) {
+          setInviteToken(token)
+          setInviteOwnerId(data.ownerId)
+          setInviteCompany(data.companyName || 'your boss')
+          setRole('worker')
+          if (data.workerName) setName(data.workerName)
+          setIsSignup(true)
+        } else {
+          setError('This invite link is invalid or has already been used. Ask your boss to send a new one.')
+        }
+      } catch {
+        // Network hiccup — let them sign up the normal way.
+      }
+    })()
+  }, [])
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -29,7 +62,10 @@ export default function Login() {
     setNotice('')
 
     let ownerId = null
-    if (role === 'worker') {
+    if (role === 'worker' && inviteOwnerId) {
+      // Came in through an invite link — owner is already known.
+      ownerId = inviteOwnerId
+    } else if (role === 'worker') {
       let ownerLookup
       try {
         const resp = await fetch('/api/find-owner', {
@@ -68,6 +104,16 @@ export default function Login() {
       options: { data: signupMeta }
     })
     if (error) { setError(error.message); setLoading(false); return }
+
+    // Burn the invite token so the link can't be reused (best-effort —
+    // the worker is already created + linked even if this call fails).
+    if (inviteToken) {
+      fetch('/api/claim-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: inviteToken, workerId: data.user?.id })
+      }).catch(() => {})
+    }
 
     // No session => Supabase requires email confirmation. Don't try to insert
     // the profile (it would fail RLS and orphan the account). Tell the user.
@@ -110,18 +156,25 @@ export default function Login() {
         <form onSubmit={isSignup ? handleSignup : handleLogin}>
           {isSignup && (
             <>
-              <div className="input-group">
-                <label>I am a...</label>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                  <button type="button" onClick={() => setRole('owner')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'owner' ? '#E07B2A' : '#ddd'), background: role === 'owner' ? '#FFF4ED' : 'white', color: role === 'owner' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Contractor / Owner</button>
-                  <button type="button" onClick={() => setRole('worker')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'worker' ? '#E07B2A' : '#ddd'), background: role === 'worker' ? '#FFF4ED' : 'white', color: role === 'worker' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Worker</button>
+              {inviteToken && (
+                <div style={{ background: '#FFF4ED', border: '1px solid #E07B2A', borderRadius: '8px', padding: '12px', fontSize: '14px', color: '#1C2B3A', marginBottom: '16px', fontWeight: '600' }}>
+                  🎉 <strong>{inviteCompany}</strong> invited you to join the crew. Just set your password below to get started.
                 </div>
-              </div>
+              )}
+              {!inviteToken && (
+                <div className="input-group">
+                  <label>I am a...</label>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <button type="button" onClick={() => setRole('owner')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'owner' ? '#E07B2A' : '#ddd'), background: role === 'owner' ? '#FFF4ED' : 'white', color: role === 'owner' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Contractor / Owner</button>
+                    <button type="button" onClick={() => setRole('worker')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'worker' ? '#E07B2A' : '#ddd'), background: role === 'worker' ? '#FFF4ED' : 'white', color: role === 'worker' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Worker</button>
+                  </div>
+                </div>
+              )}
               <div className="input-group"><label htmlFor="su-name">Full Name</label><input id="su-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
               {role === 'owner' && (
                 <div className="input-group"><label htmlFor="su-company">Company Name</label><input id="su-company" type="text" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
               )}
-              {role === 'worker' && (
+              {role === 'worker' && !inviteToken && (
                 <div className="input-group"><label htmlFor="su-owner">Your Boss's Email</label><input id="su-owner" type="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
               )}
             </>
