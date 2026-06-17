@@ -560,6 +560,10 @@ export default function WorkerDashboard({ profile }) {
   }
 
   const currentEntry = activeEntry || offlineEntry
+  // Keep the worker oriented while clocked in: which job, and where.
+  const activeProject = currentEntry ? projects.find(p => p.id === currentEntry.project_id) : null
+  const activeJobName = currentEntry ? ((activeProject && activeProject.name) || currentEntry.job_name || (currentEntry.projects && currentEntry.projects.name) || '') : ''
+  const activeJobAddress = (activeProject && activeProject.client_address) || ''
 
   // This week's hours + pay from loaded history, so the worker can always see
   // what they've banked. Week starts Sunday, local time. Includes the live
@@ -620,17 +624,23 @@ export default function WorkerDashboard({ profile }) {
         {activeTab === 'clock' && (
           <div>
             <div className="card" style={{ textAlign: 'center' }}>
-              <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '4px' }}>
+              <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '4px' }}>
                 {currentEntry
                   ? isOfflineMode ? '📶 Clocked in (offline)' : 'Currently clocked in'
                   : 'Not clocked in'}
               </p>
+              {currentEntry && activeJobName && (
+                <p style={{ fontSize: '18px', fontWeight: '700', color: '#1C2B3A', margin: '2px 0' }}>📍 {activeJobName}</p>
+              )}
+              {currentEntry && activeJobAddress && (
+                <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '4px' }}>{activeJobAddress}</p>
+              )}
               <p style={{ fontSize: '12px', fontWeight: '600', color: currentEntry ? '#16A34A' : '#9CA3AF', marginBottom: '4px' }}>
                 {currentEntry ? '📍 GPS on — stamping your start/stop' : '📍 GPS off'}
               </p>
               {currentEntry
                 ? <div className="timer-display">{formatTimerDisplay(timer)}</div>
-                : <p style={{ fontSize: '15px', color: '#6B7280', margin: '10px 0 16px' }}>Tap the big button below when you get to the job.</p>}
+                : <p style={{ fontSize: '15px', color: '#4B5563', margin: '10px 0 16px' }}>Tap the big button below when you get to the job.</p>}
 
               {!currentEntry && (
                 projects.length === 1 ? (
@@ -657,7 +667,7 @@ export default function WorkerDashboard({ profile }) {
 
               {currentEntry ? (
                 <div>
-                  <button className="btn-danger" onClick={clockOut} disabled={loading} style={{ marginBottom: '8px' }}>
+                  <button className="btn-danger" onClick={clockOut} disabled={loading} style={{ fontSize: '18px', padding: '18px', minHeight: '60px', marginBottom: '8px' }}>
                     {loading ? 'Clocking Out...' : 'Clock Out'}
                   </button>
                   {isOfflineMode && (
@@ -671,7 +681,7 @@ export default function WorkerDashboard({ profile }) {
                   {projects.length === 0 ? 'Ask your boss to assign a job' : loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
                 </button>
               )}
-              <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '14px', lineHeight: '1.5', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
+              <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '14px', lineHeight: '1.5', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
                 🔒 Your location only stamps your start and stop so your hours can never be disputed. GPS is off when you're clocked out.
               </p>
             </div>
@@ -682,14 +692,14 @@ export default function WorkerDashboard({ profile }) {
 
             {projects.length > 0 && (
               <div style={{ marginTop: '20px' }}>
-                <p style={{ fontSize: '12px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 4px 8px' }}>Your jobs</p>
+                <p style={{ fontSize: '12px', fontWeight: '700', color: '#4B5563', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 4px 8px' }}>Your jobs</p>
                 {projects.map(p => {
                   const sched = schedule.find(s => s.project_id === p.id)
                   return (
                     <div key={p.id} className="card" style={{ textAlign: 'left' }}>
                       <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{p.name}</h3>
                       {p.client_address && <p style={{ fontSize: '13px', color: '#6B7280', marginTop: '2px' }}>{p.client_address}</p>}
-                      {!p.client_address && <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>No address on file — ask your boss to add it.</p>}
+                      {!p.client_address && <p style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>No address on file — ask your boss to add it.</p>}
                       {sched && sched.task_description && <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{sched.task_description}{sched.start_time ? ` · ${formatScheduleTime(sched.start_time)}` : ''}</p>}
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '10px' }}>
                         {p.client_address && (
