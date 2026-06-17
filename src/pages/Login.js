@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import buildInfo from '../buildInfo.json'
 
 // Turn raw Supabase/auth error strings into plain language a contractor
 // (or their crew) can act on, instead of leaking internal API wording.
@@ -210,6 +211,7 @@ export default function Login() {
           <button onClick={() => { setIsSignup(!isSignup); setError(''); setNotice('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>{isSignup ? 'Sign In' : 'Sign Up'}</button>
         </p>
       </div>
+      <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: '11px', marginTop: '18px' }}>build {buildInfo.sha} · {buildInfo.time}</p>
     </div>
   )
 }
