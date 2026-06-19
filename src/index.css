@@ -1,3 +1,40 @@
+/* ── Design tokens ───────────────────────────────────────────────
+   Single source of truth for color, spacing, radius, elevation.
+   Values match the previously-inlined ones, so this is centralization
+   with no visual regression — new rules reference the vars. */
+:root {
+  --navy: #1C2B3A;
+  --navy-soft: #2A3B4D;
+  --orange: #E07B2A;
+  --orange-dark: #C96A1E;
+  --orange-tint: #FFF4ED;
+  --green: #16A34A;
+  --green-dark: #15803D;
+  --green-tint: #DCFCE7;
+  --red: #DC2626;
+  --red-dark: #B91C1C;
+  --red-tint: #FEE2E2;
+  --amber: #F59E0B;
+  --amber-tint: #FEF3C7;
+
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --text: #1C2B3A;
+  --text-secondary: #4B5563;
+  --text-muted: #6B7280;
+  --border: #e3e8ef;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.18);
+
+  --tap: 44px; /* minimum touch target (gloved hands, job site) */
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -10,4 +47,14 @@ body {
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+/* Visible keyboard-focus ring for accessibility (does not show on mouse click). */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
 }

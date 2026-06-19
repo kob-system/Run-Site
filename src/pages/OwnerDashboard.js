@@ -1500,6 +1500,16 @@ export default function OwnerDashboard({ profile }) {
         <div className="page">
           {projectTab === 'budget' && (
             <div>
+              {/* Profit hero — the one number that matters, surfaced at the top
+                  instead of buried as the last of six cards. */}
+              <div className="card" style={{ background: projProfit >= 0 ? '#F0FDF4' : '#FEF2F2', border: '1px solid ' + (projProfit >= 0 ? '#BBF7D0' : '#FECACA') }}>
+                <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Projected Profit</p>
+                <p style={{ fontSize: '32px', fontWeight: 800, lineHeight: 1.1, color: projProfit >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
+                <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
+                  {contractOf(selectedProject) > 0 ? Math.round((projProfit / contractOf(selectedProject)) * 100) + '% margin · ' : ''}target {formatCurrency(selectedProject.profit_target)}
+                </p>
+                {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px', fontWeight: 600 }}>⚠️ Projected to go over budget</p>}
+              </div>
               <button className="btn-primary" onClick={() => { setInvoiceForm({ project_id: selectedProject.id, label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' }); setActiveTab('invoices'); setSelectedProject(null); setShowNewInvoice(true); setInlineError('') }} style={{ background: '#16A34A', marginBottom: '12px' }}>+ Invoice this job</button>
               {(selectedProject.client_name || selectedProject.client_phone || selectedProject.client_email || selectedProject.client_address) && (
                 <div className="card">
@@ -1548,7 +1558,7 @@ export default function OwnerDashboard({ profile }) {
             <p style={{ fontWeight: '600', fontSize: '14px' }}>{w.name}</p>
             <p style={{ fontSize: '12px', color: '#888' }}>{formatTime(w.minutes)}</p>
           </div>
-          <p style={{ fontWeight: '700', color: '#DC2626', fontSize: '14px' }}>{formatCurrency(w.cost)}</p>
+          <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '14px' }}>{formatCurrency(w.cost)}</p>
         </div>
       ))}
     </div>
@@ -1594,7 +1604,7 @@ export default function OwnerDashboard({ profile }) {
                       <p style={{ fontSize: '11px', color: '#717171' }}>{new Date(r.created_at).toLocaleDateString()}</p>
                       {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
                     </div>
-                    <p style={{ fontWeight: '700', color: '#DC2626', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
+                    <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
                   </div>
                 </div>
               ))}
@@ -1604,7 +1614,7 @@ export default function OwnerDashboard({ profile }) {
 
           {projectTab === 'time' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add Time</button>
+              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add Time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1887,10 +1897,44 @@ export default function OwnerDashboard({ profile }) {
         )}
 
         {showNewTime && (
-          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError('') }}>
+          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
               <h2>Add Time</h2>
-              <div className="input-group"><label>Worker</label><select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — $${w.hourly_rate}/hr` : ''}</option>)}</select></div>
+              <div className="input-group">
+                <label>Worker</label>
+                <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — $${w.hourly_rate}/hr` : ''}</option>)}</select>
+                {!showInvite && (
+                  <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
+                    {workers.length === 0 ? '+ Invite a worker to send them a link' : 'Don’t see them? + Invite a new worker'}
+                  </button>
+                )}
+              </div>
+              {showInvite && (
+                <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '10px', padding: '12px', marginBottom: '12px' }}>
+                  {!inviteLink ? (
+                    <>
+                      <div className="input-group" style={{ marginBottom: '8px' }}>
+                        <label htmlFor="time-invite-name">New worker’s name</label>
+                        <input id="time-invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="button" onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <h3 style={{ marginBottom: '4px', fontSize: '15px' }}>Link ready for {inviteName} 🎉</h3>
+                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text this to {inviteName}. They tap it, set a password, and they’re on your crew — then they’ll show in the Worker list above so you can log their time.</p>
+                      <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', wordBreak: 'break-all', marginBottom: '10px' }}>{inviteLink}</div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="button" onClick={copyInvite} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Copied ✓' : 'Copy link'}</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               <div className="input-group"><label>Date</label><input type="date" value={timeForm.work_date} onChange={e => setTimeForm({ ...timeForm, work_date: e.target.value })} /></div>
               <div className="input-group"><label>Start time</label><input type="time" value={timeForm.start_time} onChange={e => setTimeForm({ ...timeForm, start_time: e.target.value })} /></div>
               <div className="input-group"><label>End time</label><input type="time" value={timeForm.end_time} onChange={e => setTimeForm({ ...timeForm, end_time: e.target.value })} /></div>
@@ -1904,10 +1948,10 @@ export default function OwnerDashboard({ profile }) {
                 const cost = (mins / 60) * (w?.hourly_rate || 0)
                 return <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>{formatTime(mins)} · {formatCurrency(cost)}{(w && !w.hourly_rate) ? ' — set this worker’s hourly rate (Workers tab) to track labor cost' : ''}</p>
               })()}
-              {workers.length === 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>Add a worker first (Workers tab) before logging time.</p>}
+              {workers.length === 0 && !showInvite && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>No workers yet — tap “Invite a worker” above to send someone a sign-up link. Once they join, you can log their time here.</p>}
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving...' : 'Add Time'}</button>
-              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError('') }}>Cancel</button>
+              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>Cancel</button>
             </div>
           </div>
         )}
@@ -2241,11 +2285,16 @@ export default function OwnerDashboard({ profile }) {
                   const s = spendOf(p.id)
                   const matPct = getBudgetPct(s.materials, p.materials_budget)
                   const labPct = getBudgetPct(s.labor, p.labor_budget)
+                  const prof = profitOf(p)
                   return (
                     <div key={p.id} className="card" role="button" tabIndex={0} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }} style={{ cursor: 'pointer' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <div><h3>{p.name}</h3><p>{p.client_name}</p></div>
-                        <span className={'status-pill status-' + p.stage}>{p.stage}</span>
+                        <div style={{ textAlign: 'right' }}>
+                          <span className={'status-pill status-' + p.stage}>{p.stage}</span>
+                          <p style={{ fontSize: '17px', fontWeight: 800, marginTop: '6px', color: prof >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(prof)}</p>
+                          <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Proj. profit</p>
+                        </div>
                       </div>
                       {(matPct >= 80 || labPct >= 80) && (
                         <div className={matPct >= 100 || labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ marginBottom: '8px' }}>
@@ -2273,7 +2322,11 @@ export default function OwnerDashboard({ profile }) {
                         <p>{p.client_name}</p>
                         {p.completed_at && <p style={{ fontSize: '11px', color: '#717171', marginTop: '2px' }}>Completed {new Date(p.completed_at).toLocaleDateString()}</p>}
                       </div>
-                      <span className="status-pill status-end">✓ Done</span>
+                      <div style={{ textAlign: 'right' }}>
+                        <span className="status-pill status-end">✓ Done</span>
+                        <p style={{ fontSize: '15px', fontWeight: 800, marginTop: '6px', color: profitOf(p) >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(profitOf(p))}</p>
+                        <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Final profit</p>
+                      </div>
                     </div>
                   </div>
                 ))}

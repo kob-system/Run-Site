@@ -1,9 +1,25 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import buildInfo from '../buildInfo.json'
+
+// Turn raw Supabase/auth error strings into plain language a contractor
+// (or their crew) can act on, instead of leaking internal API wording.
+function friendlyError(msg) {
+  if (!msg) return 'Something went wrong. Please try again.'
+  const m = msg.toLowerCase()
+  if (m.includes('invalid login')) return "That email or password doesn't match. Please try again."
+  if (m.includes('email not confirmed')) return 'Please confirm your email first — check your inbox for the link.'
+  if (m.includes('already registered') || m.includes('user already')) return 'An account with that email already exists. Try signing in instead.'
+  if (m.includes('password should be at least') || m.includes('at least 6')) return 'Password must be at least 6 characters.'
+  if (m.includes('rate limit') || m.includes('too many')) return 'Too many attempts. Wait a minute, then try again.'
+  if (m.includes('network') || m.includes('failed to fetch')) return 'Connection problem. Check your signal and try again.'
+  return msg
+}
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPw, setShowPw] = useState(false)
   const [isSignup, setIsSignup] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -51,7 +67,7 @@ export default function Login() {
     setLoading(true)
     setError('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setError(error.message)
+    if (error) setError(friendlyError(error.message))
     setLoading(false)
   }
 
@@ -103,7 +119,7 @@ export default function Login() {
       password,
       options: { data: signupMeta }
     })
-    if (error) { setError(error.message); setLoading(false); return }
+    if (error) { setError(friendlyError(error.message)); setLoading(false); return }
 
     // Burn the invite token so the link can't be reused (best-effort —
     // the worker is already created + linked even if this call fails).
@@ -149,7 +165,7 @@ export default function Login() {
         <h1 style={{ color: '#E07B2A', fontSize: '32px', fontWeight: '800' }}>RUN-SITE</h1>
         <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', marginTop: '6px' }}>Contractor job tracking — from your phone</p>
       </div>
-      <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px' }}>
+      <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}>
         <h2 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '20px', color: '#1C2B3A' }}>{isSignup ? 'Create Account' : 'Sign In'}</h2>
         {error && <div className="alert-danger">{error}</div>}
         {notice && <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', color: '#15803d', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', fontWeight: '600', marginBottom: '12px' }}>{notice}</div>}
@@ -165,29 +181,37 @@ export default function Login() {
                 <div className="input-group">
                   <label>I am a...</label>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                    <button type="button" onClick={() => setRole('owner')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'owner' ? '#E07B2A' : '#ddd'), background: role === 'owner' ? '#FFF4ED' : 'white', color: role === 'owner' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Contractor / Owner</button>
-                    <button type="button" onClick={() => setRole('worker')} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid ' + (role === 'worker' ? '#E07B2A' : '#ddd'), background: role === 'worker' ? '#FFF4ED' : 'white', color: role === 'worker' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Worker</button>
+                    <button type="button" aria-pressed={role === 'owner'} onClick={() => setRole('owner')} style={{ flex: 1, minHeight: '48px', padding: '12px 10px', borderRadius: '8px', border: '2px solid ' + (role === 'owner' ? '#E07B2A' : '#ddd'), background: role === 'owner' ? '#FFF4ED' : 'white', color: role === 'owner' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Contractor / Owner</button>
+                    <button type="button" aria-pressed={role === 'worker'} onClick={() => setRole('worker')} style={{ flex: 1, minHeight: '48px', padding: '12px 10px', borderRadius: '8px', border: '2px solid ' + (role === 'worker' ? '#E07B2A' : '#ddd'), background: role === 'worker' ? '#FFF4ED' : 'white', color: role === 'worker' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Worker</button>
                   </div>
                 </div>
               )}
-              <div className="input-group"><label htmlFor="su-name">Full Name</label><input id="su-name" type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
+              <div className="input-group"><label htmlFor="su-name">Full Name</label><input id="su-name" type="text" autoComplete="name" autoFocus={isSignup && !inviteToken} value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
               {role === 'owner' && (
-                <div className="input-group"><label htmlFor="su-company">Company Name</label><input id="su-company" type="text" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
+                <div className="input-group"><label htmlFor="su-company">Company Name</label><input id="su-company" type="text" autoComplete="organization" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
               )}
               {role === 'worker' && !inviteToken && (
-                <div className="input-group"><label htmlFor="su-owner">Your Boss's Email</label><input id="su-owner" type="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
+                <div className="input-group"><label htmlFor="su-owner">Your Boss's Email</label><input id="su-owner" type="email" inputMode="email" autoComplete="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
               )}
             </>
           )}
-          <div className="input-group"><label htmlFor="li-email">Your Email</label><input id="li-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
-          <div className="input-group"><label htmlFor="li-password">Password</label><input id="li-password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required /></div>
-          <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Loading...' : isSignup ? 'Create Account' : 'Sign In'}</button>
+          <div className="input-group"><label htmlFor="li-email">Your Email</label><input id="li-email" type="email" inputMode="email" autoComplete="email" autoFocus={!isSignup} value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
+          <div className="input-group">
+            <label htmlFor="li-password">Password</label>
+            <div className="pw-wrap">
+              <input id="li-password" type={showPw ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} autoFocus={isSignup && !!inviteToken} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required minLength={isSignup ? 6 : undefined} />
+              <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
+            </div>
+            {isSignup && <p style={{ fontSize: '12px', color: '#6B7280', margin: '6px 2px 0' }}>At least 6 characters.</p>}
+          </div>
+          <button type="submit" className="btn-primary" disabled={loading}>{loading ? <><span className="spinner" />Working…</> : isSignup ? 'Create Account' : 'Sign In'}</button>
         </form>
         <p style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px', color: '#666' }}>
           {isSignup ? 'Already have an account?' : "Don't have an account?"}
           <button onClick={() => { setIsSignup(!isSignup); setError(''); setNotice('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>{isSignup ? 'Sign In' : 'Sign Up'}</button>
         </p>
       </div>
+      <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: '11px', marginTop: '18px' }}>build {buildInfo.sha} · {buildInfo.time}</p>
     </div>
   )
 }

@@ -29,7 +29,7 @@ const card = {
 }
 const btn = {
   marginTop: 14, padding: '12px 16px', fontSize: 16, fontWeight: 700, borderRadius: 10,
-  border: 'none', background: '#1C2B3A', color: '#fff', cursor: 'pointer', minHeight: 44,
+  border: 'none', background: 'var(--orange)', color: '#fff', cursor: 'pointer', minHeight: 44,
 }
 
 export default function Billing({ profile, mode = 'manage' }) {
@@ -50,8 +50,8 @@ export default function Billing({ profile, mode = 'manage' }) {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px', fontFamily: 'sans-serif' }}>
-      <h2 style={{ color: '#1C2B3A', marginBottom: 4 }}>RUN-SITE</h2>
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px' }}>
+      <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>RUN-SITE</h2>
       <h3 style={{ margin: '0 0 4px' }}>
         {mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription'}
       </h3>
@@ -79,7 +79,7 @@ export default function Billing({ profile, mode = 'manage' }) {
         <div style={{ ...card, borderColor: '#1C2B3A', borderWidth: 2 }}>
           <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Yearly <span style={{ color: '#0a7d33', fontSize: 13 }}>· 2 months free</span></div>
           <div style={{ fontSize: 28, fontWeight: 800 }}>$2,000<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/yr</span></div>
-          <div style={{ color: '#667085', fontSize: 14 }}>Save $400 vs. monthly.</div>
+          <div style={{ display: 'inline-block', alignSelf: 'flex-start', background: 'var(--green-tint)', color: 'var(--green-dark)', fontSize: 13, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginTop: 4 }}>Save $400 vs. monthly</div>
           <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'yearly')}>
             {busy === 'yearly' ? 'Starting…' : 'Choose yearly'}
           </button>
@@ -90,7 +90,7 @@ export default function Billing({ profile, mode = 'manage' }) {
         <button
           onClick={() => go('portal')}
           disabled={!!busy}
-          style={{ ...btn, background: 'transparent', color: '#1C2B3A', border: '1px solid #1C2B3A', marginTop: 0 }}
+          style={{ ...btn, background: 'transparent', color: 'var(--orange)', border: '2px solid var(--orange)', marginTop: 0 }}
         >
           {busy === 'portal' ? 'Opening…' : 'Manage billing'}
         </button>
