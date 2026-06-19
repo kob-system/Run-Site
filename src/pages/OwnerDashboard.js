@@ -1614,7 +1614,7 @@ export default function OwnerDashboard({ profile }) {
 
           {projectTab === 'time' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add Time</button>
+              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add Time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1897,10 +1897,44 @@ export default function OwnerDashboard({ profile }) {
         )}
 
         {showNewTime && (
-          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError('') }}>
+          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
               <h2>Add Time</h2>
-              <div className="input-group"><label>Worker</label><select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — $${w.hourly_rate}/hr` : ''}</option>)}</select></div>
+              <div className="input-group">
+                <label>Worker</label>
+                <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — $${w.hourly_rate}/hr` : ''}</option>)}</select>
+                {!showInvite && (
+                  <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
+                    {workers.length === 0 ? '+ Invite a worker to send them a link' : 'Don’t see them? + Invite a new worker'}
+                  </button>
+                )}
+              </div>
+              {showInvite && (
+                <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '10px', padding: '12px', marginBottom: '12px' }}>
+                  {!inviteLink ? (
+                    <>
+                      <div className="input-group" style={{ marginBottom: '8px' }}>
+                        <label htmlFor="time-invite-name">New worker’s name</label>
+                        <input id="time-invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="button" onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <h3 style={{ marginBottom: '4px', fontSize: '15px' }}>Link ready for {inviteName} 🎉</h3>
+                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text this to {inviteName}. They tap it, set a password, and they’re on your crew — then they’ll show in the Worker list above so you can log their time.</p>
+                      <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', wordBreak: 'break-all', marginBottom: '10px' }}>{inviteLink}</div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="button" onClick={copyInvite} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Copied ✓' : 'Copy link'}</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               <div className="input-group"><label>Date</label><input type="date" value={timeForm.work_date} onChange={e => setTimeForm({ ...timeForm, work_date: e.target.value })} /></div>
               <div className="input-group"><label>Start time</label><input type="time" value={timeForm.start_time} onChange={e => setTimeForm({ ...timeForm, start_time: e.target.value })} /></div>
               <div className="input-group"><label>End time</label><input type="time" value={timeForm.end_time} onChange={e => setTimeForm({ ...timeForm, end_time: e.target.value })} /></div>
@@ -1914,10 +1948,10 @@ export default function OwnerDashboard({ profile }) {
                 const cost = (mins / 60) * (w?.hourly_rate || 0)
                 return <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>{formatTime(mins)} · {formatCurrency(cost)}{(w && !w.hourly_rate) ? ' — set this worker’s hourly rate (Workers tab) to track labor cost' : ''}</p>
               })()}
-              {workers.length === 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>Add a worker first (Workers tab) before logging time.</p>}
+              {workers.length === 0 && !showInvite && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>No workers yet — tap “Invite a worker” above to send someone a sign-up link. Once they join, you can log their time here.</p>}
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving...' : 'Add Time'}</button>
-              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError('') }}>Cancel</button>
+              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>Cancel</button>
             </div>
           </div>
         )}
