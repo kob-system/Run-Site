@@ -2,11 +2,16 @@
 -- FIX-DATABASE-12-storage-write-lockdown.sql
 -- Tenant-scope WRITES to the private 'receipts' storage bucket.
 --
--- THE HOLE (pre-existing): the original insert policy "auth_upload_receipts"
--- (FIX-DATABASE.sql) allowed ANY authenticated user to upload into ANY path of
--- the receipts bucket. Reads were already locked to each tenant's own folder by
--- FIX-DATABASE-4 ("receipts_authed_read"), but writes were not — so a logged-in
--- user could write objects into a stranger's folder.
+-- THE HOLE (pre-existing): the insert policies allowed ANY authenticated user to
+-- upload into ANY path of the receipts bucket. Worse, a LIVE-DB audit (2026-06-20)
+-- found TWO extra policies created in the Supabase UI that are in no migration:
+--   * "Authenticated users can upload receipts" (INSERT, loose — same hole again)
+--   * "Receipt photos are publicly viewable"    (SELECT, using bucket_id='receipts'
+--      for role public) — a CROSS-TENANT READ LEAK. Because RLS policies are OR'd,
+--      this permissive read overrode the correct own-folder "receipts_authed_read",
+--      so any key could read any tenant's receipts by path (the private bucket only
+--      hides the public CDN URL; the storage API still honored this policy).
+-- This migration removes ALL of those and leaves exactly one read + one write policy.
 --
 -- THE LAYOUT (do NOT change app code — uploads keep their current paths):
 --   * Owners upload under  <owner_uid>/...        (their own folder)
@@ -28,8 +33,12 @@
 --   3) Confirm the owner can still open that worker's photo.
 -- ============================================================
 
-drop policy if exists "auth_upload_receipts"   on storage.objects;
-drop policy if exists "auth_upload_own_folder"  on storage.objects;
+-- Remove every loose / legacy receipts policy (repo-created AND UI-created).
+drop policy if exists "auth_upload_receipts"                     on storage.objects;
+drop policy if exists "auth_upload_own_folder"                   on storage.objects;
+drop policy if exists "Authenticated users can upload receipts"  on storage.objects;
+drop policy if exists "Receipt photos are publicly viewable"     on storage.objects;
+drop policy if exists "receipts_tenant_scoped_upload"            on storage.objects;
 
 create policy "receipts_tenant_scoped_upload" on storage.objects
   for insert with check (
