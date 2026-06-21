@@ -876,12 +876,16 @@ export default function OwnerDashboard({ profile }) {
       const items = Array.isArray(est.items) ? est.items : []
       const materials = items.filter(it => it.kind === 'materials').reduce((s, it) => s + estItemAmount(it), 0)
       const labor = items.filter(it => it.kind === 'labor').reduce((s, it) => s + estItemAmount(it), 0)
-      const total = estTotal(items, est.tax_rate)
-      const profit = Math.max(total - materials - labor, 0)
+      // Contract price = the PRE-TAX subtotal. Sales tax is collected for the state,
+      // not revenue, so it must never be counted as profit or job budget (the old code
+      // used the tax-inclusive total, which booked the entire tax amount as profit).
+      // Profit target = the non-materials/non-labor "Other" lines (markup / overhead).
+      const subtotal = estSubtotal(items)
+      const profit = Math.max(subtotal - materials - labor, 0)
       const { data: proj, error } = await supabase.from('projects').insert({
         owner_id: profile.id, name: est.title || (est.client_name ? est.client_name + ' — job' : 'New job'),
         client_name: est.client_name, client_phone: est.client_phone || null, client_email: est.client_email || null,
-        budget: roundCents(total), materials_budget: roundCents(materials), labor_budget: roundCents(labor),
+        budget: roundCents(subtotal), materials_budget: roundCents(materials), labor_budget: roundCents(labor),
         profit_target: roundCents(profit), stage: 'start'
       }).select().single()
       if (error) throw error

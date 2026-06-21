@@ -32,6 +32,20 @@ async function getUserId(req) {
   } catch { return null }
 }
 
+// Per-user rate limit via the rate_limit_hit() Postgres function (no extra infra).
+// Returns true if allowed. FAILS OPEN so an infra hiccup never blocks a real clock-in.
+async function allowedRate(uid, bucket, max, windowSecs) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/rate_limit_hit`, {
+      method: 'POST',
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_user: uid, p_bucket: bucket, p_max: max, p_window_secs: windowSecs })
+    })
+    if (!r.ok) return true
+    return (await r.json()) === true
+  } catch { return true }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!SUPABASE_URL || !SERVICE_KEY) return res.json({ success: false, error: 'Server misconfigured' })
@@ -39,6 +53,12 @@ export default async function handler(req, res) {
 
   const workerId = await getUserId(req)
   if (!workerId) return res.status(401).json({ success: false, error: 'Unauthorized' })
+
+  // Cap at 60 clock-in/out emails per hour per worker — far above any honest crew
+  // day, but stops a loop from spamming an owner's inbox.
+  if (!(await allowedRate(workerId, 'notify-owner', 60, 3600))) {
+    return res.status(429).json({ success: false, error: 'Too many notifications. Please slow down.' })
+  }
 
   const { projectId, action, timestamp } = req.body || {}
   if (action !== 'in' && action !== 'out') {

@@ -18,6 +18,22 @@ async function getUserId(req) {
   } catch { return null }
 }
 
+// Per-user rate limit via the rate_limit_hit() Postgres function (no extra infra).
+// Returns true if the call is allowed. FAILS OPEN: if the check itself errors we
+// never block a legitimate user over an infra hiccup.
+async function allowedRate(uid, bucket, max, windowSecs) {
+  if (!SUPABASE_URL || !SERVICE_KEY) return true
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/rate_limit_hit`, {
+      method: 'POST',
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_user: uid, p_bucket: bucket, p_max: max, p_window_secs: windowSecs })
+    })
+    if (!r.ok) return true
+    return (await r.json()) === true
+  } catch { return true }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -28,6 +44,12 @@ export default async function handler(req, res) {
 
   const uid = await getUserId(req)
   if (!uid) return res.status(401).json({ error: 'Unauthorized' })
+
+  // Cap paid OCR calls at 40/hour per user — generous for real receipt scanning,
+  // a hard stop on a runaway loop draining the Anthropic budget.
+  if (!(await allowedRate(uid, 'scan-receipt', 40, 3600))) {
+    return res.status(429).json({ error: 'Too many scans right now. Please wait a bit and try again.' })
+  }
 
   const { imageBase64, mediaType } = req.body || {}
   if (!imageBase64 || typeof imageBase64 !== 'string') {
