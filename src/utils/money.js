@@ -14,6 +14,21 @@ export const roundCents = (x) => Math.round(((x || 0) + Number.EPSILON) * 100) /
 export const computeProfit = (budget, spend = {}) =>
   (budget || 0) - (spend.materials || 0) - (spend.labor || 0) - (spend.other || 0)
 
+// Projected profit forecasts the FINISHED job, not just cash out the door so far.
+// The bug this fixes: computeProfit(contract, spend) on a brand-new job (spend ≈ 0)
+// returns the ENTIRE contract as "profit" at 100% margin — nonsense to a contractor.
+// Forecast instead: assume each cost bucket will hit at least its budget; if actual
+// spend has already passed budget, use the higher actual. "Other" costs (no budget
+// bucket) always count at actual. A COMPLETED job uses pure actuals, so a job that
+// came in under budget shows its real (higher) final profit.
+export const computeProjectedProfit = (contractPrice, budgets = {}, spend = {}, isComplete = false) => {
+  if (isComplete) return computeProfit(contractPrice, spend)
+  const materials = Math.max(budgets.materials || 0, spend.materials || 0)
+  const labor = Math.max(budgets.labor || 0, spend.labor || 0)
+  const other = spend.other || 0
+  return (contractPrice || 0) - materials - labor - other
+}
+
 export const computeMargin = (profit, budget) =>
   budget > 0 ? Math.round((profit / budget) * 100) : 0
 

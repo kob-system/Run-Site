@@ -1,4 +1,4 @@
-import { computeProfit, computeMargin, computeContractPrice, roundCents } from './money'
+import { computeProfit, computeProjectedProfit, computeMargin, computeContractPrice, roundCents } from './money'
 
 describe('roundCents (tax-report footing)', () => {
   test('rounds to whole cents', () => {
@@ -36,6 +36,30 @@ describe('computeProfit', () => {
     expect(computeProfit(500)).toBe(500)
     expect(computeProfit(500, {})).toBe(500)
     expect(computeProfit(undefined, {})).toBe(0)
+  })
+})
+
+describe('computeProjectedProfit (forecasts the finished job)', () => {
+  const budgets = { materials: 4800, labor: 5200 } // Deck Build; contract 12,500, target 2,500
+  test('the bug it fixes: a fresh job shows the profit TARGET, not the whole contract', () => {
+    // Old computeProfit(12500, {0,0,0}) returned 12500 at "100% margin". Wrong.
+    expect(computeProjectedProfit(12500, budgets, { materials: 0, labor: 0, other: 0 })).toBe(2500)
+    expect(computeMargin(2500, 12500)).toBe(20) // 20% margin, not 100%
+  })
+  test('costs under budget mid-job still forecast to the budget (active job)', () => {
+    // Spent 1,000 materials so far — projection still assumes the full 4,800 budget.
+    expect(computeProjectedProfit(12500, budgets, { materials: 1000, labor: 0, other: 0 })).toBe(2500)
+  })
+  test('actuals over budget pull projected profit down', () => {
+    // Materials blew past budget to 6,000 → profit = 12500 - 6000 - 5200 = 1300.
+    expect(computeProjectedProfit(12500, budgets, { materials: 6000, labor: 5200, other: 0 })).toBe(1300)
+  })
+  test('"other" costs (no budget bucket) always reduce profit', () => {
+    expect(computeProjectedProfit(12500, budgets, { materials: 0, labor: 0, other: 500 })).toBe(2000)
+  })
+  test('a completed job uses real actuals — under-budget shows the real, higher profit', () => {
+    // Finished spending only 4,000 materials + 5,000 labor → actual profit 3,500 > target.
+    expect(computeProjectedProfit(12500, budgets, { materials: 4000, labor: 5000, other: 0 }, true)).toBe(3500)
   })
 })
 
