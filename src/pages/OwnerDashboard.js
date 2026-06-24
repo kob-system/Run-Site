@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
-import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
+import { computeProfit, computeProjectedProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
 import { downloadCsv } from '../utils/csv'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 
@@ -1391,8 +1391,11 @@ export default function OwnerDashboard({ profile }) {
   const coOf = (pid) => coByProject[pid] || 0
   // Contract price the client owes = base contract + approved change orders.
   const contractOf = (p) => (p.budget || 0) + coOf(p.id)
-  // Profit = contract price (incl. approved change orders) minus everything spent.
-  const profitOf = (p) => computeProfit(contractOf(p), spendOf(p.id))
+  // Projected profit forecasts the finished job: an active job assumes each cost
+  // bucket hits at least its budget (so a fresh job shows the profit TARGET, not the
+  // whole contract at "100% margin"); a completed job (stage 'end') uses real actuals.
+  const budgetsOf = (p) => ({ materials: p.materials_budget || 0, labor: p.labor_budget || 0 })
+  const profitOf = (p) => computeProjectedProfit(contractOf(p), budgetsOf(p), spendOf(p.id), p.stage === 'end')
 
   const activeProjects = projects.filter(p => p.stage !== 'end')
   const completedProjects = projects.filter(p => p.stage === 'end')
