@@ -1210,7 +1210,7 @@ export default function OwnerDashboard({ profile }) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `run-site-${reportYear}-tax-report.csv`
+    a.download = `jobtally-${reportYear}-tax-report.csv`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -1229,7 +1229,7 @@ export default function OwnerDashboard({ profile }) {
         .order('issued_date', { ascending: true })
       if (error) throw error
       if (!data || !data.length) { showToast('No invoices to export', 'error'); setLoading(false); return }
-      downloadCsv(buildQboInvoicesCsv(data), 'run-site-quickbooks-invoices.csv')
+      downloadCsv(buildQboInvoicesCsv(data), 'jobtally-quickbooks-invoices.csv')
       showToast('QuickBooks invoices exported ✓')
     } catch (e) { showToast('Export failed', 'error') }
     setLoading(false)
@@ -1237,7 +1237,7 @@ export default function OwnerDashboard({ profile }) {
   const exportQboCustomers = () => {
     const rows = buildQboCustomersCsv(projects)
     if (rows.length <= 1) { showToast('No customers to export', 'error'); return }
-    downloadCsv(rows, 'run-site-quickbooks-customers.csv')
+    downloadCsv(rows, 'jobtally-quickbooks-customers.csv')
     showToast('QuickBooks customers exported ✓')
   }
 
@@ -1272,7 +1272,7 @@ export default function OwnerDashboard({ profile }) {
       const deductions = expensesTotal + laborTotal + mileageDeduction
 
       const rows = []
-      rows.push(['RUN-SITE TAX PACK', String(reportYear)])
+      rows.push(['JOBTALLY TAX PACK', String(reportYear)])
       rows.push(['Generated', new Date().toLocaleDateString()])
       rows.push([])
       rows.push(['INCOME — completed jobs'])
@@ -1296,7 +1296,7 @@ export default function OwnerDashboard({ profile }) {
       rows.push([])
       rows.push(['NOTE: Summary for your accountant — not a tax filing. Mileage uses the standard rate; do not also deduct actual vehicle costs for those same miles.'])
 
-      downloadCsv(rows, `run-site-${reportYear}-tax-pack.csv`)
+      downloadCsv(rows, `jobtally-${reportYear}-tax-pack.csv`)
       showToast('Tax Pack exported ✓')
     } catch (e) {
       showToast('Failed to export Tax Pack', 'error')
@@ -2047,7 +2047,7 @@ export default function OwnerDashboard({ profile }) {
   // MAIN DASHBOARD
   return (
     <div>
-      <div className="topbar"><h1>RUN-SITE</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
+      <div className="topbar"><h1>JobTally</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
       <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
         {['home', 'jobs', 'estimates', 'invoices', 'clients', 'calendar', 'workers', 'payroll', 'reports', 'more'].map(t => (
           <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
@@ -2180,7 +2180,7 @@ export default function OwnerDashboard({ profile }) {
                     <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#1C2B3A' }}>👋 Get set up</h2>
                     <span style={{ fontSize: '12px', fontWeight: '700', color: '#E07B2A' }}>{doneCount} of {steps.length} done</span>
                   </div>
-                  <p style={{ fontSize: '13px', color: '#717171', marginBottom: '14px', lineHeight: '1.5' }}>A few quick steps to get the most out of Run-Site — they check off automatically as you go.</p>
+                  <p style={{ fontSize: '13px', color: '#717171', marginBottom: '14px', lineHeight: '1.5' }}>A few quick steps to get the most out of JobTally — they check off automatically as you go.</p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {steps.map((s, i) => (
                       <div key={s.key} role={s.done ? undefined : 'button'} tabIndex={s.done ? undefined : 0} onClick={s.done ? undefined : s.cta} onKeyDown={s.done ? undefined : (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.cta() } })} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '10px', border: '1px solid #eee', background: s.done ? '#F0FDF4' : 'white', cursor: s.done ? 'default' : 'pointer' }}>

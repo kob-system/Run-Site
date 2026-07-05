@@ -1,6 +1,6 @@
 {
-  "short_name": "Run-Site",
-  "name": "Run-Site — Contractor Job Tracking",
+  "short_name": "JobTally",
+  "name": "JobTally — Contractor Job Tracking",
   "icons": [
     {
       "src": "favicon.ico",

@@ -162,7 +162,7 @@ export default function Login() {
   return (
     <div style={{ minHeight: '100vh', background: '#1C2B3A', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
       <div style={{ marginBottom: '32px', textAlign: 'center' }}>
-        <h1 style={{ color: '#E07B2A', fontSize: '32px', fontWeight: '800' }}>RUN-SITE</h1>
+        <h1 style={{ color: '#E07B2A', fontSize: '32px', fontWeight: '800' }}>JobTally</h1>
         <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', marginTop: '6px' }}>Contractor job tracking — from your phone</p>
       </div>
       <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}>
@@ -211,7 +211,12 @@ export default function Login() {
           <button onClick={() => { setIsSignup(!isSignup); setError(''); setNotice('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>{isSignup ? 'Sign In' : 'Sign Up'}</button>
         </p>
       </div>
-      <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: '11px', marginTop: '18px' }}>build {buildInfo.sha} · {buildInfo.time}</p>
+      <p style={{ marginTop: '18px', fontSize: '12px' }}>
+        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: 'rgba(255,255,255,0.6)', textDecoration: 'none' }}>Privacy</a>
+        <span style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>·</span>
+        <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: 'rgba(255,255,255,0.6)', textDecoration: 'none' }}>Terms</a>
+      </p>
+      <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: '11px', marginTop: '10px' }}>build {buildInfo.sha} · {buildInfo.time}</p>
     </div>
   )
 }

@@ -593,7 +593,7 @@ export default function WorkerDashboard({ profile }) {
   return (
     <div>
       <div className="topbar">
-        <h1>RUN-SITE</h1>
+        <h1>JobTally</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {(() => {
             // Always-visible sync status so a worker can SEE their hours are
