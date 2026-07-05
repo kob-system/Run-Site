@@ -19,19 +19,22 @@ async function getUserId(req) {
 }
 
 // Per-user rate limit via the rate_limit_hit() Postgres function (no extra infra).
-// Returns true if the call is allowed. FAILS OPEN: if the check itself errors we
-// never block a legitimate user over an infra hiccup.
+// Returns true if the call is allowed. FAILS CLOSED on this PAID endpoint: if the
+// rate check can't positively confirm the call is under the cap (limiter missing,
+// RPC error, or network failure), we block it (429) rather than risk an unbounded
+// Anthropic bill. A transient hiccup costs a user a retry; failing open could cost
+// real money on a runaway loop.
 async function allowedRate(uid, bucket, max, windowSecs) {
-  if (!SUPABASE_URL || !SERVICE_KEY) return true
+  if (!SUPABASE_URL || !SERVICE_KEY) return false
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/rate_limit_hit`, {
       method: 'POST',
       headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ p_user: uid, p_bucket: bucket, p_max: max, p_window_secs: windowSecs })
     })
-    if (!r.ok) return true
+    if (!r.ok) return false
     return (await r.json()) === true
-  } catch { return true }
+  } catch { return false }
 }
 
 export default async function handler(req, res) {

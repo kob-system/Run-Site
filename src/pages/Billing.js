@@ -51,7 +51,7 @@ export default function Billing({ profile, mode = 'manage' }) {
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px' }}>
-      <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>RUN-SITE</h2>
+      <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>JobTally</h2>
       <h3 style={{ margin: '0 0 4px' }}>
         {mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription'}
       </h3>

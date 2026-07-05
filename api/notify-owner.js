@@ -4,7 +4,7 @@
 // spoofed, and user-controlled text is HTML-escaped as defense in depth.
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-const FROM = process.env.RESEND_FROM || 'Run-Site <onboarding@resend.dev>'
+const FROM = process.env.RESEND_FROM || 'JobTally <onboarding@resend.dev>'
 
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -113,10 +113,10 @@ export default async function handler(req, res) {
         subject,
         html: `
           <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto; padding: 24px;">
-            <h2 style="color: #1C2B3A; margin-bottom: 8px;">RUN-SITE</h2>
+            <h2 style="color: #1C2B3A; margin-bottom: 8px;">JobTally</h2>
             <div style="background: #f4f6f9; border-radius: 12px; padding: 20px; margin-top: 16px;">
               <p style="font-size: 18px; font-weight: 700; color: #1C2B3A; margin: 0 0 8px;">${line}</p>
-              <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by Run-Site</p>${testNote}
+              <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by JobTally</p>${testNote}
             </div>
           </div>
         `
