@@ -18,7 +18,7 @@ const DEFAULT_MILEAGE_RATE = 0.70 // IRS standard business mileage rate — edit
 const PROJECT_TABS = ['receipts', 'time', 'photos', 'documents', 'punch', 'materials', 'changes', 'permits', 'log', 'mileage', 'schedule', 'budget']
 const PROJECT_TAB_LABELS = {
   receipts: 'Receipts', time: 'Time', photos: 'Photos', documents: 'Documents',
-  punch: 'Punch List', materials: 'Shopping List', changes: 'Change Orders',
+  punch: 'Fix-it list', materials: 'Shopping List', changes: 'Extras & add-ons',
   permits: 'Permits', log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
 }
 // Job sub-tabs grouped by LIFECYCLE (not data-type) so a busy crew scans a few
@@ -44,6 +44,25 @@ const estTotal = (items, taxRate) => { const sub = estSubtotal(items); return su
 const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
 const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
 const sectionLabel = { fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '18px 0 8px', padding: '0 4px' }
+
+// Revamped nav helpers: a big tappable menu row (hub card) and a back-to-hub link.
+// Which bottom-nav bucket "owns" each content key (drives the highlight below).
+const NAV_BUCKET = {
+  home: 'home',
+  jobs: 'jobs', calendar: 'jobs',
+  money: 'money', estimates: 'money', invoices: 'money', clients: 'money', insights: 'money', reports: 'money',
+  crew: 'crew', workers: 'crew', payroll: 'crew',
+  more: 'more', compliance: 'more', warranties: 'more',
+}
+const HubCard = ({ icon, title, sub, onClick }) => (
+  <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 'var(--tap)' }} onClick={onClick} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}>
+    <div><h3>{icon ? icon + ' ' : ''}{title}</h3><p>{sub}</p></div>
+    <span style={{ color: '#888', fontSize: '22px' }}>›</span>
+  </div>
+)
+const BackBtn = ({ label, onClick }) => (
+  <button onClick={onClick} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ {label}</button>
+)
 
 // Sunday-start week key (YYYY-MM-DD), used to group pay into weekly paychecks.
 const dateKey = (d) => {
@@ -1756,7 +1775,7 @@ export default function OwnerDashboard({ profile }) {
 
           {projectTab === 'changes' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewChange(true); setInlineError('') }}>+ Add Change Order</button>
+              <button className="btn-primary" onClick={() => { setShowNewChange(true); setInlineError('') }}>+ Add extra / add-on</button>
               {changeOrders.some(c => c.status === 'approved') && (
                 <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
                   <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Approved extras</p>
@@ -2012,13 +2031,13 @@ export default function OwnerDashboard({ profile }) {
         {showNewChange && (
           <div className="modal-overlay" onClick={() => { setShowNewChange(false); setInlineError('') }}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-              <h2>Add Change Order</h2>
+              <h2>Add extra / add-on</h2>
               <div className="input-group"><label>What's the change?</label><input value={changeForm.description} onChange={e => setChangeForm({ ...changeForm, description: e.target.value })} placeholder="Add tile backsplash" /></div>
               <div className="input-group"><label>Price ($)</label><input type="number" value={changeForm.amount} onChange={e => setChangeForm({ ...changeForm, amount: e.target.value })} placeholder="850" /></div>
               <div className="input-group"><label>Status</label><select value={changeForm.status} onChange={e => setChangeForm({ ...changeForm, status: e.target.value })}><option value="approved">Approved</option><option value="pending">Pending</option><option value="declined">Declined</option></select></div>
               <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Approved change orders add to what the client owes and to your projected profit.</p>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addChangeOrder} disabled={loading}>{loading ? 'Saving...' : 'Add Change Order'}</button>
+              <button className="btn-primary" onClick={addChangeOrder} disabled={loading}>{loading ? 'Saving...' : 'Add extra / add-on'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewChange(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -2048,22 +2067,33 @@ export default function OwnerDashboard({ profile }) {
   return (
     <div>
       <div className="topbar"><h1>JobTally</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
-      <div className="tabs tabs-scroll" style={{ margin: '16px 16px 0' }}>
-        {['home', 'jobs', 'estimates', 'invoices', 'clients', 'calendar', 'workers', 'payroll', 'reports', 'more'].map(t => (
-          <button key={t} className={'tab ' + (activeTab === t ? 'active' : '')} onClick={() => setActiveTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
-        ))}
-      </div>
       <div className="page">
+
+        {activeTab === 'money' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Estimates, invoices, clients and the numbers.</p>
+            <HubCard icon="📝" title="Estimates" sub="Quote jobs and win the work" onClick={() => setActiveTab('estimates')} />
+            <HubCard icon="🧾" title="Invoices" sub="Bill clients and track what you're owed" onClick={() => setActiveTab('invoices')} />
+            <HubCard icon="👥" title="Clients" sub="Everyone you've worked with" onClick={() => setActiveTab('clients')} />
+            <HubCard icon="📊" title="Business health" sub="Who owes you, money collected, jobs won" onClick={() => setActiveTab('insights')} />
+            <HubCard icon="📦" title="Reports & Taxes" sub="Year-end summaries and exports" onClick={() => setActiveTab('reports')} />
+          </div>
+        )}
+
+        {activeTab === 'crew' && (
+          <div>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers and their pay.</p>
+            <HubCard icon="👷" title="Workers" sub="Add crew, set rates, time-off requests" onClick={() => setActiveTab('workers')} />
+            <HubCard icon="💰" title="Payroll" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
+          </div>
+        )}
 
         {activeTab === 'more' && (
           <div>
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
-            {[['insights', '📊 Insights', 'Charts: money owed, collected, win rate, profit'], ['compliance', '🛡️ Insurance & Licenses', 'Track expirations'], ['warranties', '🔧 Warranties & Callbacks', 'Post-job follow-ups']].map(([key, title, sub]) => (
-              <div key={key} className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setActiveTab(key)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(key) } }}>
-                <div><h3>{title}</h3><p>{sub}</p></div>
-                <span style={{ color: '#888', fontSize: '22px' }}>›</span>
-              </div>
-            ))}
+            <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
+            <HubCard icon="🔧" title="Callbacks / go-backs" sub="Post-job follow-ups and warranty work" onClick={() => setActiveTab('warranties')} />
+            <HubCard icon="⚙️" title="Settings & Billing" sub="Manage your subscription and plan" onClick={() => { window.location.assign('?billing') }} />
           </div>
         )}
 
@@ -2117,9 +2147,9 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'insights' && (
           <div>
-            <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
+            <BackBtn label="Money" onClick={() => setActiveTab('money')} />
             <div className="card">
-              <p style={sectionLabel}>Money owed to you (A/R aging)</p>
+              <p style={sectionLabel}>Who still owes you</p>
               <p style={{ fontSize: '24px', fontWeight: '800', color: '#1C2B3A', marginBottom: '12px' }}>{formatCurrency(arTotal)}</p>
               {arBuckets.map(b => (
                 <div key={b.label} style={{ marginBottom: '8px' }}>
@@ -2142,9 +2172,9 @@ export default function OwnerDashboard({ profile }) {
               </div>
             </div>
             <div className="card">
-              <p style={sectionLabel}>Quote win rate</p>
+              <p style={sectionLabel}>Jobs won</p>
               {winRate == null
-                ? <p style={{ fontSize: '13px', color: '#888' }}>No decided quotes yet.</p>
+                ? <p style={{ fontSize: '13px', color: '#888' }}>No decided estimates yet.</p>
                 : <p style={{ fontSize: '28px', fontWeight: '800', color: '#16A34A' }}>{winRate}%</p>}
               <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>{estAccepted} won · {estDeclined} lost · {estOpen} open</p>
             </div>
@@ -2194,12 +2224,12 @@ export default function OwnerDashboard({ profile }) {
               )
             })()}
             <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
-              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
-              <p style={{ fontSize: '30px', fontWeight: '800', color: '#F59E0B' }}>{formatCurrency(owedTotal)}</p>
-              <div style={{ display: 'flex', gap: '24px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '18px', fontWeight: '700' }}>{activeProjects.length}</p></div>
-                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open quotes</p><p style={{ fontSize: '18px', fontWeight: '700' }}>{openEstimateCount}</p></div>
-                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Proj. profit</p><p style={{ fontSize: '18px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(projectedProfit)}</p></div>
+              <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
+              <p style={{ fontSize: '44px', fontWeight: '800', color: '#F59E0B', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
+              <div style={{ display: 'flex', gap: '24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{activeProjects.length}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open estimates</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{openEstimateCount}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Proj. profit</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(projectedProfit)}</p></div>
               </div>
             </div>
             {budgetAlerts.length > 0 && (
@@ -2230,6 +2260,7 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'clients' && (
           <div>
+            <BackBtn label="Money" onClick={() => setActiveTab('money')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Everyone you've worked with — jobs, what they're worth, and what they still owe.</p>
             {clientsList.map(c => (
               <div key={c.name} className="card">
@@ -2253,6 +2284,7 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'calendar' && (
           <div>
+            <BackBtn label="Jobs" onClick={() => setActiveTab('jobs')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Everything coming up across all your jobs.</p>
             {upcomingSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Assign crew from a job's Schedule tab.</p></div>}
             {(() => {
@@ -2275,6 +2307,10 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'jobs' && (
           <div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <button style={{ flex: 1, minHeight: 'var(--tap)', padding: '10px', borderRadius: '10px', border: 'none', background: '#1C2B3A', color: 'white', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>🔨 Jobs</button>
+              <button onClick={() => setActiveTab('calendar')} style={{ flex: 1, minHeight: 'var(--tap)', padding: '10px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>📅 Schedule</button>
+            </div>
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <div className="stat-card"><div className="stat-value">{activeProjects.length}</div><div className="stat-label">Active Jobs</div></div>
               <div className="stat-card"><div className="stat-value">{completedProjects.length}</div><div className="stat-label">Completed</div></div>
@@ -2344,6 +2380,7 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'workers' && (
           <div>
+            <BackBtn label="Crew" onClick={() => setActiveTab('crew')} />
             {!showInvite && (
               <button onClick={() => setShowInvite(true)} className="btn-primary" style={{ marginBottom: '12px' }}>+ Add Worker</button>
             )}
@@ -2439,6 +2476,7 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'payroll' && (
           <div>
+            <BackBtn label="Crew" onClick={() => setActiveTab('crew')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
               Weekly pay per worker, straight from their clocked hours. Tap "Mark Paid" each week to record a paycheck.
             </p>
@@ -2479,6 +2517,7 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'estimates' && (
           <div>
+            <BackBtn label="Money" onClick={() => setActiveTab('money')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
               Quote a job, send it, and turn a "yes" into a job with one tap.
             </p>
@@ -2513,6 +2552,7 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'invoices' && (
           <div>
+            <BackBtn label="Money" onClick={() => setActiveTab('money')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
               Bill clients and track what you're owed. Tap "Mark Paid" when the money comes in.
             </p>
@@ -2576,6 +2616,7 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'reports' && (
           <div>
+            <BackBtn label="Money" onClick={() => setActiveTab('money')} />
             <div className="input-group">
               <label>Year</label>
               <select value={reportYear} onChange={e => setReportYear(parseInt(e.target.value, 10))}>
@@ -2770,6 +2811,15 @@ export default function OwnerDashboard({ profile }) {
       )}
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
+
+      <div className="bottom-nav">
+        {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs'], ['money', '💵', 'Money'], ['crew', '👷', 'Crew'], ['more', '⋯', 'More']].map(([key, icon, label]) => (
+          <button key={key} className={(NAV_BUCKET[activeTab] || 'home') === key ? 'active' : ''} onClick={() => setActiveTab(key)} aria-label={label}>
+            <span style={{ fontSize: '20px', lineHeight: '1' }}>{icon}</span>
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
