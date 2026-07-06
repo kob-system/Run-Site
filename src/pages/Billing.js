@@ -56,8 +56,8 @@ export default function Billing({ profile, mode = 'manage' }) {
         {mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription'}
       </h3>
       <p style={{ color: '#667085', marginTop: 0 }}>
-        Pick a plan. You enter your card on Stripe's secure checkout and it auto-renews —
-        cancel anytime from Manage billing.
+        Start with a <strong>14-day free trial</strong> — no charge today. You enter your card on
+        Stripe's secure checkout and it auto-renews after the trial. Cancel anytime from Manage billing.
       </p>
 
       {err && (
@@ -69,17 +69,17 @@ export default function Billing({ profile, mode = 'manage' }) {
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
         <div style={card}>
           <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Monthly</div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>$200<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/mo</span></div>
-          <div style={{ color: '#667085', fontSize: 14 }}>Billed monthly. Cancel anytime.</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>$150<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/mo</span></div>
+          <div style={{ color: '#667085', fontSize: 14 }}>All features, unlimited crew. Cancel anytime.</div>
           <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'monthly')}>
             {busy === 'monthly' ? 'Starting…' : 'Choose monthly'}
           </button>
         </div>
 
         <div style={{ ...card, borderColor: '#1C2B3A', borderWidth: 2 }}>
-          <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Yearly <span style={{ color: '#0a7d33', fontSize: 13 }}>· 2 months free</span></div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>$2,000<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/yr</span></div>
-          <div style={{ display: 'inline-block', alignSelf: 'flex-start', background: 'var(--green-tint)', color: 'var(--green-dark)', fontSize: 13, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginTop: 4 }}>Save $400 vs. monthly</div>
+          <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Yearly <span style={{ color: '#0a7d33', fontSize: 13 }}>· 4 months free</span></div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>$1,200<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/yr</span></div>
+          <div style={{ display: 'inline-block', alignSelf: 'flex-start', background: 'var(--green-tint)', color: 'var(--green-dark)', fontSize: 13, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginTop: 4 }}>Save $600 vs. monthly</div>
           <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'yearly')}>
             {busy === 'yearly' ? 'Starting…' : 'Choose yearly'}
           </button>

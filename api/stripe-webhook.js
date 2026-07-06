@@ -103,16 +103,20 @@ async function upsertSubscription(row) {
 async function rowFromSubscription(sub, ownerIdHint) {
   const ownerId = (sub.metadata && sub.metadata.owner_id) || ownerIdHint
   if (!ownerId) return null
-  const priceId =
-    sub.items && sub.items.data && sub.items.data[0] && sub.items.data[0].price && sub.items.data[0].price.id
+  const item = sub.items && sub.items.data && sub.items.data[0]
+  const priceId = item && item.price && item.price.id
+  // current_period_end lives on the subscription in older API versions, but as
+  // of 2025-03+ (this webhook is pinned to 2026-06-24.dahlia) it moved onto the
+  // line item. Read the item first, fall back to the legacy top-level field.
+  const periodEnd = (item && item.current_period_end) || sub.current_period_end
   return {
     owner_id: ownerId,
     stripe_customer_id: typeof sub.customer === 'string' ? sub.customer : (sub.customer && sub.customer.id) || null,
     stripe_subscription_id: sub.id || null,
     status: sub.status || null,
     plan: planFor(priceId),
-    current_period_end: sub.current_period_end
-      ? new Date(sub.current_period_end * 1000).toISOString()
+    current_period_end: periodEnd
+      ? new Date(periodEnd * 1000).toISOString()
       : null,
     updated_at: new Date().toISOString(),
   }
