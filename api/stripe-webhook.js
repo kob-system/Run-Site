@@ -85,6 +85,18 @@ async function claimEvent(id, type) {
   return true
 }
 
+// Has this event id already been fully processed + recorded? Used as a
+// best-effort fast-path to skip redundant re-processing of redelivered events.
+async function alreadyProcessed(id) {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/billing_events?id=eq.${encodeURIComponent(id)}&select=id`,
+    { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } }
+  )
+  if (!r.ok) throw new Error('billing_events read failed: ' + r.status)
+  const rows = await r.json()
+  return Array.isArray(rows) && rows.length > 0
+}
+
 async function upsertSubscription(row) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/subscriptions?on_conflict=owner_id`, {
     method: 'POST',
@@ -135,14 +147,21 @@ export default async function handler(req, res) {
   const event = verify(raw, req.headers['stripe-signature'])
   if (!event) return res.status(400).json({ error: 'Invalid signature' })
 
-  // Idempotency gate — claim the event id before doing any work.
+  // Idempotency is recorded AFTER the work succeeds, not before. Every write
+  // below is an idempotent upsert keyed by owner_id, so re-processing a
+  // redelivered event is harmless — whereas claiming the id up front means a
+  // transient failure mid-process (Supabase/Stripe blip) returns 500, Stripe
+  // retries, the retry sees the already-claimed id, short-circuits as a
+  // "duplicate", and the subscription row is NEVER written: a paying customer
+  // charged with no access. So: do the work, then record the event id.
   try {
-    const fresh = await claimEvent(event.id, event.type)
-    if (!fresh) return res.json({ received: true, duplicate: true })
-  } catch (e) {
-    console.error('stripe-webhook idempotency error:', e)
-    return res.status(500).end() // let Stripe retry rather than silently drop
-  }
+    // Fast-path: if this exact event id was already fully processed, skip the
+    // redundant Stripe fetch + upsert. Best-effort read; on error we just
+    // process again (safe, idempotent).
+    if (await alreadyProcessed(event.id)) {
+      return res.json({ received: true, duplicate: true })
+    }
+  } catch { /* fall through and process — upserts are idempotent */ }
 
   try {
     const obj = event.data && event.data.object
@@ -181,9 +200,15 @@ export default async function handler(req, res) {
       default:
         break // ignore everything else
     }
+    // Record the event id ONLY now that the work committed. If claimEvent
+    // itself fails, we still return 200: the write already succeeded, and a
+    // Stripe retry would harmlessly re-run the same idempotent upsert.
+    try { await claimEvent(event.id, event.type) } catch (e) {
+      console.error('stripe-webhook: post-process claim failed (non-fatal):', e)
+    }
     return res.json({ received: true })
   } catch (err) {
     console.error('stripe-webhook handler error:', event.type, err)
-    return res.status(500).end() // 500 => Stripe retries
+    return res.status(500).end() // 500 => Stripe retries (work was NOT recorded)
   }
 }

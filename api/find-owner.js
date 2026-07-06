@@ -44,8 +44,15 @@ export default async function handler(req, res) {
   const { ownerEmail } = req.body
   if (!ownerEmail) return res.status(400).json({ error: 'Missing ownerEmail' })
 
+  // Use the platform-trusted client IP. NEVER the first X-Forwarded-For entry —
+  // that hop is client-supplied, so an attacker can spoof a fresh value per
+  // request and mint a new rate-limit bucket every call (defeating the cap).
+  // Vercel sets x-real-ip to the true client IP; the LAST XFF hop is the one
+  // Vercel appended, so it's trustworthy too. Fall back accordingly.
+  const xff = (req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean)
   const ip =
-    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    (req.headers['x-real-ip'] || '').trim() ||
+    (xff.length ? xff[xff.length - 1] : '') ||
     (req.socket && req.socket.remoteAddress) ||
     'unknown'
   if (!(await rateOk(ip))) {
