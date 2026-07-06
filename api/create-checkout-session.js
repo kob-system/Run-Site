@@ -81,6 +81,7 @@ export default async function handler(req, res) {
       'line_items[0][quantity]': '1',
       client_reference_id: user.id,
       'subscription_data[metadata][owner_id]': user.id,
+      'subscription_data[trial_period_days]': '14',
       'metadata[owner_id]': user.id,
       allow_promotion_codes: 'true',
       success_url: `${APP_URL}/?billing=success`,
