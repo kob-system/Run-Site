@@ -39,10 +39,11 @@ export default function Billing({ profile, mode = 'manage' }) {
   const go = async (action, arg) => {
     setErr(''); setBusy(arg || action)
     try {
+      const ref = (typeof localStorage !== 'undefined' && localStorage.getItem('jobtally_ref')) || undefined
       const { url } =
         action === 'portal'
           ? await authedPost('create-billing-portal', {})
-          : await authedPost('create-checkout-session', { plan: arg })
+          : await authedPost('create-checkout-session', { plan: arg, ref })
       window.location.href = url
     } catch (e) {
       setErr(e.message); setBusy('')
