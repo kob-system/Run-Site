@@ -110,10 +110,20 @@ export default function App() {
       ['active', 'trialing', 'comp'].includes(sub.status) &&
       (!sub.current_period_end || new Date(sub.current_period_end) > new Date())
 
+    // New owners get a 7-day no-card free window from signup — full app, no
+    // Stripe — before they ever see the paywall. After that they must start a
+    // (card-based) trial or subscribe. The DB enforces the same window on writes
+    // (public.has_app_access), so this isn't just a client-side gate.
+    const FREE_WINDOW_DAYS = 7
+    const createdAt = profile.created_at ? new Date(profile.created_at) : null
+    const inFreeWindow =
+      !!createdAt && Date.now() - createdAt.getTime() < FREE_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    const hasAccess = active || inFreeWindow
+
     // Only when enforcement is ON: wait for the subscription read before
     // deciding, so we never flash the dashboard and then yank it to a paywall.
     if (enforced && sub === undefined) return <div className="loading">Loading JobTally...</div>
-    if (enforced && !active) return <Billing profile={profile} mode="paywall" />
+    if (enforced && !hasAccess) return <Billing profile={profile} mode="paywall" />
     if (wantsBilling) return <Billing profile={profile} mode="manage" />
     return <OwnerDashboard profile={profile} />
   }

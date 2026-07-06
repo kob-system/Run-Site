@@ -57,7 +57,7 @@ export default function Billing({ profile, mode = 'manage' }) {
         {mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription'}
       </h3>
       <p style={{ color: '#667085', marginTop: 0 }}>
-        Start with a <strong>14-day free trial</strong> — no charge today. You enter your card on
+        Start with a <strong>7-day free trial</strong> — no charge today. You enter your card on
         Stripe's secure checkout and it auto-renews after the trial. Cancel anytime from Manage billing.
       </p>
 
