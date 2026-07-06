@@ -64,6 +64,15 @@ export default async function handler(req, res) {
   const priceId = PRICES[plan]
   if (!priceId) return res.status(400).json({ error: 'Unknown plan' })
 
+  // Optional referral tag (e.g. a partner's link ?ref=josh). Sanitized to a
+  // short slug and stamped onto the subscription + session metadata so we can
+  // attribute the sub to the referrer for commission payouts.
+  const rawRef = req.body && req.body.ref
+  const ref =
+    typeof rawRef === 'string'
+      ? rawRef.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32)
+      : ''
+
   try {
     // Reuse an existing Stripe customer if this owner already has one, so we
     // don't create a duplicate customer on a re-subscribe.
@@ -86,6 +95,12 @@ export default async function handler(req, res) {
       allow_promotion_codes: 'true',
       success_url: `${APP_URL}/?billing=success`,
       cancel_url: `${APP_URL}/?billing=cancel`,
+    }
+    if (ref) {
+      // On the subscription so it persists for the life of the plan (used for
+      // recurring commission), and on the session for immediate visibility.
+      params['subscription_data[metadata][referrer]'] = ref
+      params['metadata[referrer]'] = ref
     }
     if (existingCustomer) params.customer = existingCustomer
     else if (user.email) params.customer_email = user.email

@@ -30,6 +30,17 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Referral attribution: if someone arrives via a partner link like
+  // getjobtally.com/?ref=josh, remember it so we can tag their subscription
+  // with the referrer at checkout (which may happen minutes or days later).
+  // Sanitized + persisted; last referral link wins.
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get('ref')
+    if (!raw) return
+    const ref = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32)
+    if (ref) localStorage.setItem('jobtally_ref', ref)
+  }, [])
+
   const fetchProfile = async (user) => {
     setLoadError(false)
     try {
