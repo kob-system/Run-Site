@@ -260,10 +260,11 @@ export default function WorkerDashboard({ profile }) {
     try {
       const thirtyDaysAgo = new Date()
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+      // worker_time_entries: a column-limited view (own rows + job name only,
+      // never the job's budget/margins). See FIX-DATABASE-16.
       const { data, error } = await supabase
-        .from('time_entries')
-        .select('*, projects(name)')
-        .eq('worker_id', profile.id)
+        .from('worker_time_entries')
+        .select('*')
         .gte('clocked_in_at', thirtyDaysAgo.toISOString())
         .order('clocked_in_at', { ascending: false })
       if (error) throw error
@@ -279,8 +280,9 @@ export default function WorkerDashboard({ profile }) {
       const { data: assignments, error } = await supabase.from('project_workers').select('project_id').eq('worker_id', profile.id)
       if (error) throw error
       if (assignments?.length) {
-        const ids = assignments.map(a => a.project_id)
-        const { data, error: projError } = await supabase.from('projects').select('*').in('id', ids).neq('stage', 'end')
+        // worker_projects: column-limited view (assigned + not-ended jobs, safe
+        // columns only — no budgets/margins/client contact). See FIX-DATABASE-16.
+        const { data, error: projError } = await supabase.from('worker_projects').select('*')
         if (projError) throw projError
         setProjects(data || [])
       } else {
@@ -321,7 +323,7 @@ export default function WorkerDashboard({ profile }) {
   const fetchSchedule = async () => {
     setScheduleError('')
     try {
-      const { data, error } = await supabase.from('schedule_entries').select('*, projects(name)').eq('worker_id', profile.id).gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date', { ascending: true })
+      const { data, error } = await supabase.from('worker_schedule').select('*').gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date', { ascending: true })
       if (error) throw error
       setSchedule(data || [])
     } catch (e) {
@@ -728,7 +730,7 @@ export default function WorkerDashboard({ profile }) {
                 : schedule.map(entry => (
                   <div key={entry.id} className="card">
                     <p className="schedule-day">{new Date(entry.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                    <h3>{entry.projects?.name}</h3>
+                    <h3>{entry.project_name}</h3>
                     <p>{entry.task_description}</p>
                     {entry.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{formatScheduleTime(entry.start_time)}{entry.end_time ? ` — ${formatScheduleTime(entry.end_time)}` : ''}</p>}
                   </div>
@@ -804,7 +806,7 @@ export default function WorkerDashboard({ profile }) {
                             <p style={{ fontSize: '11px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
                               {clockIn.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             </p>
-                            <h3>{entry.projects?.name || 'Unknown Job'}</h3>
+                            <h3>{entry.project_name || 'Unknown Job'}</h3>
                             <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
                               In: {clockIn.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
                               {clockOut ? ` — Out: ${clockOut.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
