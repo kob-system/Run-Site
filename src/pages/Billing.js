@@ -50,6 +50,34 @@ export default function Billing({ profile, mode = 'manage' }) {
     }
   }
 
+  // Data retention: an owner can always download a full copy of their records,
+  // even after cancelling — reads are never gated, so their data is never
+  // trapped behind the paywall. Pulls each owner-scoped table (RLS returns only
+  // their own rows) and downloads one JSON backup.
+  const exportData = async () => {
+    setErr(''); setBusy('export')
+    try {
+      const tables = ['projects', 'receipts', 'time_entries', 'invoices', 'estimates', 'change_orders', 'material_items']
+      const dump = { exported_at: new Date().toISOString(), account: profile && profile.email }
+      for (const t of tables) {
+        const { data, error } = await supabase.from(t).select('*')
+        if (!error) dump[t] = data || []
+      }
+      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `jobtally-data-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setErr('Export failed: ' + e.message)
+    }
+    setBusy('')
+  }
+
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px' }}>
       <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>JobTally</h2>
@@ -57,7 +85,7 @@ export default function Billing({ profile, mode = 'manage' }) {
         {mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription'}
       </h3>
       <p style={{ color: '#667085', marginTop: 0 }}>
-        Start with a <strong>14-day free trial</strong> — no charge today. You enter your card on
+        Start with a <strong>7-day free trial</strong> — no charge today. You enter your card on
         Stripe's secure checkout and it auto-renews after the trial. Cancel anytime from Manage billing.
       </p>
 
@@ -85,6 +113,21 @@ export default function Billing({ profile, mode = 'manage' }) {
             {busy === 'yearly' ? 'Starting…' : 'Choose yearly'}
           </button>
         </div>
+      </div>
+
+      <div style={{ marginTop: 24, background: '#f0f6ff', border: '1px solid #cfe0f5', borderRadius: 12, padding: 16 }}>
+        <div style={{ fontWeight: 700, color: '#1C2B3A', marginBottom: 4 }}>🔒 Your data is safe</div>
+        <p style={{ color: '#425466', fontSize: 14, margin: '0 0 12px' }}>
+          Nothing is ever deleted if you cancel — your jobs, receipts, hours and invoices stay in your account.
+          You can download a full copy anytime.
+        </p>
+        <button
+          onClick={exportData}
+          disabled={!!busy}
+          style={{ ...btn, marginTop: 0, background: 'transparent', color: '#1C2B3A', border: '2px solid #1C2B3A' }}
+        >
+          {busy === 'export' ? 'Preparing…' : 'Export all my data'}
+        </button>
       </div>
 
       <div style={{ marginTop: 24, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>

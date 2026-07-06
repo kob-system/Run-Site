@@ -64,14 +64,17 @@ export default async function handler(req, res) {
   const priceId = PRICES[plan]
   if (!priceId) return res.status(400).json({ error: 'Unknown plan' })
 
-  // Optional referral tag (e.g. a partner's link ?ref=josh). Sanitized to a
-  // short slug and stamped onto the subscription + session metadata so we can
-  // attribute the sub to the referrer for commission payouts.
+  // Optional referral tag (e.g. a partner's link ?ref=josh). Only slugs on the
+  // known-partner allowlist are honored, so a random or spoofed ?ref= can't
+  // manufacture a commission-eligible attribution. Add partners here as they
+  // sign on. Stamped onto the subscription + session metadata for payout.
+  const VALID_REFERRERS = ['josh']
   const rawRef = req.body && req.body.ref
-  const ref =
+  const cleanRef =
     typeof rawRef === 'string'
       ? rawRef.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32)
       : ''
+  const ref = VALID_REFERRERS.includes(cleanRef) ? cleanRef : ''
 
   try {
     // Reuse an existing Stripe customer if this owner already has one, so we
@@ -90,7 +93,7 @@ export default async function handler(req, res) {
       'line_items[0][quantity]': '1',
       client_reference_id: user.id,
       'subscription_data[metadata][owner_id]': user.id,
-      'subscription_data[trial_period_days]': '14',
+      'subscription_data[trial_period_days]': '7',
       'metadata[owner_id]': user.id,
       allow_promotion_codes: 'true',
       success_url: `${APP_URL}/?billing=success`,
