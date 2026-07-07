@@ -111,6 +111,41 @@ async function upsertSubscription(row) {
   if (!r.ok) throw new Error('subscriptions upsert failed: ' + r.status + ' ' + (await r.text()))
 }
 
+// The guard field (last_event_at) for an owner's current subscription row.
+// Best-effort: on any read error we return null and let the write proceed.
+async function existingSub(ownerId) {
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/subscriptions?owner_id=eq.${encodeURIComponent(ownerId)}&select=last_event_at`,
+      { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } }
+    )
+    if (!r.ok) return null
+    const rows = await r.json()
+    return (Array.isArray(rows) && rows[0]) || null
+  } catch { return null }
+}
+
+// Apply a normalized row, but DROP it if a newer event already updated this
+// owner's subscription. Stripe does not guarantee delivery order, so a late
+// `customer.subscription.deleted` for an old plan can arrive AFTER the owner
+// has already resubscribed — without this guard it would clobber the fresh
+// active row back to "canceled". We stamp each write with the source event's
+// timestamp and refuse to apply an older event on top of a newer one.
+async function applyRow(row, eventCreatedSec) {
+  if (!row) return
+  const stamp = Number.isFinite(eventCreatedSec)
+    ? new Date(eventCreatedSec * 1000).toISOString()
+    : null
+  if (stamp) {
+    const prev = await existingSub(row.owner_id)
+    if (prev && prev.last_event_at && new Date(prev.last_event_at) > new Date(stamp)) {
+      return // a newer event already applied; this one is stale
+    }
+    row.last_event_at = stamp
+  }
+  await upsertSubscription(row)
+}
+
 // Normalize a Stripe subscription object into our row shape.
 async function rowFromSubscription(sub, ownerIdHint) {
   const ownerId = (sub.metadata && sub.metadata.owner_id) || ownerIdHint
@@ -173,7 +208,7 @@ export default async function handler(req, res) {
         if (obj.subscription) {
           const sub = await stripeGet('subscriptions/' + obj.subscription)
           const row = await rowFromSubscription(sub, ownerId)
-          if (row) await upsertSubscription(row)
+          await applyRow(row, event.created)
         }
         break
       }
@@ -183,7 +218,7 @@ export default async function handler(req, res) {
         const row = await rowFromSubscription(obj, null)
         if (row) {
           if (event.type === 'customer.subscription.deleted') row.status = 'canceled'
-          await upsertSubscription(row)
+          await applyRow(row, event.created)
         }
         break
       }
@@ -193,7 +228,7 @@ export default async function handler(req, res) {
         if (obj.subscription) {
           const sub = await stripeGet('subscriptions/' + obj.subscription)
           const row = await rowFromSubscription(sub, null)
-          if (row) await upsertSubscription(row)
+          await applyRow(row, event.created)
         }
         break
       }

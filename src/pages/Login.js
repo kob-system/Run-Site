@@ -149,8 +149,15 @@ export default function Login() {
     if (inviteToken) {
       fetch('/api/claim-invite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: inviteToken, workerId: data.user?.id })
+        headers: {
+          'Content-Type': 'application/json',
+          // Send the session token when we have one (confirmation-off flow) so
+          // the server records used_by from a verified JWT, not a client value.
+          ...(data.session?.access_token
+            ? { Authorization: `Bearer ${data.session.access_token}` }
+            : {})
+        },
+        body: JSON.stringify({ token: inviteToken })
       }).catch(() => {})
     }
 
