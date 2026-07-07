@@ -35,14 +35,18 @@ const PROJECT_QUICK = [
   { tab: 'photos', label: '📷 Photo' },
   { tab: 'log', label: '📋 Log' },
 ]
+// Plain-English names for the DB stage values (start/mid/end). The raw values
+// mean nothing to a contractor — always render through this map.
+const STAGE_LABELS = { start: 'Not started', mid: 'In progress', end: 'Done' }
+const stageLabel = (s) => STAGE_LABELS[s] || s
 
 // Estimate line-item math (pure; safe at module scope).
 const ESTIMATE_KINDS = [['materials', 'Materials'], ['labor', 'Labor'], ['other', 'Other']]
 const estItemAmount = (it) => (parseFloat(it && it.qty) || 0) * (parseFloat(it && it.unit_price) || 0)
 const estSubtotal = (items) => (Array.isArray(items) ? items : []).reduce((s, it) => s + estItemAmount(it), 0)
 const estTotal = (items, taxRate) => { const sub = estSubtotal(items); return sub + sub * (parseFloat(taxRate) || 0) / 100 }
-const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
-const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '38px' })
+const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px' })
+const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px' })
 const sectionLabel = { fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '18px 0 8px', padding: '0 4px' }
 
 // Revamped nav helpers: a big tappable menu row (hub card) and a back-to-hub link.
@@ -184,7 +188,7 @@ function JobPhoto({ path, alt, style, onClick }) {
   return <img src={url} alt={alt || 'Job photo'} onClick={onClick} style={style} />
 }
 
-export default function OwnerDashboard({ profile }) {
+export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [activeTab, setActiveTab] = useState('home')
   const [projects, setProjects] = useState([])
   const [workers, setWorkers] = useState([])
@@ -202,6 +206,7 @@ export default function OwnerDashboard({ profile }) {
   const [showNewSchedule, setShowNewSchedule] = useState(false)
   const [showAssignWorker, setShowAssignWorker] = useState(null)
   const [showEditRate, setShowEditRate] = useState(null)
+  const [assignedWorkerIds, setAssignedWorkerIds] = useState([]) // worker ids with ≥1 job assignment
   const [assignProjectId, setAssignProjectId] = useState('')
   const [editRate, setEditRate] = useState('')
   const [loading, setLoading] = useState(false)
@@ -245,6 +250,8 @@ export default function OwnerDashboard({ profile }) {
   const [materialInput, setMaterialInput] = useState({ name: '', qty: '' })
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [invoices, setInvoices] = useState([])
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false)
+  const [estimatesLoaded, setEstimatesLoaded] = useState(false)
   const [showNewLog, setShowNewLog] = useState(false)
   const [showNewChange, setShowNewChange] = useState(false)
   const [showNewInvoice, setShowNewInvoice] = useState(false)
@@ -324,6 +331,18 @@ export default function OwnerDashboard({ profile }) {
       showToast('Failed to load workers', 'error')
     }
   }, [profile.id])
+
+  // Which workers are assigned to at least one job. A worker can't clock in
+  // until they're assigned, so the Workers tab flags anyone with zero jobs.
+  const fetchAssignments = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('project_workers').select('worker_id')
+      if (error) throw error
+      setAssignedWorkerIds([...new Set((data || []).map(r => r.worker_id))])
+    } catch (e) {
+      // non-fatal — the nudge just won't show
+    }
+  }, [])
 
   // Time-off requests addressed to this owner. Worker names are resolved
   // from the already-loaded `workers` list in render (no profiles embed,
@@ -457,6 +476,7 @@ export default function OwnerDashboard({ profile }) {
       if (error) throw error
       setInvoices(data || [])
     } catch (e) { console.error('Invoices fetch failed:', e); showToast('Could not load invoices. Check your connection and try again.', 'error') }
+    finally { setInvoicesLoaded(true) }
   }, [profile.id])
 
   const fetchEstimates = useCallback(async () => {
@@ -468,6 +488,7 @@ export default function OwnerDashboard({ profile }) {
       if (error) throw error
       setEstimates(data || [])
     } catch (e) { console.error('Estimates fetch failed:', e); showToast('Could not load estimates. Check your connection and try again.', 'error') }
+    finally { setEstimatesLoaded(true) }
   }, [profile.id])
 
   const fetchUpcomingSchedule = useCallback(async () => {
@@ -500,8 +521,8 @@ export default function OwnerDashboard({ profile }) {
   }, [profile.id])
 
   useEffect(() => {
-    Promise.all([fetchProjects(), fetchWorkers(), fetchTimeOff()]).finally(() => setInitialLoading(false))
-  }, [fetchProjects, fetchWorkers, fetchTimeOff])
+    Promise.all([fetchProjects(), fetchWorkers(), fetchTimeOff(), fetchAssignments()]).finally(() => setInitialLoading(false))
+  }, [fetchProjects, fetchWorkers, fetchTimeOff, fetchAssignments])
 
   useEffect(() => {
     if (workers.length) fetchWorkerStats(workers)
@@ -755,17 +776,17 @@ export default function OwnerDashboard({ profile }) {
       })
       if (error) throw error
       setShowNewChange(false); setChangeForm({ description: '', amount: '', status: 'approved' })
-      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Change order added ✓')
-    } catch (e) { setInlineError('Failed to add change order. Try again.') }
+      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Extra added ✓')
+    } catch (e) { setInlineError('Failed to add extra. Try again.') }
     setLoading(false)
   }
   const deleteChangeOrder = async (co) => {
-    if (!window.confirm('Delete this change order?')) return
+    if (!window.confirm('Delete this extra?')) return
     try {
       const { error } = await supabase.from('change_orders').delete().eq('id', co.id)
       if (error) throw error
-      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Change order deleted ✓')
-    } catch (e) { showToast('Failed to delete change order', 'error') }
+      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Extra deleted ✓')
+    } catch (e) { showToast('Failed to delete extra', 'error') }
   }
 
   // ---- Job photos (image stored in the private 'receipts' bucket) ----
@@ -1185,7 +1206,8 @@ export default function OwnerDashboard({ profile }) {
       if (error && error.code !== '23505') throw error
       const jobName = projects.find(p => p.id === assignProjectId)?.name || 'job'
       setShowAssignWorker(null); setAssignProjectId('')
-      showToast(`Assigned to ${jobName} ✓`)
+      setAssignedWorkerIds(prev => prev.includes(workerId) ? prev : [...prev, workerId])
+      showToast(`Assigned to ${jobName} — they can clock in now ✓`)
     } catch (e) {
       setInlineError('Failed to assign worker. Try again.')
     }
@@ -1521,7 +1543,7 @@ export default function OwnerDashboard({ profile }) {
         <div className="topbar">
           <button aria-label="Back" onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
-          <span className={'status-pill status-' + selectedProject.stage}>{selectedProject.stage}</span>
+          <span className={'status-pill status-' + selectedProject.stage}>{stageLabel(selectedProject.stage)}</span>
         </div>
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
@@ -1554,15 +1576,23 @@ export default function OwnerDashboard({ profile }) {
           {projectTab === 'budget' && (
             <div>
               {/* Profit hero — the one number that matters, surfaced at the top
-                  instead of buried as the last of six cards. */}
-              <div className="card" style={{ background: projProfit >= 0 ? '#F0FDF4' : '#FEF2F2', border: '1px solid ' + (projProfit >= 0 ? '#BBF7D0' : '#FECACA') }}>
-                <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Projected Profit</p>
-                <p style={{ fontSize: '32px', fontWeight: 800, lineHeight: 1.1, color: projProfit >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
-                <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
-                  {contractOf(selectedProject) > 0 ? Math.round((projProfit / contractOf(selectedProject)) * 100) + '% margin · ' : ''}target {formatCurrency(selectedProject.profit_target)}
-                </p>
-                {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px', fontWeight: 600 }}>⚠️ Projected to go over budget</p>}
-              </div>
+                  instead of buried as the last of six cards. If no budget was
+                  set yet, don't show a scary $0/over-budget — prompt to add one. */}
+              {contractOf(selectedProject) > 0 ? (
+                <div className="card" style={{ background: projProfit >= 0 ? '#F0FDF4' : '#FEF2F2', border: '1px solid ' + (projProfit >= 0 ? '#BBF7D0' : '#FECACA') }}>
+                  <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Projected Profit</p>
+                  <p style={{ fontSize: '32px', fontWeight: 800, lineHeight: 1.1, color: projProfit >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
+                  <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
+                    {Math.round((projProfit / contractOf(selectedProject)) * 100) + '% margin · '}target {formatCurrency(selectedProject.profit_target)}
+                  </p>
+                  {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px', fontWeight: 600 }}>⚠️ Projected to go over budget</p>}
+                </div>
+              ) : (
+                <div className="card" role="button" tabIndex={0} onClick={openEditJob} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditJob() } }} style={{ cursor: 'pointer', background: '#FFF7ED', border: '1px solid #FED7AA' }}>
+                  <p style={{ fontSize: '12px', color: '#9A3412', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Set your budget to track profit</p>
+                  <p style={{ fontSize: '15px', color: '#4B5563', lineHeight: 1.4 }}>Add materials, labor, and profit target for this job — then JobTally shows your live profit as costs come in. <span style={{ color: '#E07B2A', fontWeight: 700 }}>Add budget →</span></p>
+                </div>
+              )}
               <button className="btn-primary" onClick={() => { setInvoiceForm({ project_id: selectedProject.id, label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' }); setActiveTab('invoices'); setSelectedProject(null); setShowNewInvoice(true); setInlineError('') }} style={{ background: '#16A34A', marginBottom: '12px' }}>+ Invoice this job</button>
               {(selectedProject.client_name || selectedProject.client_phone || selectedProject.client_email || selectedProject.client_address) && (
                 <div className="card">
@@ -1579,9 +1609,9 @@ export default function OwnerDashboard({ profile }) {
               )}
               {coOf(selectedProject.id) > 0 && (
                 <div className="card">
-                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CONTRACT + CHANGE ORDERS</p>
+                  <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CONTRACT + EXTRAS</p>
                   <p style={{ fontSize: '13px', color: '#4B5563' }}>Base contract <span style={{ float: 'right', fontWeight: '600' }}>{formatCurrency(selectedProject.budget)}</span></p>
-                  <p style={{ fontSize: '13px', color: '#16A34A', marginTop: '4px' }}>Approved change orders <span style={{ float: 'right', fontWeight: '600' }}>+{formatCurrency(coOf(selectedProject.id))}</span></p>
+                  <p style={{ fontSize: '13px', color: '#16A34A', marginTop: '4px' }}>Approved extras <span style={{ float: 'right', fontWeight: '600' }}>+{formatCurrency(coOf(selectedProject.id))}</span></p>
                   <p style={{ fontSize: '15px', fontWeight: '700', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f0f0f0' }}>Adjusted contract <span style={{ float: 'right' }}>{formatCurrency(contractOf(selectedProject))}</span></p>
                 </div>
               )}
@@ -1635,7 +1665,7 @@ export default function OwnerDashboard({ profile }) {
               </div>
               {selectedProject.stage !== 'end' && (
                 <button className="btn-secondary" onClick={() => advanceStage(selectedProject)}>
-                  {selectedProject.stage === 'start' ? 'Advance to Mid →' : 'Mark as Complete ✓'}
+                  {selectedProject.stage === 'start' ? 'Start work →' : 'Mark as Complete ✓'}
                 </button>
               )}
               <button className="btn-secondary" onClick={openEditJob}>✎ Edit Job Details</button>
@@ -1661,7 +1691,7 @@ export default function OwnerDashboard({ profile }) {
                   </div>
                 </div>
               ))}
-              {receipts.length === 0 && <div className="empty-state"><p>No receipts yet</p></div>}
+              {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store and amount for you and adds it to this job's costs.</p></div>}
             </div>
           )}
 
@@ -1700,7 +1730,7 @@ export default function OwnerDashboard({ profile }) {
                   </button>
                 </div>
               ))}
-              {timeEntries.length === 0 && <div className="empty-state"><p>No time entries yet</p></div>}
+              {timeEntries.length === 0 && <div className="empty-state"><p>No hours logged yet. Crew hours show up here when they clock in — or tap below to add time yourself.</p></div>}
             </div>
           )}
 
@@ -1781,7 +1811,7 @@ export default function OwnerDashboard({ profile }) {
                   <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
                 </div>
               ))}
-              {punchItems.length === 0 && <div className="empty-state"><p>Nothing left on the punch list. Add what's left before you call it done.</p></div>}
+              {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done.</p></div>}
             </div>
           )}
 
@@ -1825,7 +1855,7 @@ export default function OwnerDashboard({ profile }) {
                   <button onClick={() => deleteChangeOrder(c)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
                 </div>
               ))}
-              {changeOrders.length === 0 && <div className="empty-state"><p>No change orders yet. Log extra work the client approves so you get paid for it.</p></div>}
+              {changeOrders.length === 0 && <div className="empty-state"><p>No extras yet. Log extra work the client approves so you get paid for it.</p></div>}
             </div>
           )}
 
@@ -1879,7 +1909,7 @@ export default function OwnerDashboard({ profile }) {
                   {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
                 </div>
               ))}
-              {scheduleEntries.length === 0 && <div className="empty-state"><p>No schedule yet</p></div>}
+              {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job.</p></div>}
             </div>
           )}
         </div>
@@ -1978,7 +2008,7 @@ export default function OwnerDashboard({ profile }) {
                   ) : (
                     <>
                       <h3 style={{ marginBottom: '4px', fontSize: '15px' }}>Link ready for {inviteName} 🎉</h3>
-                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text this to {inviteName}. They tap it, set a password, and they’re on your crew — then they’ll show in the Worker list above so you can log their time.</p>
+                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text this to {inviteName}. They tap it, set a password, and they’re on your crew — then tap <b>Assign</b> on their card to put them on a job so they can clock in.</p>
                       <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', wordBreak: 'break-all', marginBottom: '10px' }}>{inviteLink}</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button type="button" onClick={copyInvite} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Copied ✓' : 'Copy link'}</button>
@@ -2065,7 +2095,7 @@ export default function OwnerDashboard({ profile }) {
               <div className="input-group"><label>What's the change?</label><input value={changeForm.description} onChange={e => setChangeForm({ ...changeForm, description: e.target.value })} placeholder="Add tile backsplash" /></div>
               <div className="input-group"><label>Price ($)</label><input type="number" value={changeForm.amount} onChange={e => setChangeForm({ ...changeForm, amount: e.target.value })} placeholder="850" /></div>
               <div className="input-group"><label>Status</label><select value={changeForm.status} onChange={e => setChangeForm({ ...changeForm, status: e.target.value })}><option value="approved">Approved</option><option value="pending">Pending</option><option value="declined">Declined</option></select></div>
-              <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Approved change orders add to what the client owes and to your projected profit.</p>
+              <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Approved extras add to what the client owes and to your projected profit.</p>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addChangeOrder} disabled={loading}>{loading ? 'Saving...' : 'Add extra / add-on'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewChange(false); setInlineError('') }}>Cancel</button>
@@ -2122,7 +2152,7 @@ export default function OwnerDashboard({ profile }) {
           <div>
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
             <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
-            <HubCard icon="🔧" title="Callbacks / go-backs" sub="Post-job follow-ups and warranty work" onClick={() => setActiveTab('warranties')} />
+            <HubCard icon="🔧" title="Callbacks & warranty work" sub="Post-job follow-ups and fixes under warranty" onClick={() => setActiveTab('warranties')} />
             <HubCard icon="⚙️" title="Settings & Billing" sub="Your business info and subscription" onClick={() => { setSettingsForm({ company_name: profile.company_name || '', full_name: profile.full_name || '' }); setActiveTab('settings') }} />
           </div>
         )}
@@ -2253,6 +2283,33 @@ export default function OwnerDashboard({ profile }) {
 
         {activeTab === 'home' && (
           <div>
+            {(() => {
+              // Free-trial countdown — so the 7-day free window (or a card trial)
+              // never ends as a surprise paywall. Hidden for paid/comp owners and
+              // when billing isn't enforced.
+              const paid = sub && ['active', 'comp'].includes(sub.status)
+              if (!billingEnforced || paid) return null
+              let daysLeft = null, isCardTrial = false
+              if (sub && sub.status === 'trialing' && sub.current_period_end) {
+                daysLeft = Math.max(0, Math.ceil((new Date(sub.current_period_end).getTime() - Date.now()) / 86400000))
+                isCardTrial = true
+              } else if (profile.created_at) {
+                const msLeft = new Date(profile.created_at).getTime() + 7 * 86400000 - Date.now()
+                if (msLeft > 0) daysLeft = Math.max(1, Math.ceil(msLeft / 86400000))
+              }
+              if (daysLeft === null) return null
+              const urgent = daysLeft <= 2
+              const label = isCardTrial
+                ? `Trial — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left`
+                : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your free trial · no card needed`
+              return (
+                <div role="button" tabIndex={0} onClick={() => window.location.assign('?billing')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.assign('?billing') } }}
+                  style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '12px', padding: '10px 14px', borderRadius: '10px', border: '1px solid ' + (urgent ? '#FCA5A5' : '#FED7AA'), background: urgent ? '#FEF2F2' : '#FFF7ED' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: urgent ? '#B91C1C' : '#9A3412' }}>{urgent ? '⏰ ' : '✨ '}{label}</span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#E07B2A', whiteSpace: 'nowrap' }}>{isCardTrial ? 'Manage →' : 'See plans →'}</span>
+                </div>
+              )
+            })()}
             {!initialLoading && (() => {
               const steps = [
                 { key: 'job', label: 'Create your first job', done: projects.length > 0, cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') } },
@@ -2294,7 +2351,9 @@ export default function OwnerDashboard({ profile }) {
             })()}
             <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
               <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
-              <p style={{ fontSize: '44px', fontWeight: '800', color: '#F59E0B', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
+              {owedTotal > 0
+                ? <p style={{ fontSize: '44px', fontWeight: '800', color: '#F59E0B', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
+                : <p style={{ fontSize: '22px', fontWeight: '700', color: 'rgba(255,255,255,0.85)', lineHeight: '1.2', marginTop: '6px' }}>Nothing outstanding — you're all paid up 👍</p>}
               <div style={{ display: 'flex', gap: '24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{activeProjects.length}</p></div>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open estimates</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{openEstimateCount}</p></div>
@@ -2399,9 +2458,9 @@ export default function OwnerDashboard({ profile }) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <div><h3>{p.name}</h3><p>{p.client_name}</p></div>
                         <div style={{ textAlign: 'right' }}>
-                          <span className={'status-pill status-' + p.stage}>{p.stage}</span>
+                          <span className={'status-pill status-' + p.stage}>{stageLabel(p.stage)}</span>
                           <p style={{ fontSize: '17px', fontWeight: 800, marginTop: '6px', color: '#1C2B3A' }}>{formatCurrency(contractOf(p))}</p>
-                          <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Grand total</p>
+                          <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Contract</p>
                         </div>
                       </div>
                       {(matPct >= 80 || labPct >= 80) && (
@@ -2482,7 +2541,7 @@ export default function OwnerDashboard({ profile }) {
               </div>
             )}
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
-              Add a worker with an invite link above, or they can sign up themselves and enter your email.
+              Add a worker with an invite link above, or they can sign up themselves and enter your email. Once they're on, tap <b>Assign</b> to put them on a job — that's what lets them clock in.
             </p>
             {timeOff.filter(r => r.status === 'pending').length > 0 && (
               <div className="card" style={{ marginBottom: '12px', border: '1px solid #F0C9A8' }}>
@@ -2505,13 +2564,22 @@ export default function OwnerDashboard({ profile }) {
             )}
             {workers.map(w => {
               const stats = workerStats[w.id]
+              const isAssigned = assignedWorkerIds.includes(w.id)
               return (
                 <div key={w.id} className="card">
+                  {!isAssigned && (
+                    <div role="button" tabIndex={0} onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') } }} style={{ cursor: 'pointer', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '8px', padding: '8px 10px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', color: '#9A3412', fontWeight: 600 }}>Not on a job yet — they can't clock in until you assign them.</span>
+                      <span style={{ fontSize: '12px', color: '#E07B2A', fontWeight: 700, whiteSpace: 'nowrap' }}>Assign →</span>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
                       <h3>{w.full_name}</h3>
                       <p>{w.email}</p>
-                      <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate || 0}/hr</p>
+                      {w.hourly_rate > 0
+                        ? <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate}/hr</p>
+                        : <button onClick={() => { setShowEditRate(w); setEditRate(''); setInlineError('') }} style={{ marginTop: '4px', background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '4px 10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>⚠️ Set hourly rate — their pay reads $0 until you do</button>}
                       {stats && (
                         <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
                           <div>
@@ -2529,9 +2597,9 @@ export default function OwnerDashboard({ profile }) {
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
-                      <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Edit Rate</button>
-                      <button onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Assign</button>
-                      <button onClick={() => removeWorker(w)} style={{ background: 'transparent', color: '#DC2626', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>Remove</button>
+                      <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', minHeight: '44px', cursor: 'pointer' }}>Edit Rate</button>
+                      <button onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', minHeight: '44px', cursor: 'pointer' }}>Assign</button>
+                      <button onClick={() => removeWorker(w)} style={{ background: 'transparent', color: '#DC2626', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', minHeight: '44px', cursor: 'pointer' }}>Remove</button>
                     </div>
                   </div>
                 </div>
@@ -2614,7 +2682,9 @@ export default function OwnerDashboard({ profile }) {
                 </div>
               )
             })}
-            {estimates.length === 0 && <div className="empty-state"><p>No estimates yet. Quote your next job and send it to win the work.</p></div>}
+            {estimates.length === 0 && (estimatesLoaded
+              ? <div className="empty-state"><p>No estimates yet. Quote your next job and send it to win the work.</p></div>
+              : <div className="empty-state"><p>Loading…</p></div>)}
           </div>
         )}
 
@@ -2675,7 +2745,9 @@ export default function OwnerDashboard({ profile }) {
                       </div>
                     </div>
                   ))}
-                  {invoices.length === 0 && <div className="empty-state"><p>No invoices yet. Create one to bill a client and track what you're owed.</p></div>}
+                  {invoices.length === 0 && (invoicesLoaded
+                    ? <div className="empty-state"><p>No invoices yet. Create one to bill a client and track what you're owed.</p></div>
+                    : <div className="empty-state"><p>Loading…</p></div>)}
                 </>
               )
             })()}
@@ -2691,12 +2763,14 @@ export default function OwnerDashboard({ profile }) {
                 {reportYears.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
-            <div className="card">
-              <p style={{ fontSize: '12px', color: '#888', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '1px' }}>Send to QuickBooks</p>
-              <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '10px' }}>Download, then in QuickBooks: <b>⚙ Settings → Import Data → Invoices</b> (or Customers) and match the columns.</p>
-              <button className="btn-secondary" onClick={exportQboInvoices} disabled={loading} style={{ marginBottom: '8px' }}>⬇ Invoices for QuickBooks (CSV)</button>
-              <button className="btn-secondary" onClick={exportQboCustomers}>⬇ Customers for QuickBooks (CSV)</button>
-            </div>
+            {projects.length > 0 && (
+              <div className="card">
+                <p style={{ fontSize: '12px', color: '#888', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '1px' }}>Send to QuickBooks</p>
+                <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '10px' }}>Download, then in QuickBooks: <b>⚙ Settings → Import Data → Invoices</b> (or Customers) and match the columns.</p>
+                <button className="btn-secondary" onClick={exportQboInvoices} disabled={loading} style={{ marginBottom: '8px' }}>⬇ Invoices for QuickBooks (CSV)</button>
+                <button className="btn-secondary" onClick={exportQboCustomers}>⬇ Customers for QuickBooks (CSV)</button>
+              </div>
+            )}
             {reportJobs.length > 0 ? (
               <>
                 <button className="btn-primary" onClick={exportTaxPack} disabled={loading} style={{ marginBottom: '8px' }}>{loading ? 'Preparing…' : `📦 Download ${reportYear} Tax Pack`}</button>
@@ -2786,6 +2860,8 @@ export default function OwnerDashboard({ profile }) {
             <div className="input-group"><label>Materials Budget ($)</label><input type="number" value={jobForm.materials_budget} onChange={e => setJobForm({ ...jobForm, materials_budget: e.target.value })} placeholder="3000" /></div>
             <div className="input-group"><label>Labor Budget ($)</label><input type="number" value={jobForm.labor_budget} onChange={e => setJobForm({ ...jobForm, labor_budget: e.target.value })} placeholder="1000" /></div>
             <div className="input-group"><label>Profit Target ($)</label><input type="number" value={jobForm.profit_target} onChange={e => setJobForm({ ...jobForm, profit_target: e.target.value })} placeholder="1000" /></div>
+            <p style={{ fontSize: '13px', color: '#15803D', fontWeight: 600, marginBottom: '4px' }}>Contract price = ${((parseFloat(jobForm.materials_budget) || 0) + (parseFloat(jobForm.labor_budget) || 0) + (parseFloat(jobForm.profit_target) || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p style={{ fontSize: '12px', color: '#6B7280', marginBottom: '8px' }}>That's what your client pays — materials + labor + profit added up. You can change it later.</p>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewJob(false); setInlineError('') }}>Cancel</button>
@@ -2832,6 +2908,7 @@ export default function OwnerDashboard({ profile }) {
             <div className="input-group"><label>Client Phone</label><input type="tel" value={estimateForm.client_phone} onChange={e => setEstimateForm({ ...estimateForm, client_phone: e.target.value })} placeholder="(518) 555-0199" /></div>
             <div className="input-group"><label>Client Email</label><input type="email" value={estimateForm.client_email} onChange={e => setEstimateForm({ ...estimateForm, client_email: e.target.value })} placeholder="client@email.com" /></div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: '#444', marginBottom: '5px' }}>Line Items</label>
+            <p style={{ fontSize: '12px', color: '#6B7280', margin: '0 2px 8px' }}>Tag each line as Materials, Labor, or Other — if you win this estimate, JobTally uses those tags to set the job's budget and profit split automatically.</p>
             {estimateItems.map((it, i) => (
               <div key={i} style={{ border: '1px solid #eee', borderRadius: '10px', padding: '10px', marginBottom: '8px' }}>
                 <input value={it.description} onChange={e => setEstimateItem(i, 'description', e.target.value)} placeholder="Description (e.g. Cabinets & install)" style={{ width: '100%', padding: '8px 10px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px', marginBottom: '6px' }} />
