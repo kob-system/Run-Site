@@ -71,6 +71,29 @@ export default function Login() {
     setLoading(false)
   }
 
+  // Self-serve password reset — sends a Supabase recovery link to the email
+  // they typed. No separate screen needed; they land back here after resetting.
+  const handleForgotPassword = async () => {
+    setError(''); setNotice('')
+    if (!email) { setError('Enter your email above first, then tap "Forgot password?"'); return }
+    setLoading(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+    if (error) setError(friendlyError(error.message))
+    else setNotice(`Password reset link sent to ${email}. Check your inbox (and spam), then follow the link.`)
+    setLoading(false)
+  }
+
+  // Re-send the signup confirmation email if the first one never arrived.
+  const handleResendConfirm = async () => {
+    setError(''); setNotice('')
+    if (!email) { setError('Enter your email above first, then tap Resend.'); return }
+    setLoading(true)
+    const { error } = await supabase.auth.resend({ type: 'signup', email })
+    if (error) setError(friendlyError(error.message))
+    else setNotice(`Confirmation email re-sent to ${email}. Check your inbox and spam folder.`)
+    setLoading(false)
+  }
+
   const handleSignup = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -134,7 +157,7 @@ export default function Login() {
     // No session => Supabase requires email confirmation. Don't try to insert
     // the profile (it would fail RLS and orphan the account). Tell the user.
     if (!data.session) {
-      setNotice('Account created! Check your email to confirm, then sign in.')
+      setNotice(`Account created! We sent a confirmation link to ${email}. Click it, then sign in.`)
       setIsSignup(false)
       setLoading(false)
       return
@@ -203,6 +226,11 @@ export default function Login() {
               <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
             </div>
             {isSignup && <p style={{ fontSize: '12px', color: '#6B7280', margin: '6px 2px 0' }}>At least 6 characters.</p>}
+            {!isSignup && (
+              <p style={{ textAlign: 'right', margin: '8px 2px 0' }}>
+                <button type="button" onClick={handleForgotPassword} disabled={loading} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', fontSize: '13px', cursor: 'pointer', padding: 0 }}>Forgot password?</button>
+              </p>
+            )}
           </div>
           <button type="submit" className="btn-primary" disabled={loading}>{loading ? <><span className="spinner" />Working…</> : isSignup ? 'Create Account' : 'Sign In'}</button>
         </form>
@@ -210,6 +238,12 @@ export default function Login() {
           {isSignup ? 'Already have an account?' : "Don't have an account?"}
           <button onClick={() => { setIsSignup(!isSignup); setError(''); setNotice('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>{isSignup ? 'Sign In' : 'Sign Up'}</button>
         </p>
+        {!isSignup && notice.includes('confirmation link') && (
+          <p style={{ textAlign: 'center', marginTop: '4px', fontSize: '13px', color: '#666' }}>
+            Didn't get it?
+            <button type="button" onClick={handleResendConfirm} disabled={loading} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>Resend email</button>
+          </p>
+        )}
       </div>
       <p style={{ marginTop: '18px', fontSize: '12px' }}>
         <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: 'rgba(255,255,255,0.6)', textDecoration: 'none' }}>Privacy</a>

@@ -125,7 +125,8 @@ export default function App() {
     if (enforced && sub === undefined) return <div className="loading">Loading JobTally...</div>
     if (enforced && !hasAccess) return <Billing profile={profile} mode="paywall" />
     if (wantsBilling) return <Billing profile={profile} mode="manage" />
-    return <OwnerDashboard profile={profile} />
+    return <OwnerDashboard profile={profile} sub={sub} billingEnforced={enforced} />
+
   }
   if (loadError) return (
     <div className="loading">

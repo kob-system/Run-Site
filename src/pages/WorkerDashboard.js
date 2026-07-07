@@ -726,7 +726,7 @@ export default function WorkerDashboard({ profile }) {
             {scheduleError
               ? <div className="alert-danger">{scheduleError}</div>
               : schedule.length === 0
-                ? <div className="empty-state"><p>No upcoming schedule</p></div>
+                ? <div className="empty-state"><p>Nothing scheduled yet. Your boss will add the days and jobs you're working here.</p></div>
                 : schedule.map(entry => (
                   <div key={entry.id} className="card">
                     <p className="schedule-day">{new Date(entry.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
@@ -795,7 +795,7 @@ export default function WorkerDashboard({ profile }) {
             {historyError
               ? <div className="alert-danger">{historyError} <button onClick={fetchHistory} style={{ background: 'none', border: 'none', color: 'white', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>Retry</button></div>
               : history.length === 0
-                ? <div className="empty-state"><p>No time entries in the last 30 days</p></div>
+                ? <div className="empty-state"><p>No hours yet in the last 30 days. Clock in on a job and your time shows up here.</p></div>
                 : history.map(entry => {
                     const clockIn = new Date(entry.clocked_in_at)
                     const clockOut = entry.clocked_out_at ? new Date(entry.clocked_out_at) : null
