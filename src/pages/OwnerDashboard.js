@@ -1442,6 +1442,10 @@ export default function OwnerDashboard({ profile }) {
   const activeProjects = projects.filter(p => p.stage !== 'end')
   const completedProjects = projects.filter(p => p.stage === 'end')
   const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
+  // Grand total = the contract value of all active jobs (materials + labor +
+  // profit). Shown on the at-a-glance summaries; unlike projected profit it
+  // doesn't move as costs are logged, so the "Grand total" label stays honest.
+  const grandTotal = activeProjects.reduce((sum, p) => sum + contractOf(p), 0)
 
   // ---- Home / Clients / Calendar derived data ----
   const owedTotal = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.amount || 0), 0)
@@ -2294,7 +2298,7 @@ export default function OwnerDashboard({ profile }) {
               <div style={{ display: 'flex', gap: '24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{activeProjects.length}</p></div>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open estimates</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{openEstimateCount}</p></div>
-                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Proj. profit</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(projectedProfit)}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Grand total</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(grandTotal)}</p></div>
               </div>
             </div>
             {budgetAlerts.length > 0 && (
@@ -2379,7 +2383,7 @@ export default function OwnerDashboard({ profile }) {
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <div className="stat-card"><div className="stat-value">{activeProjects.length}</div><div className="stat-label">Active Jobs</div></div>
               <div className="stat-card"><div className="stat-value">{completedProjects.length}</div><div className="stat-label">Completed</div></div>
-              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: projectedProfit >= 0 ? '#16A34A' : '#DC2626' }}>{formatCurrency(projectedProfit)}</div><div className="stat-label">Proj. Profit</div></div>
+              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Grand total</div></div>
             </div>
             <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New Job</button>
 
@@ -2390,15 +2394,14 @@ export default function OwnerDashboard({ profile }) {
                   const s = spendOf(p.id)
                   const matPct = getBudgetPct(s.materials, p.materials_budget)
                   const labPct = getBudgetPct(s.labor, p.labor_budget)
-                  const prof = profitOf(p)
                   return (
                     <div key={p.id} className="card" role="button" tabIndex={0} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }} style={{ cursor: 'pointer' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <div><h3>{p.name}</h3><p>{p.client_name}</p></div>
                         <div style={{ textAlign: 'right' }}>
                           <span className={'status-pill status-' + p.stage}>{p.stage}</span>
-                          <p style={{ fontSize: '17px', fontWeight: 800, marginTop: '6px', color: prof >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(prof)}</p>
-                          <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Proj. profit</p>
+                          <p style={{ fontSize: '17px', fontWeight: 800, marginTop: '6px', color: '#1C2B3A' }}>{formatCurrency(contractOf(p))}</p>
+                          <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Grand total</p>
                         </div>
                       </div>
                       {(matPct >= 80 || labPct >= 80) && (
