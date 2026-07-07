@@ -637,8 +637,8 @@ export default function WorkerDashboard({ profile }) {
               {currentEntry && activeJobAddress && (
                 <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '4px' }}>{activeJobAddress}</p>
               )}
-              <p style={{ fontSize: '12px', fontWeight: '600', color: currentEntry ? '#16A34A' : '#9CA3AF', marginBottom: '4px' }}>
-                {currentEntry ? '📍 GPS on — stamping your start/stop' : '📍 GPS off'}
+              <p style={{ fontSize: '12px', fontWeight: '600', color: (currentEntry && currentEntry.gps_lat != null) ? '#16A34A' : '#9CA3AF', marginBottom: '4px' }}>
+                {!currentEntry ? '📍 GPS off' : (currentEntry.gps_lat != null ? '📍 GPS on — stamping your start/stop' : '📍 Clocked in — location unavailable')}
               </p>
               {currentEntry
                 ? <div className="timer-display">{formatTimerDisplay(timer)}</div>

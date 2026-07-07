@@ -52,7 +52,7 @@ const NAV_BUCKET = {
   jobs: 'jobs', calendar: 'jobs',
   money: 'money', estimates: 'money', invoices: 'money', clients: 'money', insights: 'money', reports: 'money',
   crew: 'crew', workers: 'crew', payroll: 'crew',
-  more: 'more', compliance: 'more', warranties: 'more',
+  more: 'more', compliance: 'more', warranties: 'more', settings: 'more',
 }
 const HubCard = ({ icon, title, sub, onClick }) => (
   <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 'var(--tap)' }} onClick={onClick} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}>
@@ -213,6 +213,8 @@ export default function OwnerDashboard({ profile }) {
   const [toast, setToast] = useState('')
   const [toastType, setToastType] = useState('success')
   const [inlineError, setInlineError] = useState('')
+  const [settingsForm, setSettingsForm] = useState({ company_name: profile.company_name || '', full_name: profile.full_name || '' })
+  const [settingsSaving, setSettingsSaving] = useState(false)
   const [reportYear, setReportYear] = useState(new Date().getFullYear())
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
@@ -268,6 +270,30 @@ export default function OwnerDashboard({ profile }) {
   const [permitForm, setPermitForm] = useState({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
+
+  // Save the owner's editable business info. company_name / full_name are the
+  // only profile columns an owner may change (role/owner_id/email/created_at/
+  // hourly_rate are locked server-side by lock_profile_identity — FIX-15).
+  const saveSettings = async () => {
+    const company = settingsForm.company_name.trim()
+    const name = settingsForm.full_name.trim()
+    if (!company) { showToast('Company name can’t be empty', 'error'); return }
+    setSettingsSaving(true)
+    try {
+      const { error } = await supabase.from('profiles')
+        .update({ company_name: company, full_name: name })
+        .eq('id', profile.id)
+      if (error) throw error
+      // Keep the in-memory prop-derived form in sync so it survives a tab switch.
+      profile.company_name = company
+      profile.full_name = name
+      showToast('Saved ✓')
+    } catch (e) {
+      showToast('Could not save. Check your connection and try again.', 'error')
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
 
   // Friendly date range for time-off ("Jun 18" or "Jun 18 – Jun 20").
   // T00:00:00 keeps date-only columns from drifting a day in local time.
@@ -2084,7 +2110,7 @@ export default function OwnerDashboard({ profile }) {
           <div>
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers and their pay.</p>
             <HubCard icon="👷" title="Workers" sub="Add crew, set rates, time-off requests" onClick={() => setActiveTab('workers')} />
-            <HubCard icon="💰" title="Payroll" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
+            <HubCard icon="💰" title="Crew Pay" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
           </div>
         )}
 
@@ -2093,7 +2119,36 @@ export default function OwnerDashboard({ profile }) {
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
             <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
             <HubCard icon="🔧" title="Callbacks / go-backs" sub="Post-job follow-ups and warranty work" onClick={() => setActiveTab('warranties')} />
-            <HubCard icon="⚙️" title="Settings & Billing" sub="Manage your subscription and plan" onClick={() => { window.location.assign('?billing') }} />
+            <HubCard icon="⚙️" title="Settings & Billing" sub="Your business info and subscription" onClick={() => { setSettingsForm({ company_name: profile.company_name || '', full_name: profile.full_name || '' }); setActiveTab('settings') }} />
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div>
+            <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
+            <div className="card">
+              <h3 style={{ marginBottom: '4px' }}>Your business</h3>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>This shows up on your estimates and invoices.</p>
+              <div className="input-group">
+                <label htmlFor="set-company">Company name</label>
+                <input id="set-company" type="text" value={settingsForm.company_name} onChange={e => setSettingsForm(f => ({ ...f, company_name: e.target.value }))} placeholder="First Class Property Services" />
+              </div>
+              <div className="input-group">
+                <label htmlFor="set-name">Your name</label>
+                <input id="set-name" type="text" value={settingsForm.full_name} onChange={e => setSettingsForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Josh Smith" />
+              </div>
+              <div className="input-group">
+                <label htmlFor="set-email">Email</label>
+                <input id="set-email" type="email" value={profile.email || ''} disabled style={{ background: '#f4f4f5', color: '#888' }} />
+                <p style={{ fontSize: '12px', color: '#888', margin: '4px 2px 0' }}>Contact support to change your login email.</p>
+              </div>
+              <button className="btn-primary" onClick={saveSettings} disabled={settingsSaving} style={{ width: '100%' }}>{settingsSaving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+            <div className="card">
+              <h3 style={{ marginBottom: '4px' }}>Subscription & billing</h3>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>Manage your plan, payment method, and invoices.</p>
+              <button className="btn-secondary" onClick={() => { window.location.assign('?billing') }} style={{ width: '100%' }}>Manage subscription & plan</button>
+            </div>
           </div>
         )}
 
@@ -2220,6 +2275,16 @@ export default function OwnerDashboard({ profile }) {
                       </div>
                     ))}
                   </div>
+                </div>
+              )
+            })()}
+            {(() => {
+              const pending = timeOff.filter(r => r.status === 'pending').length
+              if (!pending) return null
+              return (
+                <div className="card" role="button" tabIndex={0} onClick={() => setActiveTab('workers')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab('workers') } }} style={{ border: '2px solid #E07B2A', background: '#FFF4ED', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '14px', fontWeight: '600', color: '#1C2B3A' }}>🌴 {pending} time-off request{pending > 1 ? 's' : ''} waiting for your review</span>
+                  <span style={{ color: '#E07B2A', fontSize: '18px' }}>›</span>
                 </div>
               )
             })()}
