@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
 import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
 import { downloadCsv } from '../utils/csv'
+import AssistantPanel from '../components/AssistantPanel'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 
 // Deduction categories an accountant wants broken out at tax time.
@@ -2956,6 +2957,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       )}
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
+
+      <AssistantPanel />
 
       <div className="bottom-nav">
         {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs'], ['money', '💵', 'Money'], ['crew', '👷', 'Crew'], ['more', '⋯', 'More']].map(([key, icon, label]) => (
