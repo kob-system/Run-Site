@@ -52,7 +52,7 @@ const NAV_BUCKET = {
   jobs: 'jobs', calendar: 'jobs',
   money: 'money', estimates: 'money', invoices: 'money', clients: 'money', insights: 'money', reports: 'money',
   crew: 'crew', workers: 'crew', payroll: 'crew',
-  more: 'more', compliance: 'more', warranties: 'more',
+  more: 'more', compliance: 'more', warranties: 'more', settings: 'more',
 }
 const HubCard = ({ icon, title, sub, onClick }) => (
   <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 'var(--tap)' }} onClick={onClick} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}>
@@ -213,6 +213,8 @@ export default function OwnerDashboard({ profile }) {
   const [toast, setToast] = useState('')
   const [toastType, setToastType] = useState('success')
   const [inlineError, setInlineError] = useState('')
+  const [settingsForm, setSettingsForm] = useState({ company_name: profile.company_name || '', full_name: profile.full_name || '' })
+  const [settingsSaving, setSettingsSaving] = useState(false)
   const [reportYear, setReportYear] = useState(new Date().getFullYear())
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
@@ -268,6 +270,30 @@ export default function OwnerDashboard({ profile }) {
   const [permitForm, setPermitForm] = useState({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
 
   const showToast = (msg, type = 'success') => { setToast(msg); setToastType(type) }
+
+  // Save the owner's editable business info. company_name / full_name are the
+  // only profile columns an owner may change (role/owner_id/email/created_at/
+  // hourly_rate are locked server-side by lock_profile_identity — FIX-15).
+  const saveSettings = async () => {
+    const company = settingsForm.company_name.trim()
+    const name = settingsForm.full_name.trim()
+    if (!company) { showToast('Company name can’t be empty', 'error'); return }
+    setSettingsSaving(true)
+    try {
+      const { error } = await supabase.from('profiles')
+        .update({ company_name: company, full_name: name })
+        .eq('id', profile.id)
+      if (error) throw error
+      // Keep the in-memory prop-derived form in sync so it survives a tab switch.
+      profile.company_name = company
+      profile.full_name = name
+      showToast('Saved ✓')
+    } catch (e) {
+      showToast('Could not save. Check your connection and try again.', 'error')
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
 
   // Friendly date range for time-off ("Jun 18" or "Jun 18 – Jun 20").
   // T00:00:00 keeps date-only columns from drifting a day in local time.
@@ -1416,6 +1442,10 @@ export default function OwnerDashboard({ profile }) {
   const activeProjects = projects.filter(p => p.stage !== 'end')
   const completedProjects = projects.filter(p => p.stage === 'end')
   const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
+  // Grand total = the contract value of all active jobs (materials + labor +
+  // profit). Shown on the at-a-glance summaries; unlike projected profit it
+  // doesn't move as costs are logged, so the "Grand total" label stays honest.
+  const grandTotal = activeProjects.reduce((sum, p) => sum + contractOf(p), 0)
 
   // ---- Home / Clients / Calendar derived data ----
   const owedTotal = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.amount || 0), 0)
@@ -2084,7 +2114,7 @@ export default function OwnerDashboard({ profile }) {
           <div>
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers and their pay.</p>
             <HubCard icon="👷" title="Workers" sub="Add crew, set rates, time-off requests" onClick={() => setActiveTab('workers')} />
-            <HubCard icon="💰" title="Payroll" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
+            <HubCard icon="💰" title="Crew Pay" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
           </div>
         )}
 
@@ -2093,7 +2123,36 @@ export default function OwnerDashboard({ profile }) {
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
             <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
             <HubCard icon="🔧" title="Callbacks / go-backs" sub="Post-job follow-ups and warranty work" onClick={() => setActiveTab('warranties')} />
-            <HubCard icon="⚙️" title="Settings & Billing" sub="Manage your subscription and plan" onClick={() => { window.location.assign('?billing') }} />
+            <HubCard icon="⚙️" title="Settings & Billing" sub="Your business info and subscription" onClick={() => { setSettingsForm({ company_name: profile.company_name || '', full_name: profile.full_name || '' }); setActiveTab('settings') }} />
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div>
+            <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
+            <div className="card">
+              <h3 style={{ marginBottom: '4px' }}>Your business</h3>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>This shows up on your estimates and invoices.</p>
+              <div className="input-group">
+                <label htmlFor="set-company">Company name</label>
+                <input id="set-company" type="text" value={settingsForm.company_name} onChange={e => setSettingsForm(f => ({ ...f, company_name: e.target.value }))} placeholder="First Class Property Services" />
+              </div>
+              <div className="input-group">
+                <label htmlFor="set-name">Your name</label>
+                <input id="set-name" type="text" value={settingsForm.full_name} onChange={e => setSettingsForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Josh Smith" />
+              </div>
+              <div className="input-group">
+                <label htmlFor="set-email">Email</label>
+                <input id="set-email" type="email" value={profile.email || ''} disabled style={{ background: '#f4f4f5', color: '#888' }} />
+                <p style={{ fontSize: '12px', color: '#888', margin: '4px 2px 0' }}>Contact support to change your login email.</p>
+              </div>
+              <button className="btn-primary" onClick={saveSettings} disabled={settingsSaving} style={{ width: '100%' }}>{settingsSaving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+            <div className="card">
+              <h3 style={{ marginBottom: '4px' }}>Subscription & billing</h3>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>Manage your plan, payment method, and invoices.</p>
+              <button className="btn-secondary" onClick={() => { window.location.assign('?billing') }} style={{ width: '100%' }}>Manage subscription & plan</button>
+            </div>
           </div>
         )}
 
@@ -2223,13 +2282,23 @@ export default function OwnerDashboard({ profile }) {
                 </div>
               )
             })()}
+            {(() => {
+              const pending = timeOff.filter(r => r.status === 'pending').length
+              if (!pending) return null
+              return (
+                <div className="card" role="button" tabIndex={0} onClick={() => setActiveTab('workers')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab('workers') } }} style={{ border: '2px solid #E07B2A', background: '#FFF4ED', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '14px', fontWeight: '600', color: '#1C2B3A' }}>🌴 {pending} time-off request{pending > 1 ? 's' : ''} waiting for your review</span>
+                  <span style={{ color: '#E07B2A', fontSize: '18px' }}>›</span>
+                </div>
+              )
+            })()}
             <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
               <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
               <p style={{ fontSize: '44px', fontWeight: '800', color: '#F59E0B', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
               <div style={{ display: 'flex', gap: '24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{activeProjects.length}</p></div>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open estimates</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{openEstimateCount}</p></div>
-                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Proj. profit</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(projectedProfit)}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Grand total</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(grandTotal)}</p></div>
               </div>
             </div>
             {budgetAlerts.length > 0 && (
@@ -2314,7 +2383,7 @@ export default function OwnerDashboard({ profile }) {
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <div className="stat-card"><div className="stat-value">{activeProjects.length}</div><div className="stat-label">Active Jobs</div></div>
               <div className="stat-card"><div className="stat-value">{completedProjects.length}</div><div className="stat-label">Completed</div></div>
-              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: projectedProfit >= 0 ? '#16A34A' : '#DC2626' }}>{formatCurrency(projectedProfit)}</div><div className="stat-label">Proj. Profit</div></div>
+              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Grand total</div></div>
             </div>
             <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New Job</button>
 
@@ -2325,15 +2394,14 @@ export default function OwnerDashboard({ profile }) {
                   const s = spendOf(p.id)
                   const matPct = getBudgetPct(s.materials, p.materials_budget)
                   const labPct = getBudgetPct(s.labor, p.labor_budget)
-                  const prof = profitOf(p)
                   return (
                     <div key={p.id} className="card" role="button" tabIndex={0} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }} style={{ cursor: 'pointer' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <div><h3>{p.name}</h3><p>{p.client_name}</p></div>
                         <div style={{ textAlign: 'right' }}>
                           <span className={'status-pill status-' + p.stage}>{p.stage}</span>
-                          <p style={{ fontSize: '17px', fontWeight: 800, marginTop: '6px', color: prof >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(prof)}</p>
-                          <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Proj. profit</p>
+                          <p style={{ fontSize: '17px', fontWeight: 800, marginTop: '6px', color: '#1C2B3A' }}>{formatCurrency(contractOf(p))}</p>
+                          <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Grand total</p>
                         </div>
                       </div>
                       {(matPct >= 80 || labPct >= 80) && (
