@@ -1,5 +1,4 @@
 {
-  "$comment": "SPA fallback: path routes like /remodelers must serve the CRA shell (App.js branches on pathname). Static files and /api/* functions match the filesystem first, so this only catches app routes.",
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
