@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import { getAttribution, saveSignupAttribution } from '../utils/attribution'
 import buildInfo from '../buildInfo.json'
 
 // Turn raw Supabase/auth error strings into plain language a contractor
@@ -34,6 +35,12 @@ export default function Login() {
   const [inviteToken, setInviteToken] = useState(null)
   const [inviteOwnerId, setInviteOwnerId] = useState(null)
   const [inviteCompany, setInviteCompany] = useState('')
+
+  // Marketing CTAs (e.g. /remodelers) land on /?signup=1 — open straight to
+  // the Create Account form instead of making them find the toggle.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('signup')) setIsSignup(true)
+  }, [])
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get('invite')
@@ -136,6 +143,11 @@ export default function Login() {
       company_name: role === 'owner' ? company : null,
       owner_id: ownerId
     }
+    // First-touch marketing attribution rides in the metadata too, so the
+    // email-confirmation flow (which may finish on ANOTHER device, where
+    // localStorage is empty) can still record which post brought them in.
+    const attribution = getAttribution()
+    if (attribution) signupMeta.attribution = attribution
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -178,6 +190,8 @@ export default function Login() {
         setLoading(false)
         return
       }
+      // Best-effort: record which campaign/ref created this account.
+      saveSignupAttribution(supabase, data.user.id, attribution)
     }
     setLoading(false)
   }
