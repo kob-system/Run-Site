@@ -1,10 +1,15 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Suspense } from 'react'
 import { supabase } from './supabaseClient'
 import Login from './pages/Login'
 import OwnerDashboard from './pages/OwnerDashboard'
 import WorkerDashboard from './pages/WorkerDashboard'
 import Billing from './pages/Billing'
+import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import './App.css'
+
+// Public marketing page(s) — lazy so visitors who never hit them don't pay
+// for the code, and app users don't carry the landing page in the main bundle.
+const Remodelers = React.lazy(() => import('./pages/Remodelers'))
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -41,6 +46,13 @@ export default function App() {
     if (ref) localStorage.setItem('jobtally_ref', ref)
   }, [])
 
+  // Marketing attribution: persist first-touch utm_* params from any page
+  // (landing pages, the app root, anywhere) so signup can record which post
+  // or campaign actually brought this account in. First touch wins.
+  useEffect(() => {
+    captureAttribution()
+  }, [])
+
   const fetchProfile = async (user) => {
     setLoadError(false)
     try {
@@ -63,6 +75,11 @@ export default function App() {
             owner_id: md.owner_id || null
           })
           if (insErr) console.error('Profile auto-create failed:', insErr)
+          // Record which campaign/post brought this account in. The utm data
+          // rode along in the signup metadata (set on the device they signed
+          // up from), so it survives confirming email on a different device.
+          // Best-effort — never blocks account creation.
+          if (!insErr) saveSignupAttribution(supabase, user.id, md.attribution || null)
           const res = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
           if (res.error) throw res.error
           data = res.data
@@ -95,6 +112,16 @@ export default function App() {
       setLoadError(true)
     }
     setLoading(false)
+  }
+
+  // Public marketing routes — rendered before ANY auth/billing decision so
+  // they work for logged-out visitors (and logged-in ones checking the page).
+  if (window.location.pathname.replace(/\/+$/, '') === '/remodelers') {
+    return (
+      <Suspense fallback={<div className="loading">Loading JobTally...</div>}>
+        <Remodelers />
+      </Suspense>
+    )
   }
 
   if (loading) return <div className="loading">Loading JobTally...</div>
