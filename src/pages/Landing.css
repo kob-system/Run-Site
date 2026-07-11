@@ -42,6 +42,13 @@
 .ld h2 { font-size: clamp(24px, 4vw, 32px); font-weight: 800; text-align: center; }
 .ld .ld-kicker { text-align: center; color: var(--text-muted); font-size: 15px; margin: 8px auto 8px; max-width: 520px; }
 
+/* Watch-it-run video — 16:9, click-to-play */
+.ld-video { background: var(--navy); color: #fff; }
+.ld-video h2 { color: #fff; }
+.ld-video .ld-kicker { color: rgba(255,255,255,0.6); }
+.ld-video-frame { max-width: 860px; margin: 24px auto 0; border-radius: var(--radius); overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.45); background: #000; aspect-ratio: 16 / 9; }
+.ld-video-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
+
 /* Feature rows — copy + phone, alternating sides on desktop */
 .ld-row { display: grid; grid-template-columns: 1fr; gap: 28px; align-items: center; padding: 36px 0; border-bottom: 1px solid var(--border); }
 .ld-row:last-child { border-bottom: none; }

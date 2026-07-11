@@ -23,9 +23,9 @@ const FEATURES = [
     img: '/landing/receipts-list.png',
     alt: 'JobTally receipts list booked to a job',
     kicker: 'Receipts',
-    title: 'Snap a receipt at the register — it books itself',
+    title: 'Snap a receipt — the store and total fill themselves in',
     body:
-      'Take a photo and JobTally reads the store, the amount, and the date, and books it to the right job. The pile of crumpled receipts on the dash stops existing, and tax time stops being a nightmare weekend.',
+      'Take a photo at the register and JobTally reads the store and the amount and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing, and tax time stops being a nightmare weekend.',
   },
   {
     img: '/landing/job-profit.png',
@@ -118,6 +118,25 @@ export default function Landing() {
               <img src="/landing/jobs-list.png" alt="JobTally jobs list showing live projected profit per job" width="390" height="844" />
             </div>
             <div className="ld-shot-caption">Real screens from the app — this is what you get.</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Watch-it-run video — click-to-play, nothing loads until they hit play */}
+      <section className="ld-video">
+        <div className="ld-inner">
+          <h2>See it run — 3-minute walkthrough</h2>
+          <p className="ld-kicker">Watch a real job go from clock-in to profit. No sign-up needed.</p>
+          <div className="ld-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/pitch-poster.jpg"
+              src="/landing/JobTally-Pitch.mp4"
+            >
+              Your browser can't play this video.
+            </video>
           </div>
         </div>
       </section>
