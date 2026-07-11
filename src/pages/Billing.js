@@ -32,9 +32,16 @@ const btn = {
   border: 'none', background: 'var(--orange)', color: '#fff', cursor: 'pointer', minHeight: 44,
 }
 
-export default function Billing({ profile, mode = 'manage' }) {
+export default function Billing({ profile, sub, mode = 'manage' }) {
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
+
+  // An owner with a live subscription (or one in the grace/past-due window)
+  // shouldn't be pitched the plan cards or the "no charge today" trial line —
+  // show them their status and the Manage-billing button only.
+  const status = sub && sub.status
+  const activeSub = ['active', 'trialing', 'past_due'].includes(status)
+  const periodEnd = sub && sub.current_period_end ? new Date(sub.current_period_end) : null
 
   const go = async (action, arg) => {
     setErr(''); setBusy(arg || action)
@@ -82,12 +89,26 @@ export default function Billing({ profile, mode = 'manage' }) {
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px' }}>
       <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>JobTally</h2>
       <h3 style={{ margin: '0 0 4px' }}>
-        {mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription'}
+        {activeSub ? 'Your subscription' : (mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription')}
       </h3>
-      <p style={{ color: '#667085', marginTop: 0 }}>
-        Start with a <strong>7-day free trial</strong> — no charge today. You enter your card on
-        Stripe's secure checkout and it auto-renews after the trial. Cancel anytime from Manage billing.
-      </p>
+      {activeSub ? (
+        <p style={{ color: '#667085', marginTop: 0 }}>
+          {status === 'trialing'
+            ? 'You’re on your free trial'
+            : status === 'past_due'
+            ? 'Your last payment didn’t go through — update your card to avoid interruption'
+            : 'Your subscription is active'}
+          {periodEnd
+            ? ` — ${status === 'trialing' ? 'trial ends' : status === 'past_due' ? 'retry by' : 'renews'} ${periodEnd.toLocaleDateString()}`
+            : ''}
+          . Use <strong>Manage billing</strong> below to change your plan, update your card, or cancel.
+        </p>
+      ) : (
+        <p style={{ color: '#667085', marginTop: 0 }}>
+          New accounts start with a <strong>7-day free trial</strong> — no charge today. You enter your card on
+          Stripe's secure checkout and it auto-renews after the trial. Cancel anytime from Manage billing.
+        </p>
+      )}
 
       {err && (
         <div style={{ background: '#fde8e8', color: '#9b1c1c', padding: 12, borderRadius: 10, margin: '12px 0' }}>
@@ -95,25 +116,27 @@ export default function Billing({ profile, mode = 'manage' }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
-        <div style={card}>
-          <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Monthly</div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>$150<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/mo</span></div>
-          <div style={{ color: '#667085', fontSize: 14 }}>All features, unlimited crew. Cancel anytime.</div>
-          <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'monthly')}>
-            {busy === 'monthly' ? 'Starting…' : 'Choose monthly'}
-          </button>
-        </div>
+      {!activeSub && (
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
+          <div style={card}>
+            <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Monthly</div>
+            <div style={{ fontSize: 28, fontWeight: 800 }}>$150<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/mo</span></div>
+            <div style={{ color: '#667085', fontSize: 14 }}>All features, unlimited crew. Cancel anytime.</div>
+            <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'monthly')}>
+              {busy === 'monthly' ? 'Starting…' : 'Choose monthly'}
+            </button>
+          </div>
 
-        <div style={{ ...card, borderColor: '#1C2B3A', borderWidth: 2 }}>
-          <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Yearly <span style={{ color: '#0a7d33', fontSize: 13 }}>· 4 months free</span></div>
-          <div style={{ fontSize: 28, fontWeight: 800 }}>$1,200<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/yr</span></div>
-          <div style={{ display: 'inline-block', alignSelf: 'flex-start', background: 'var(--green-tint)', color: 'var(--green-dark)', fontSize: 13, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginTop: 4 }}>Save $600 vs. monthly</div>
-          <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'yearly')}>
-            {busy === 'yearly' ? 'Starting…' : 'Choose yearly'}
-          </button>
+          <div style={{ ...card, borderColor: '#1C2B3A', borderWidth: 2 }}>
+            <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Yearly <span style={{ color: '#0a7d33', fontSize: 13 }}>· 4 months free</span></div>
+            <div style={{ fontSize: 28, fontWeight: 800 }}>$1,200<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/yr</span></div>
+            <div style={{ display: 'inline-block', alignSelf: 'flex-start', background: 'var(--green-tint)', color: 'var(--green-dark)', fontSize: 13, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginTop: 4 }}>Save $600 vs. monthly</div>
+            <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'yearly')}>
+              {busy === 'yearly' ? 'Starting…' : 'Choose yearly'}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div style={{ marginTop: 24, background: '#f0f6ff', border: '1px solid #cfe0f5', borderRadius: 12, padding: 16 }}>
         <div style={{ fontWeight: 700, color: '#1C2B3A', marginBottom: 4 }}>🔒 Your data is safe</div>

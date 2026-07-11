@@ -169,8 +169,8 @@ export default function App() {
     // Only when enforcement is ON: wait for the subscription read before
     // deciding, so we never flash the dashboard and then yank it to a paywall.
     if (enforced && sub === undefined) return <div className="loading">Loading JobTally...</div>
-    if (enforced && !hasAccess) return <Billing profile={profile} mode="paywall" />
-    if (wantsBilling) return <Billing profile={profile} mode="manage" />
+    if (enforced && !hasAccess) return <Billing profile={profile} sub={sub} mode="paywall" />
+    if (wantsBilling) return <Billing profile={profile} sub={sub} mode="manage" />
     return <OwnerDashboard profile={profile} sub={sub} billingEnforced={enforced} />
 
   }
