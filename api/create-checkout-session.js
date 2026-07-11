@@ -91,7 +91,10 @@ export default async function handler(req, res) {
       if (row) {
         if (row.stripe_customer_id) existingCustomer = row.stripe_customer_id
         if (row.stripe_subscription_id) hadPriorSub = true
-        if (['active', 'trialing', 'past_due'].includes(row.status)) {
+        // 'comp' is a grandfathered/free grant — block checkout too, so a comp'd
+        // owner can't start a paid subscription that the webhook would upsert on
+        // top of (and silently overwrite) their comp status.
+        if (['active', 'trialing', 'past_due', 'comp'].includes(row.status)) {
           return res.status(409).json({
             error: 'You already have an active subscription — use Manage billing to change your plan.',
           })

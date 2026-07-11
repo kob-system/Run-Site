@@ -1,16 +1,26 @@
 import React, { useState, useEffect, Suspense } from 'react'
 import { supabase } from './supabaseClient'
-import Login from './pages/Login'
-import OwnerDashboard from './pages/OwnerDashboard'
-import WorkerDashboard from './pages/WorkerDashboard'
-import Billing from './pages/Billing'
 import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import './App.css'
 
-// Public marketing page(s) — lazy so visitors who never hit them don't pay
-// for the code, and app users don't carry the landing page in the main bundle.
+// Everything below is code-split. A logged-out stranger hitting the root should
+// download the landing page and nothing else — not the whole authenticated app.
+// Eagerly importing the dashboards/login/billing here inverted that: the heavy
+// owner dashboard rode in the main bundle and blocked the marketing page's first
+// paint. Lazy() splits each screen into its own chunk, fetched only when that
+// branch actually renders.
+const Login = React.lazy(() => import('./pages/Login'))
+const OwnerDashboard = React.lazy(() => import('./pages/OwnerDashboard'))
+const WorkerDashboard = React.lazy(() => import('./pages/WorkerDashboard'))
+const Billing = React.lazy(() => import('./pages/Billing'))
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
 const Landing = React.lazy(() => import('./pages/Landing'))
+
+// Single Suspense fallback for every code-split screen, so each return site can
+// just wrap its element in <Screen>…</Screen> instead of repeating the boilerplate.
+const Screen = ({ children }) => (
+  <Suspense fallback={<div className="loading">Loading JobTally...</div>}>{children}</Suspense>
+)
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -118,11 +128,7 @@ export default function App() {
   // Public marketing routes — rendered before ANY auth/billing decision so
   // they work for logged-out visitors (and logged-in ones checking the page).
   if (window.location.pathname.replace(/\/+$/, '') === '/remodelers') {
-    return (
-      <Suspense fallback={<div className="loading">Loading JobTally...</div>}>
-        <Remodelers />
-      </Suspense>
-    )
+    return <Screen><Remodelers /></Screen>
   }
 
   if (loading) return <div className="loading">Loading JobTally...</div>
@@ -137,15 +143,11 @@ export default function App() {
       params.has('signup') ||
       params.has('invite')
     if (!wantsAuth) {
-      return (
-        <Suspense fallback={<div className="loading">Loading JobTally...</div>}>
-          <Landing />
-        </Suspense>
-      )
+      return <Screen><Landing /></Screen>
     }
-    return <Login />
+    return <Screen><Login /></Screen>
   }
-  if (profile?.role === 'worker') return <WorkerDashboard profile={profile} />
+  if (profile?.role === 'worker') return <Screen><WorkerDashboard profile={profile} /></Screen>
   if (profile) {
     const enforced = process.env.REACT_APP_BILLING_ENFORCED === 'true'
     const wantsBilling =
@@ -169,9 +171,9 @@ export default function App() {
     // Only when enforcement is ON: wait for the subscription read before
     // deciding, so we never flash the dashboard and then yank it to a paywall.
     if (enforced && sub === undefined) return <div className="loading">Loading JobTally...</div>
-    if (enforced && !hasAccess) return <Billing profile={profile} sub={sub} mode="paywall" />
-    if (wantsBilling) return <Billing profile={profile} sub={sub} mode="manage" />
-    return <OwnerDashboard profile={profile} sub={sub} billingEnforced={enforced} />
+    if (enforced && !hasAccess) return <Screen><Billing profile={profile} sub={sub} mode="paywall" /></Screen>
+    if (wantsBilling) return <Screen><Billing profile={profile} sub={sub} mode="manage" /></Screen>
+    return <Screen><OwnerDashboard profile={profile} sub={sub} billingEnforced={enforced} /></Screen>
 
   }
   if (loadError) return (
