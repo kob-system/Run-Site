@@ -1,11 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 
-// In-app AI assistant (owner MVP). A floating ✨ button opens a bottom sheet.
+// In-app AI assistant. A floating ✨ button opens a bottom sheet.
 // Type a question or an action; reads answer inline, writes show a confirm card
 // before anything saves. Every executed action is audited (Activity tab).
+// v0.4: role="worker" mounts the crew persona (clock in/out, hours, schedule,
+// time off — the API enforces the toolset server-side, this only sets copy),
+// mic dictation where the browser supports SpeechRecognition, and owner-only
+// receipt photo → /api/scan-receipt → normal add_expense confirm flow.
 const NAVY = '#1C2B3A'
 const ORANGE = '#E07B2A'
+const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
+const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
 async function authHeader() {
   const { data } = await supabase.auth.getSession()
@@ -13,17 +19,27 @@ async function authHeader() {
   return tok ? { Authorization: `Bearer ${tok}` } : {}
 }
 
-export default function AssistantPanel({ onDataChanged }) {
+export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
+  const isOwner = role !== 'worker'
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('chat')
   const [msgs, setMsgs] = useState([
-    { role: 'assistant', text: "Hey — I can do just about anything here for you: check profit and what you're owed, add expenses, hours, or mileage, create jobs, invoices, and estimates, manage the crew and schedule, permits, punch lists… just say it. I'll always show you a Confirm card before anything saves." },
+    {
+      role: 'assistant',
+      text: isOwner
+        ? "Hey — I can do just about anything here for you: check profit and what you're owed, add expenses, hours, or mileage, create jobs, invoices, and estimates, manage the crew and schedule, permits, punch lists… just say it. I'll always show you a Confirm card before anything saves."
+        : "Hey — I can clock you in or out, check your hours and pay, show your schedule and jobs, or send your boss a time-off request. Just say it (or tap the mic). I'll show you a Confirm card before anything saves.",
+    },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState(null) // { tool, args, summary }
   const [activity, setActivity] = useState(null)
+  const [listening, setListening] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const scrollRef = useRef(null)
+  const recogRef = useRef(null)
+  const fileRef = useRef(null)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -31,10 +47,10 @@ export default function AssistantPanel({ onDataChanged }) {
 
   const pushMsg = (m) => setMsgs((prev) => [...prev, m])
 
-  const send = useCallback(async () => {
-    const text = input.trim()
+  const send = useCallback(async (overrideText) => {
+    const text = (typeof overrideText === 'string' ? overrideText : input).trim()
     if (!text || busy) return
-    setInput('')
+    if (typeof overrideText !== 'string') setInput('')
     setPending(null)
     pushMsg({ role: 'user', text })
     setBusy(true)
@@ -87,6 +103,71 @@ export default function AssistantPanel({ onDataChanged }) {
     }
   }, [pending, busy, activity, onDataChanged])
 
+  // Mic dictation — browser speech-to-text into the input box. Button only
+  // renders when the browser has SpeechRecognition (iOS Safari 14.5+, Chrome).
+  const toggleMic = useCallback(() => {
+    if (!SR) return
+    if (listening) {
+      try { if (recogRef.current) recogRef.current.stop() } catch { /* already stopped */ }
+      setListening(false)
+      return
+    }
+    const rec = new SR()
+    rec.lang = 'en-US'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+    rec.onresult = (e) => {
+      const t = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : ''
+      if (t) setInput((prev) => (prev ? prev + ' ' : '') + t)
+    }
+    rec.onend = () => setListening(false)
+    rec.onerror = () => setListening(false)
+    recogRef.current = rec
+    try {
+      rec.start()
+      setListening(true)
+    } catch { setListening(false) }
+  }, [listening])
+
+  // Receipt photo (owner only): photo → /api/scan-receipt (Haiku vision) →
+  // auto-send the store/amount so the normal add_expense confirm flow takes over.
+  const onReceiptPick = useCallback(async (e) => {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = ''
+    if (!file || busy || scanning) return
+    if (!RECEIPT_TYPES.includes(file.type)) {
+      pushMsg({ role: 'assistant', text: 'That file type won’t work — send a photo (JPG, PNG, or WebP).' })
+      return
+    }
+    setScanning(true)
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(String(r.result).split(',')[1] || '')
+        r.onerror = reject
+        r.readAsDataURL(file)
+      })
+      const resp = await fetch('/api/scan-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+        body: JSON.stringify({ imageBase64: b64, mediaType: file.type }),
+      })
+      const data = await resp.json().catch(() => null)
+      const store = data && data.store ? String(data.store).slice(0, 80) : ''
+      const amount = data && Number(data.amount) > 0 ? Number(data.amount).toFixed(2) : ''
+      if (!resp.ok || (!store && !amount)) {
+        pushMsg({ role: 'assistant', text: (data && data.error) || 'Couldn’t read that receipt — try a clearer photo, or just tell me the store and amount.' })
+        return
+      }
+      setScanning(false)
+      await send(`I scanned a receipt${store ? ` from ${store}` : ''}${amount ? ` for $${amount}` : ''} — add it as an expense. Ask me which job if you need to.`)
+    } catch {
+      pushMsg({ role: 'assistant', text: 'Couldn’t read that receipt. Tell me the store and amount instead.' })
+    } finally {
+      setScanning(false)
+    }
+  }, [busy, scanning, send])
+
   const loadActivity = useCallback(async () => {
     const { data, error } = await supabase
       .from('assistant_actions')
@@ -111,6 +192,7 @@ export default function AssistantPanel({ onDataChanged }) {
     add_warranty: 'Logged callback', set_warranty_status: 'Updated callback',
     add_compliance_item: 'Added document', update_settings: 'Updated settings',
     invite_worker: 'Invited worker', remove_worker: 'Removed worker',
+    clock_in: 'Clocked in', clock_out: 'Clocked out', request_time_off: 'Requested time off',
   }
   const describe = (a) => {
     const p = a.params || {}
@@ -173,15 +255,24 @@ export default function AssistantPanel({ onDataChanged }) {
                   </div>
                 </div>
               )}
-              {busy && <div style={{ alignSelf: 'flex-start', color: '#9ca3af', fontSize: 13, fontStyle: 'italic' }}>thinking…</div>}
+              {(busy || scanning) && <div style={{ alignSelf: 'flex-start', color: '#9ca3af', fontSize: 13, fontStyle: 'italic' }}>{scanning ? 'reading receipt…' : 'thinking…'}</div>}
             </div>
             <div style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid #e5e7eb', background: 'white' }}>
+              {isOwner && (
+                <>
+                  <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
+                  <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
+                </>
+              )}
+              {SR && (
+                <button onClick={toggleMic} disabled={busy || scanning} aria-label={listening ? 'Stop listening' : 'Speak'} title={listening ? 'Stop listening' : 'Speak'} style={{ width: 44, border: listening ? 'none' : '1px solid #d1d5db', borderRadius: 10, background: listening ? '#dc2626' : 'white', fontSize: 18, cursor: 'pointer' }}>🎤</button>
+              )}
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') send() }}
-                placeholder="Ask or tell me to do something…"
-                style={{ flex: 1, padding: '11px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 15, outline: 'none' }}
+                placeholder={listening ? 'Listening…' : isOwner ? 'Ask or tell me to do something…' : 'Clock in, check hours, time off…'}
+                style={{ flex: 1, minWidth: 0, padding: '11px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 15, outline: 'none' }}
               />
               <button onClick={send} disabled={busy || !input.trim()} style={{ padding: '0 16px', border: 'none', borderRadius: 10, background: input.trim() && !busy ? ORANGE : '#d1d5db', color: 'white', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Send</button>
             </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatTime } from '../utils/formatTime'
+import AssistantPanel from '../components/AssistantPanel'
 
 const OFFLINE_KEY = 'runsite_offline_entry'
 const MAX_RETRIES = 3
@@ -855,6 +856,8 @@ export default function WorkerDashboard({ profile }) {
           fontSize: '14px', fontWeight: '600', zIndex: 999, boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
         }}>{toast}</div>
       )}
+
+      <AssistantPanel role="worker" onDataChanged={() => { checkActiveEntry(); fetchHistory(); fetchSchedule(); fetchTimeOff() }} />
     </div>
   )
 }
