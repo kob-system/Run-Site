@@ -131,11 +131,17 @@ async function runTool(tool, args, uid, userToken) {
     if (!name) return { error: 'A job name is required.' }
     const contract = args.contract_price != null ? asNum(args.contract_price) : 0
     if (!Number.isFinite(contract) || contract < 0 || contract > 10000000) return { error: 'Contract price is out of range.' }
+    // Seed the budget buckets so the Edit Job form (which reads
+    // materials_budget/labor_budget/profit_target) can't recompute budget→$0
+    // when the owner edits an unrelated field. profit_target holds the contract.
     const { ok, data } = await userReq(userToken, 'projects', 'POST', {
       owner_id: uid,
       name,
       client_name: clean(args.client_name, 120) || null,
       budget: contract,
+      materials_budget: 0,
+      labor_budget: 0,
+      profit_target: contract,
       stage: 'start',
     })
     if (!ok) return { error: 'Create was blocked (check your subscription is active).' }
