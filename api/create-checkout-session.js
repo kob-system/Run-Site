@@ -77,14 +77,26 @@ export default async function handler(req, res) {
   const ref = VALID_REFERRERS.includes(cleanRef) ? cleanRef : ''
 
   try {
-    // Reuse an existing Stripe customer if this owner already has one, so we
-    // don't create a duplicate customer on a re-subscribe.
+    // Look up this owner's existing subscription row (if any). It decides three
+    // things: reuse the Stripe customer on a re-subscribe (no duplicate
+    // customer); block a duplicate checkout when a plan is already live; and
+    // grant the 7-day trial ONLY to an owner who has never subscribed before.
     let existingCustomer = null
+    let hadPriorSub = false
     try {
       const rows = await sbGet(
-        `subscriptions?owner_id=eq.${encodeURIComponent(user.id)}&select=stripe_customer_id`
+        `subscriptions?owner_id=eq.${encodeURIComponent(user.id)}&select=stripe_customer_id,stripe_subscription_id,status`
       )
-      if (rows && rows[0] && rows[0].stripe_customer_id) existingCustomer = rows[0].stripe_customer_id
+      const row = rows && rows[0]
+      if (row) {
+        if (row.stripe_customer_id) existingCustomer = row.stripe_customer_id
+        if (row.stripe_subscription_id) hadPriorSub = true
+        if (['active', 'trialing', 'past_due'].includes(row.status)) {
+          return res.status(409).json({
+            error: 'You already have an active subscription — use Manage billing to change your plan.',
+          })
+        }
+      }
     } catch { /* table may not exist yet; fall through to email */ }
 
     const params = {
@@ -93,12 +105,15 @@ export default async function handler(req, res) {
       'line_items[0][quantity]': '1',
       client_reference_id: user.id,
       'subscription_data[metadata][owner_id]': user.id,
-      'subscription_data[trial_period_days]': '7',
       'metadata[owner_id]': user.id,
       allow_promotion_codes: 'true',
       success_url: `${APP_URL}/?billing=success`,
       cancel_url: `${APP_URL}/?billing=cancel`,
     }
+    // First-time subscribers get the 7-day free trial. An owner who has had a
+    // subscription before (cancelled or lapsed) re-subscribes with no new trial,
+    // so the trial can't be farmed by cancel-and-resubscribe.
+    if (!hadPriorSub) params['subscription_data[trial_period_days]'] = '7'
     if (ref) {
       // On the subscription so it persists for the life of the plan (used for
       // recurring commission), and on the session for immediate visibility.
