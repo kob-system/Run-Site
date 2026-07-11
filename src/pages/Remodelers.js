@@ -6,10 +6,10 @@ import './Remodelers.css'
 
 // Public marketing page at /remodelers — remodelers & GCs running a 2–10 man
 // crew. Rendered before any auth check (App.js), so it works logged-out.
-// The CTA points at the REAL signup: / opens Login, ?signup=1 flips it to
-// Create Account. New owners get the existing 7-day no-card free window —
-// no invented trials, no invented pricing.
-const SIGNUP_URL = '/?signup=1'
+// The CTA points at the REAL signup: /login opens the auth screen, ?signup=1
+// flips it to Create Account. New owners get the existing 7-day no-card free
+// window — no invented trials, no invented pricing.
+const SIGNUP_URL = '/login?signup=1'
 
 const FEATURES = [
   {
@@ -97,7 +97,7 @@ export default function Remodelers() {
       <header className="rl-top">
         <a className="rl-logo" href="/remodelers">JobTally</a>
         <nav>
-          <a className="rl-signin" href="/">Sign in</a>
+          <a className="rl-signin" href="/login">Sign in</a>
           <a className="rl-cta-sm" href={SIGNUP_URL}>Start free</a>
         </nav>
       </header>
@@ -261,7 +261,7 @@ export default function Remodelers() {
       </section>
 
       <footer className="rl-footer">
-        <a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>·<a href="/">Sign in</a>
+        <a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>·<a href="/login">Sign in</a>
         <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
       </footer>
     </div>
