@@ -80,17 +80,23 @@ async function findProjects(userToken, jobName) {
 }
 
 async function jobProfit(userToken, p) {
-  const receipts = await userGet(
-    userToken,
-    `receipts?select=amount,category&project_id=eq.${p.id}`
-  )
+  // Mirror the dashboard's fetchSpend exactly: materials/other from receipts,
+  // labor from CLOCKED-OUT time_entries (labor_spent is a dead column), and
+  // contract = base budget + APPROVED change orders. Anything else drifts from
+  // what the owner sees on the Jobs tab.
+  const [receipts, times, cos] = await Promise.all([
+    userGet(userToken, `receipts?select=amount,category&project_id=eq.${p.id}`),
+    userGet(userToken, `time_entries?select=labor_cost&project_id=eq.${p.id}&clocked_out_at=not.is.null`),
+    userGet(userToken, `change_orders?select=amount,status&project_id=eq.${p.id}`),
+  ])
   let materials = 0, other = 0
   for (const r of receipts || []) {
     if (r.category === 'materials') materials += num(r.amount)
     else other += num(r.amount)
   }
-  const labor = num(p.labor_spent)
-  const contract = num(p.budget)
+  const labor = (times || []).reduce((s, t) => s + num(t.labor_cost), 0)
+  const approvedCO = (cos || []).reduce((s, c) => s + (c.status === 'approved' ? num(c.amount) : 0), 0)
+  const contract = num(p.budget) + approvedCO
   const spend = materials + other + labor
   return {
     job: p.name,
@@ -272,6 +278,8 @@ export default async function handler(req, res) {
     `Help them get quick answers and take actions about their jobs, expenses, and money. ` +
     `Replies are read on a phone: keep them short and plain, no markdown tables. Money is USD. ` +
     `Use the read tools to look things up — never invent job names or numbers. ` +
+    `contract_price is the job's REVENUE (what the client pays), NOT profit. ` +
+    `Profit so far = contract price minus everything spent (materials + labor + other). Never call the contract price "profit." ` +
     `For anything that CHANGES data (add an expense, create a job), call the matching write tool: ` +
     `the app shows the owner a confirm card before it saves, so don't ask for confirmation yourself. ` +
     `If a required detail is missing (amount, which job), ask one short question instead of guessing.`
@@ -289,13 +297,20 @@ export default async function handler(req, res) {
 
         // If the model wants to WRITE, stop and ask the user to confirm. MVP
         // handles one write per turn.
-        const write = toolUses.find((b) => WRITE_NAMES.has(b.name))
+        const writes = toolUses.filter((b) => WRITE_NAMES.has(b.name))
+        const write = writes[0]
         if (write) {
+          const base = summarize(write.name, write.input || {})
+          // MVP does one write per turn — if the model queued more, tell the
+          // owner so the extras aren't silently dropped.
+          const more = writes.length > 1
+            ? ' (One action at a time — after this saves, ask me for the next.)'
+            : ''
           return res.json({
             type: 'confirm',
             tool: write.name,
             args: write.input || {},
-            summary: summarize(write.name, write.input || {}),
+            summary: base + more,
           })
         }
 

@@ -13,7 +13,7 @@ async function authHeader() {
   return tok ? { Authorization: `Bearer ${tok}` } : {}
 }
 
-export default function AssistantPanel() {
+export default function AssistantPanel({ onDataChanged }) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('chat')
   const [msgs, setMsgs] = useState([
@@ -76,13 +76,16 @@ export default function AssistantPanel() {
       })
       const data = await r.json()
       pushMsg({ role: 'assistant', text: r.ok ? (data.message || 'Done ✓') : (data.error || "Couldn't do that.") })
-      if (r.ok && activity) loadActivity()
+      if (r.ok) {
+        if (typeof onDataChanged === 'function') onDataChanged() // refresh dashboard money after a confirmed write
+        if (activity) loadActivity()
+      }
     } catch {
       pushMsg({ role: 'assistant', text: "Couldn't complete that action." })
     } finally {
       setBusy(false)
     }
-  }, [pending, busy, activity])
+  }, [pending, busy, activity, onDataChanged])
 
   const loadActivity = useCallback(async () => {
     const { data, error } = await supabase

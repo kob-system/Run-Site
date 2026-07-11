@@ -1436,10 +1436,15 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const labor = parseFloat(editJobForm.labor_budget || 0)
       const profit = parseFloat(editJobForm.profit_target || 0)
       const total = materials + labor + profit
+      // If the owner left every budget bucket blank (e.g. an assistant-created
+      // job never had buckets set), DON'T overwrite the contract to $0 — leave
+      // budget + buckets untouched and only save the other fields they edited.
+      const bucketsBlank = ['materials_budget', 'labor_budget', 'profit_target']
+        .every(k => editJobForm[k] === '' || editJobForm[k] == null)
       const updated = {
         name: editJobForm.name, client_name: editJobForm.client_name,
         client_phone: editJobForm.client_phone || null, client_email: editJobForm.client_email || null, client_address: editJobForm.client_address || null,
-        materials_budget: materials, labor_budget: labor, profit_target: profit, budget: total
+        ...(bucketsBlank ? {} : { materials_budget: materials, labor_budget: labor, profit_target: profit, budget: total })
       }
       const { error } = await supabase.from('projects').update(updated).eq('id', selectedProject.id)
       if (error) throw error
@@ -2958,7 +2963,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
-      <AssistantPanel />
+      <AssistantPanel onDataChanged={fetchProjects} />
 
       <div className="bottom-nav">
         {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs'], ['money', '💵', 'Money'], ['crew', '👷', 'Crew'], ['more', '⋯', 'More']].map(([key, icon, label]) => (
