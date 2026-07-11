@@ -17,7 +17,7 @@ export default function AssistantPanel({ onDataChanged }) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('chat')
   const [msgs, setMsgs] = useState([
-    { role: 'assistant', text: "Hey — I can look up job profit, what you're owed, worker hours, and add expenses or create jobs for you. What do you need?" },
+    { role: 'assistant', text: "Hey — I can do just about anything here for you: check profit and what you're owed, add expenses, hours, or mileage, create jobs, invoices, and estimates, manage the crew and schedule, permits, punch lists… just say it. I'll always show you a Confirm card before anything saves." },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -47,7 +47,7 @@ export default function AssistantPanel({ onDataChanged }) {
       const r = await fetch('/api/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({ message: text, history, tz: new Date().getTimezoneOffset() }),
       })
       const data = await r.json()
       if (!r.ok) { pushMsg({ role: 'assistant', text: data.error || 'Something went wrong.' }); return }
@@ -72,7 +72,7 @@ export default function AssistantPanel({ onDataChanged }) {
       const r = await fetch('/api/assistant-execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-        body: JSON.stringify({ tool: p.tool, args: p.args }),
+        body: JSON.stringify({ tool: p.tool, args: p.args, tz: new Date().getTimezoneOffset() }),
       })
       const data = await r.json()
       pushMsg({ role: 'assistant', text: r.ok ? (data.message || 'Done ✓') : (data.error || "Couldn't do that.") })
@@ -98,11 +98,26 @@ export default function AssistantPanel({ onDataChanged }) {
 
   useEffect(() => { if (open && tab === 'activity' && activity === null) loadActivity() }, [open, tab, activity, loadActivity])
 
+  const ACTION_LABELS = {
+    add_expense: 'Added expense', create_job: 'Created job', update_job: 'Updated job', set_job_stage: 'Changed job stage',
+    add_time_entry: 'Logged hours', add_mileage: 'Logged mileage', add_daily_log: 'Added daily log',
+    add_change_order: 'Added extra', add_punch_item: 'Added punch item', set_punch_item: 'Updated punch item',
+    add_material_item: 'Added material', set_material_item: 'Updated material',
+    create_invoice: 'Created invoice', mark_invoice_paid: 'Marked invoice paid',
+    create_estimate: 'Created estimate', set_estimate_status: 'Updated estimate', accept_estimate: 'Accepted estimate',
+    set_worker_rate: 'Set worker rate', assign_worker: 'Assigned worker', decide_time_off: 'Decided time off',
+    add_schedule_entry: 'Scheduled shift', record_paycheck: 'Recorded paycheck',
+    add_permit: 'Added permit', set_permit_status: 'Updated permit',
+    add_warranty: 'Logged callback', set_warranty_status: 'Updated callback',
+    add_compliance_item: 'Added document', update_settings: 'Updated settings',
+    invite_worker: 'Invited worker', remove_worker: 'Removed worker',
+  }
   const describe = (a) => {
     const p = a.params || {}
+    const label = ACTION_LABELS[a.action] || String(a.action || '').replace(/_/g, ' ')
     if (a.action === 'add_expense') return `Added $${Number(p.amount || 0).toFixed(2)} ${p.category || 'materials'} to “${p.job_name || '—'}”`
-    if (a.action === 'create_job') return `Created job “${p.name || '—'}”`
-    return a.action
+    const target = p.job_name || p.worker_name || p.name || p.title || p.label || p.description
+    return target ? `${label} — ${String(target).slice(0, 60)}` : label
   }
 
   if (!open) {
