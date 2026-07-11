@@ -22,7 +22,7 @@ const FEATURES = [
     emoji: '🧾',
     title: 'Snap a receipt, done',
     body:
-      'Take a photo at the register. JobTally reads the store, the amount, and the date, and books it to the right job. The pile of crumpled receipts on the dash stops existing.',
+      'Take a photo at the register. JobTally reads the store and the amount and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing.',
   },
   {
     emoji: '💰',
