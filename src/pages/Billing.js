@@ -39,8 +39,12 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
   // An owner with a live subscription (or one in the grace/past-due window)
   // shouldn't be pitched the plan cards or the "no charge today" trial line —
   // show them their status and the Manage-billing button only.
+  // 'comp' = a grandfathered/free account (e.g. a partner grant). Treat it like an
+  // active sub for UI purposes: no plan cards, no "no charge today" pitch — so a
+  // comp'd owner can't accidentally start a paid checkout that the webhook would
+  // then overwrite on top of their grant.
   const status = sub && sub.status
-  const activeSub = ['active', 'trialing', 'past_due'].includes(status)
+  const activeSub = ['active', 'trialing', 'past_due', 'comp'].includes(status)
   const periodEnd = sub && sub.current_period_end ? new Date(sub.current_period_end) : null
 
   const go = async (action, arg) => {

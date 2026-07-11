@@ -141,6 +141,33 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Why this exists — origin story / trust band */}
+      <section className="ld-story">
+        <div className="ld-inner ld-story-inner">
+          <div className="ld-story-kicker">Why this exists</div>
+          <h2>Built for a contractor who was losing money he couldn't see.</h2>
+          <p>
+            JobTally started with a contractor friend of ours in Troy, NY. Good builder, steady
+            work, crew of guys who showed up. His system: crew hours scribbled in
+            <strong> spiral notebooks</strong>, and every receipt from the supply house stuffed into
+            a <strong>plastic sheet</strong> in the truck — crumpled, coffee-stained, half of them
+            faded to nothing.
+          </p>
+          <p>
+            Ask him if a job made money and he'd say "pretty sure." Come tax time it was a
+            <strong> nightmare weekend</strong> of flattening receipts on the kitchen table, trying
+            to remember which job the lumber run belonged to. He wasn't losing money because he was
+            bad at building — he was losing it because nobody could see the numbers until it was way
+            too late.
+          </p>
+          <p className="ld-story-punch">
+            <strong>So we built JobTally to kill that.</strong> The notebook, the plastic sheet, the
+            tax-time archaeology — all of it. One app, on the phones you and your crew already carry,
+            that keeps score while the job is running.
+          </p>
+        </div>
+      </section>
+
       {/* Features — alternating rows, real screenshots */}
       <section className="ld-features">
         <div className="ld-inner">
