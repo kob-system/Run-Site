@@ -108,8 +108,61 @@ async function jobProfit(userToken, p) {
   }
 }
 
+// Profit for EVERY job in one shot, ranked. This is the ground truth for any
+// "which job is most/least profitable / bleeding" question — computing it
+// server-side (4 bulk queries, grouped in memory) stops the model from
+// eyeballing single lookups and contradicting its own ranking. Mirrors the
+// dashboard's fetchSpend math exactly so the numbers match the Jobs tab.
+async function listJobProfits(userToken) {
+  const projects = await userGet(
+    userToken,
+    `projects?select=id,name,budget,profit_target,stage&order=created_at.desc&limit=50`
+  )
+  if (!projects || !projects.length) return { jobs: [], note: 'No jobs yet.' }
+  const ids = projects.map((p) => p.id)
+  const inList = `(${ids.join(',')})`
+  const [receipts, times, cos] = await Promise.all([
+    userGet(userToken, `receipts?select=project_id,amount,category&project_id=in.${inList}`),
+    userGet(userToken, `time_entries?select=project_id,labor_cost&clocked_out_at=not.is.null&project_id=in.${inList}`),
+    userGet(userToken, `change_orders?select=project_id,amount,status&project_id=in.${inList}`),
+  ])
+  const spend = {}
+  for (const id of ids) spend[id] = { materials: 0, labor: 0, other: 0 }
+  for (const r of receipts || []) {
+    if (!spend[r.project_id]) continue
+    if (r.category === 'materials') spend[r.project_id].materials += num(r.amount)
+    else spend[r.project_id].other += num(r.amount)
+  }
+  for (const t of times || []) {
+    if (spend[t.project_id]) spend[t.project_id].labor += num(t.labor_cost)
+  }
+  const co = {}
+  for (const c of cos || []) {
+    if (c.status === 'approved') co[c.project_id] = (co[c.project_id] || 0) + num(c.amount)
+  }
+  const jobs = projects.map((p) => {
+    const s = spend[p.id] || { materials: 0, labor: 0, other: 0 }
+    const spent = s.materials + s.labor + s.other
+    const contract = num(p.budget) + (co[p.id] || 0)
+    return {
+      job: p.name,
+      contract_price: contract,
+      spent_total: spent,
+      profit_so_far: contract - spent,
+      stage: p.stage || null,
+    }
+  })
+  jobs.sort((a, b) => b.profit_so_far - a.profit_so_far)
+  return {
+    jobs,
+    note: 'Already ranked: highest profit_so_far first. profit_so_far = contract price minus everything spent. Use this order as-is.',
+  }
+}
+
 async function execRead(name, args, userToken) {
   switch (name) {
+    case 'list_job_profits':
+      return listJobProfits(userToken)
     case 'list_jobs': {
       const rows = await findProjects(userToken, null)
       return (rows || []).map((p) => ({
@@ -147,6 +200,12 @@ async function execRead(name, args, userToken) {
 
 // ---- Tool schemas exposed to the model ------------------------------------
 const READ_TOOLS = [
+  {
+    name: 'list_job_profits',
+    description:
+      'Profit for ALL jobs at once, already ranked highest-profit-first. Use this for ANY question that compares or ranks jobs by money — "most/least profitable job", "rank my jobs", "which jobs are losing money / bleeding", "best job". Returns each job with contract price, total spent, and profit so far. Never rank jobs from separate single lookups — use this so the order is consistent.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
   {
     name: 'list_jobs',
     description: "List the owner's jobs with contract price and stage. Use to find the exact job name before other tools.",
@@ -280,6 +339,7 @@ export default async function handler(req, res) {
     `Use the read tools to look things up — never invent job names or numbers. ` +
     `contract_price is the job's REVENUE (what the client pays), NOT profit. ` +
     `Profit so far = contract price minus everything spent (materials + labor + other). Never call the contract price "profit." ` +
+    `To compare or rank jobs by money (most/least profitable, which are bleeding), call list_job_profits — it returns every job already ranked, so report that order exactly and never re-rank from memory. ` +
     `For anything that CHANGES data (add an expense, create a job), call the matching write tool: ` +
     `the app shows the owner a confirm card before it saves, so don't ask for confirmation yourself. ` +
     `If a required detail is missing (amount, which job), ask one short question instead of guessing.`
