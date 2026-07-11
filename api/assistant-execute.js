@@ -126,15 +126,32 @@ const BLOCKED = 'Save was blocked (check your subscription is active).'
 // ---------- resolvers (all under the caller's RLS) ----------
 const ilikeSafe = (s) => encodeURIComponent(String(s).replace(/[%*,()]/g, ''))
 
+// Every word must appear in `field`, in any order — "Delgado basement" still
+// finds "Basement Finish – Delgado Residence". Returns a PostgREST and=() filter,
+// or null when there's only one word (the plain substring match already covers it).
+function wordFilter(field, needle) {
+  const words = String(needle).trim().split(/\s+/).filter((w) => w.length > 1)
+  if (words.length < 2) return null
+  return `and=(${words.map((w) => `${field}.ilike.*${ilikeSafe(w)}*`).join(',')})`
+}
+
 // Resolve a job name to exactly one of the caller's projects.
 async function resolveJob(userToken, jobName) {
   if (!jobName || typeof jobName !== 'string' || !jobName.trim()) return { error: 'Missing job name.' }
-  const { ok, data } = await userReq(
+  const select = 'projects?select=id,name,budget,materials_budget,labor_budget,profit_target,stage'
+  let { ok, data } = await userReq(
     userToken,
-    `projects?select=id,name,budget,materials_budget,labor_budget,profit_target,stage&name=ilike.*${ilikeSafe(jobName)}*&order=created_at.desc`,
+    `${select}&name=ilike.*${ilikeSafe(jobName)}*&order=created_at.desc`,
     'GET'
   )
   if (!ok || !Array.isArray(data)) return { error: 'Could not look up jobs.' }
+  if (data.length === 0) {
+    const wf = wordFilter('name', jobName)
+    if (wf) {
+      const retry = await userReq(userToken, `${select}&${wf}&order=created_at.desc`, 'GET')
+      if (retry.ok && Array.isArray(retry.data)) data = retry.data
+    }
+  }
   if (data.length === 0) return { error: `No job found matching “${jobName}”.` }
   if (data.length > 1) {
     const exact = data.filter((p) => (p.name || '').trim().toLowerCase() === jobName.trim().toLowerCase())
@@ -147,12 +164,20 @@ async function resolveJob(userToken, jobName) {
 // Resolve a crew-member name to exactly one of the owner's workers.
 async function resolveWorker(userToken, uid, workerName) {
   if (!workerName || typeof workerName !== 'string' || !workerName.trim()) return { error: 'Missing worker name.' }
-  const { ok, data } = await userReq(
+  const select = `profiles?select=id,full_name,hourly_rate&owner_id=eq.${uid}&role=eq.worker`
+  let { ok, data } = await userReq(
     userToken,
-    `profiles?select=id,full_name,hourly_rate&owner_id=eq.${uid}&role=eq.worker&full_name=ilike.*${ilikeSafe(workerName)}*`,
+    `${select}&full_name=ilike.*${ilikeSafe(workerName)}*`,
     'GET'
   )
   if (!ok || !Array.isArray(data)) return { error: 'Could not look up your crew.' }
+  if (data.length === 0) {
+    const wf = wordFilter('full_name', workerName)
+    if (wf) {
+      const retry = await userReq(userToken, `${select}&${wf}`, 'GET')
+      if (retry.ok && Array.isArray(retry.data)) data = retry.data
+    }
+  }
   if (data.length === 0) return { error: `No crew member found matching “${workerName}”.` }
   if (data.length > 1) {
     const exact = data.filter((w) => (w.full_name || '').trim().toLowerCase() === workerName.trim().toLowerCase())
@@ -166,7 +191,16 @@ async function resolveWorker(userToken, uid, workerName) {
 function matchOne(rows, field, needle, what) {
   const n = String(needle || '').trim().toLowerCase()
   if (!n) return { error: `Missing ${what}.` }
-  const hits = (rows || []).filter((r) => String(r[field] || '').toLowerCase().includes(n))
+  let hits = (rows || []).filter((r) => String(r[field] || '').toLowerCase().includes(n))
+  if (hits.length === 0) {
+    const words = n.split(/\s+/).filter((w) => w.length > 1)
+    if (words.length > 1) {
+      hits = (rows || []).filter((r) => {
+        const v = String(r[field] || '').toLowerCase()
+        return words.every((w) => v.includes(w))
+      })
+    }
+  }
   if (hits.length === 0) return { error: `No ${what} found matching “${needle}”.` }
   if (hits.length > 1) {
     const exact = hits.filter((r) => String(r[field] || '').trim().toLowerCase() === n)
@@ -179,12 +213,20 @@ function matchOne(rows, field, needle, what) {
 // Resolve an estimate title to exactly one estimate.
 async function resolveEstimate(userToken, title) {
   if (!title || typeof title !== 'string' || !title.trim()) return { error: 'Missing estimate title.' }
-  const { ok, data } = await userReq(
+  const select = 'estimates?select=id,title,status,items,tax_rate,client_name,client_phone,client_email'
+  let { ok, data } = await userReq(
     userToken,
-    `estimates?select=id,title,status,items,tax_rate,client_name,client_phone,client_email&title=ilike.*${ilikeSafe(title)}*&order=created_at.desc`,
+    `${select}&title=ilike.*${ilikeSafe(title)}*&order=created_at.desc`,
     'GET'
   )
   if (!ok || !Array.isArray(data)) return { error: 'Could not look up estimates.' }
+  if (data.length === 0) {
+    const wf = wordFilter('title', title)
+    if (wf) {
+      const retry = await userReq(userToken, `${select}&${wf}&order=created_at.desc`, 'GET')
+      if (retry.ok && Array.isArray(retry.data)) data = retry.data
+    }
+  }
   if (data.length === 0) return { error: `No estimate found matching “${title}”.` }
   if (data.length > 1) {
     const exact = data.filter((e) => (e.title || '').trim().toLowerCase() === title.trim().toLowerCase())
