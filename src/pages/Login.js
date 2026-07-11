@@ -199,7 +199,9 @@ export default function Login() {
   return (
     <div style={{ minHeight: '100vh', background: '#1C2B3A', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
       <div style={{ marginBottom: '32px', textAlign: 'center' }}>
-        <h1 style={{ color: '#E07B2A', fontSize: '32px', fontWeight: '800' }}>JobTally</h1>
+        <h1 style={{ fontSize: '32px', fontWeight: '800' }}>
+          <a href="/" style={{ color: '#E07B2A', textDecoration: 'none' }}>JobTally</a>
+        </h1>
         <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', marginTop: '6px' }}>Contractor job tracking — from your phone</p>
       </div>
       <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}>

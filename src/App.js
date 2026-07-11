@@ -10,6 +10,7 @@ import './App.css'
 // Public marketing page(s) — lazy so visitors who never hit them don't pay
 // for the code, and app users don't carry the landing page in the main bundle.
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
+const Landing = React.lazy(() => import('./pages/Landing'))
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -125,7 +126,25 @@ export default function App() {
   }
 
   if (loading) return <div className="loading">Loading JobTally...</div>
-  if (!session) return <Login />
+  if (!session) {
+    // Logged-out visitors at the root get the public landing page, not a
+    // cold login form. Auth still owns: /login, plus the two query-param
+    // entries already in the wild — /?signup=1 (marketing CTAs) and
+    // /?invite=<token> (worker invite links texted by owners).
+    const params = new URLSearchParams(window.location.search)
+    const wantsAuth =
+      window.location.pathname.replace(/\/+$/, '') === '/login' ||
+      params.has('signup') ||
+      params.has('invite')
+    if (!wantsAuth) {
+      return (
+        <Suspense fallback={<div className="loading">Loading JobTally...</div>}>
+          <Landing />
+        </Suspense>
+      )
+    }
+    return <Login />
+  }
   if (profile?.role === 'worker') return <WorkerDashboard profile={profile} />
   if (profile) {
     const enforced = process.env.REACT_APP_BILLING_ENFORCED === 'true'
