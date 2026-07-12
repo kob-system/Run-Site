@@ -13,7 +13,8 @@
 //   4. AUDITED. Every executed WRITE is logged to assistant_actions (in the
 //      execute endpoint).
 //
-// Owner-first: crew access is a later phase and is refused here for now.
+// Two personas: owners get the full toolset; workers (crew) get a small
+// self-scoped toolset (own hours/schedule/jobs + clock in/out + time off).
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY
@@ -126,6 +127,18 @@ async function findWorkers(userToken, uid, workerName) {
   const rows = await userGet(userToken, `${base}&full_name=ilike.*${ilikeSafe(workerName)}*`)
   if (rows && rows.length) return rows
   const wf = wordFilter('full_name', workerName)
+  return wf ? userGet(userToken, `${base}&${wf}`) : rows
+}
+
+// Worker-side job lookup. Workers have NO read on the base projects table
+// (FIX-16 Part B) — only the hard-scoped worker_projects view (assigned,
+// non-completed jobs).
+async function findMyProjects(userToken, jobName) {
+  const base = `worker_projects?select=id,name,client_address,stage`
+  if (!jobName) return userGet(userToken, base)
+  const rows = await userGet(userToken, `${base}&name=ilike.*${ilikeSafe(jobName)}*`)
+  if (rows && rows.length) return rows
+  const wf = wordFilter('name', jobName)
   return wf ? userGet(userToken, `${base}&${wf}`) : rows
 }
 
@@ -394,6 +407,62 @@ async function execRead(name, args, ctx) {
       return (rows || []).map((r) => ({
         worker: nameOf[r.worker_id] || 'Worker', from: r.start_date, to: r.end_date, status: r.status,
       }))
+    }
+    // ---- Worker-side reads: everything below runs through the hard-scoped
+    // worker_* views or the worker's own rows. No owner money data.
+    case 'my_jobs': {
+      const rows = await findMyProjects(userToken, null)
+      return (rows || []).map((p) => ({ job: p.name, address: p.client_address || null, stage: p.stage || null }))
+    }
+    case 'clock_status': {
+      const rows = await userGet(userToken, `time_entries?select=project_id,clocked_in_at&worker_id=eq.${uid}&clocked_out_at=is.null&limit=1`)
+      if (!rows || !rows.length) return { clocked_in: false }
+      const open = rows[0]
+      let jobName = null
+      try {
+        const ps = await userGet(userToken, `worker_projects?select=id,name&id=eq.${open.project_id}`)
+        jobName = ps && ps[0] ? ps[0].name : null
+      } catch {}
+      return { clocked_in: true, job: jobName, since: open.clocked_in_at }
+    }
+    case 'my_hours': {
+      const weekStart = args && /^\d{4}-\d{2}-\d{2}$/.test(args.week_start || '') ? args.week_start : weekStartOf(Date.now(), tz)
+      const since = addDaysKey(weekStart, -1) // tz-edge buffer; grouped below
+      const entries = await userGet(
+        userToken,
+        `worker_time_entries?select=clocked_in_at,total_minutes,labor_cost,project_name&clocked_out_at=not.is.null&clocked_in_at=gte.${since}&order=clocked_in_at.desc&limit=200`
+      )
+      const inWeek = (entries || []).filter((t) => weekStartOf(t.clocked_in_at, tz) === weekStart)
+      const minutes = inWeek.reduce((s, t) => s + (t.total_minutes || 0), 0)
+      const pay = inWeek.reduce((s, t) => s + num(t.labor_cost), 0)
+      const byJob = {}
+      for (const t of inWeek) {
+        const jn = t.project_name || 'Unknown job'
+        byJob[jn] = (byJob[jn] || 0) + (t.total_minutes || 0)
+      }
+      return {
+        week_start: weekStart,
+        hours: Math.round((minutes / 60) * 100) / 100,
+        pay_earned: pay,
+        by_job: Object.entries(byJob).map(([job, mins]) => ({ job, hours: Math.round((mins / 60) * 100) / 100 })),
+      }
+    }
+    case 'my_schedule': {
+      const days = args && Number.isFinite(num(args.days_ahead)) && num(args.days_ahead) > 0 ? Math.min(num(args.days_ahead), 31) : 7
+      const start = todayKey(tz)
+      const end = addDaysKey(start, days)
+      const rows = await userGet(
+        userToken,
+        `worker_schedule?select=scheduled_date,start_time,end_time,task_description,project_name&scheduled_date=gte.${start}&scheduled_date=lte.${end}&order=scheduled_date.asc&limit=100`
+      )
+      return (rows || []).map((s) => ({
+        date: s.scheduled_date, start: s.start_time, end: s.end_time,
+        task: s.task_description, job: s.project_name || null,
+      }))
+    }
+    case 'my_time_off': {
+      const rows = await userGet(userToken, `time_off_requests?select=start_date,end_date,reason,status&worker_id=eq.${uid}&order=created_at.desc&limit=20`)
+      return (rows || []).map((r) => ({ from: r.start_date, to: r.end_date, reason: r.reason || null, status: r.status }))
     }
     default:
       return { error: 'Unknown read tool.' }
@@ -936,6 +1005,82 @@ const WRITE_TOOLS = [
 
 const WRITE_NAMES = new Set(WRITE_TOOLS.map((t) => t.name))
 
+// ---- Worker (crew) toolset --------------------------------------------------
+// Workers get ONLY these — never the owner tools. Reads run through the
+// hard-scoped worker_* views; writes are the three things a crew member can
+// already do in the UI (clock in, clock out, ask for time off).
+const WORKER_READ_TOOLS = [
+  {
+    name: 'my_jobs',
+    description: 'List the jobs this crew member is assigned to (name, address, stage). Use to find the exact job name before clocking in.',
+    input_schema: NO_ARGS,
+  },
+  {
+    name: 'clock_status',
+    description: 'Whether the crew member is currently clocked in, on which job, and since when. Check this before clocking in or out.',
+    input_schema: NO_ARGS,
+  },
+  {
+    name: 'my_hours',
+    description: "The crew member's own clocked hours, pay earned, and per-job breakdown for a week (defaults to this week).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        week_start: { type: 'string', description: 'Optional Sunday week start, YYYY-MM-DD. Defaults to this week.' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'my_schedule',
+    description: "The crew member's own schedule for the next N days (default 7): which job, when, doing what.",
+    input_schema: {
+      type: 'object',
+      properties: { days_ahead: { type: 'number', description: '1–31, default 7.' } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'my_time_off',
+    description: "The crew member's own time-off requests and their status (pending/approved/denied).",
+    input_schema: NO_ARGS,
+  },
+]
+
+const WORKER_WRITE_TOOLS = [
+  {
+    name: 'clock_in',
+    description: 'Clock the crew member in on a job right now. WRITE — they confirm before it saves. Fails if they are already clocked in.',
+    input_schema: {
+      type: 'object',
+      properties: { job_name: { type: 'string', description: 'Name (or part of the name) of the assigned job.' } },
+      required: ['job_name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'clock_out',
+    description: 'Clock the crew member out of their open shift right now (hours and pay computed from the clock-in time). WRITE — confirmed.',
+    input_schema: NO_ARGS,
+  },
+  {
+    name: 'request_time_off',
+    description: 'Send the boss a time-off request for a date or date range. WRITE — confirmed.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: 'YYYY-MM-DD.' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD. Same as start_date for a single day.' },
+        reason: { type: 'string', description: 'Optional short reason.' },
+      },
+      required: ['start_date', 'end_date'],
+      additionalProperties: false,
+    },
+  },
+]
+
+const WORKER_WRITE_NAMES = new Set(WORKER_WRITE_TOOLS.map((t) => t.name))
+
 // Plain-English confirm text, derived server-side (not trusted from the model).
 function summarize(tool, a) {
   const money = (n) => '$' + Number(num(n)).toFixed(2)
@@ -1024,12 +1169,20 @@ function summarize(tool, a) {
       return `Create an invite link for new crew member “${a.worker_name}” (you text it to them; they set a password and are linked to your company).`
     case 'remove_worker':
       return `REMOVE ${a.worker_name} from your crew. They lose access to your jobs (their past hours stay on record). This can't be undone from the app.`
+    case 'clock_in':
+      return `Clock you IN on “${a.job_name}” starting now.`
+    case 'clock_out':
+      return `Clock you OUT now — your hours and pay are computed from when you clocked in.`
+    case 'request_time_off': {
+      const span = a.end_date && a.end_date !== a.start_date ? `${a.start_date} through ${a.end_date}` : `${a.start_date}`
+      return `Send your boss a time-off request for ${span}${a.reason ? ` — “${String(a.reason).slice(0, 60)}”` : ''}.`
+    }
     default:
       return 'Make a change in JobTally.'
   }
 }
 
-async function callClaude(system, messages) {
+async function callClaude(system, messages, tools) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -1041,7 +1194,7 @@ async function callClaude(system, messages) {
       model: MODEL,
       max_tokens: 1200,
       system,
-      tools: [...READ_TOOLS, ...WRITE_TOOLS],
+      tools,
       messages,
     }),
   })
@@ -1067,8 +1220,9 @@ export default async function handler(req, res) {
 
   const profile = await getProfile(user.id)
   if (!profile) return res.status(403).json({ error: 'No profile' })
-  if (profile.role !== 'owner') {
-    return res.json({ type: 'reply', reply: "The assistant is available for owners right now — crew access is coming soon." })
+  const isOwner = profile.role === 'owner'
+  if (!isOwner && profile.role !== 'worker') {
+    return res.status(403).json({ error: 'No access' })
   }
 
   // 30 assistant turns/hour/user — plenty for real use, a hard stop on a loop.
@@ -1086,9 +1240,9 @@ export default async function handler(req, res) {
   if (!userMessage) return res.status(400).json({ error: 'Empty message' })
   if (userMessage.length > 2000) return res.status(413).json({ error: 'Message too long' })
 
-  const who = profile.full_name || 'the owner'
+  const who = profile.full_name || (isOwner ? 'the owner' : 'a crew member')
   const company = profile.company_name ? ` at ${profile.company_name}` : ''
-  const system =
+  const ownerSystem =
     `You are the JobTally assistant for ${who}${company}, a contractor business owner. ` +
     `You can look anything up AND make changes for them — jobs, money, crew, schedule, estimates, invoices, permits, compliance. ` +
     `Today's date is ${todayKey(tz)} and yesterday was ${addDaysKey(todayKey(tz), -1)}. Work out relative dates ("yesterday", "last Friday") from today's date yourself — never ask the owner for a date you can compute. ` +
@@ -1109,13 +1263,30 @@ export default async function handler(req, res) {
     `- If they ask how to do something in the app, offer to just do it for them right here.\n` +
     `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.`
 
+  const workerSystem =
+    `You are the JobTally assistant for ${who}, a crew member${company}. ` +
+    `You can look up THEIR OWN stuff — assigned jobs, clocked hours and pay, schedule, time-off requests — and do three things for them: clock in, clock out, and request time off. ` +
+    `Today's date is ${todayKey(tz)} and yesterday was ${addDaysKey(todayKey(tz), -1)}. Work out relative dates ("tomorrow", "next Monday") from today's date yourself — never ask for a date you can compute. ` +
+    `Replies are read on a phone on a jobsite: SHORT and plain, no markdown tables. Money is USD.\n\n` +
+    `RULES:\n` +
+    `- Use the read tools to look things up — never invent job names, hours, or pay numbers.\n` +
+    `- Check clock_status before proposing clock_in or clock_out (can't clock in twice; can't clock out if not clocked in).\n` +
+    `- For clock in/out or time off, call the matching write tool. The app shows them a confirm card before it saves, so don't ask "are you sure?" yourself — just call the tool.\n` +
+    `- One change per message: if they ask for several at once, do the first and tell them to send the next after confirming.\n` +
+    `- Their pay = their clocked hours × their hourly rate. You cannot see or discuss the business's money, other crew members' pay, or anything owner-side — if asked, say that's owner-only and they should ask their boss.\n` +
+    `- If a required detail is missing (which job, which dates), ask ONE short question instead of guessing.\n` +
+    `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.`
+
+  const system = isOwner ? ownerSystem : workerSystem
+  const tools = isOwner ? [...READ_TOOLS, ...WRITE_TOOLS] : [...WORKER_READ_TOOLS, ...WORKER_WRITE_TOOLS]
+  const writeNames = isOwner ? WRITE_NAMES : WORKER_WRITE_NAMES
   const messages = [...history, { role: 'user', content: userMessage }]
   const ctx = { token: user.token, uid: user.id, tz }
 
   try {
     // Up to 5 tool round-trips (read tools chain); a write short-circuits out.
     for (let i = 0; i < 5; i++) {
-      const data = await callClaude(system, messages)
+      const data = await callClaude(system, messages, tools)
       const blocks = Array.isArray(data.content) ? data.content : []
 
       if (data.stop_reason === 'tool_use') {
@@ -1123,7 +1294,7 @@ export default async function handler(req, res) {
 
         // If the model wants to WRITE, stop and ask the user to confirm.
         // One write per turn.
-        const writes = toolUses.filter((b) => WRITE_NAMES.has(b.name))
+        const writes = toolUses.filter((b) => writeNames.has(b.name))
         const write = writes[0]
         if (write) {
           const base = summarize(write.name, write.input || {})

@@ -8,6 +8,9 @@
 // v0.3: full-app coverage — 30 write tools, every insert/update mirrors the
 // dashboard's exact column shapes (a wrong column = PostgREST 400 = a false
 // "blocked" error, so shapes here must track OwnerDashboard.js).
+// v0.4: workers get their own three tools (clock_in / clock_out /
+// request_time_off), whitelisted PER ROLE — a worker can never run an owner
+// tool and vice versa. Worker writes mirror WorkerDashboard.js shapes.
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY
@@ -29,7 +32,7 @@ async function getUser(req) {
 async function getProfile(uid) {
   try {
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=id,role,owner_id`,
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=id,role,owner_id,hourly_rate`,
       { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } }
     )
     if (!r.ok) return null
@@ -69,7 +72,7 @@ async function userReq(userToken, path, method, body) {
   return { ok: r.ok, status: r.status, data }
 }
 
-async function logAction(actorId, ownerScope, action, params, status, result) {
+async function logAction(actorId, actorRole, ownerScope, action, params, status, result) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/assistant_actions`, {
       method: 'POST',
@@ -80,7 +83,7 @@ async function logAction(actorId, ownerScope, action, params, status, result) {
         Prefer: 'return=minimal',
       },
       body: JSON.stringify({
-        actor_id: actorId, actor_role: 'owner', owner_scope: ownerScope,
+        actor_id: actorId, actor_role: actorRole, owner_scope: ownerScope,
         action, params, status, result,
       }),
     })
@@ -234,6 +237,44 @@ async function resolveEstimate(userToken, title) {
     return { error: `More than one estimate matches “${title}” (${data.slice(0, 5).map((e) => e.title).join(', ')}). Be more specific.` }
   }
   return { estimate: data[0] }
+}
+
+// Resolve a job name to exactly one of the WORKER's assigned jobs. Workers
+// have no read on the base projects table (FIX-16 Part B) — only the
+// hard-scoped worker_projects view (assigned, non-completed jobs).
+async function resolveMyJob(userToken, jobName) {
+  if (!jobName || typeof jobName !== 'string' || !jobName.trim()) return { error: 'Which job? Give the job name.' }
+  const select = 'worker_projects?select=id,name'
+  let { ok, data } = await userReq(userToken, `${select}&name=ilike.*${ilikeSafe(jobName)}*`, 'GET')
+  if (!ok || !Array.isArray(data)) return { error: 'Could not look up your jobs.' }
+  if (data.length === 0) {
+    const wf = wordFilter('name', jobName)
+    if (wf) {
+      const retry = await userReq(userToken, `${select}&${wf}`, 'GET')
+      if (retry.ok && Array.isArray(retry.data)) data = retry.data
+    }
+  }
+  if (data.length === 0) return { error: `No assigned job found matching “${jobName}”. Ask your boss to assign you if it's missing.` }
+  if (data.length > 1) {
+    const exact = data.filter((p) => (p.name || '').trim().toLowerCase() === jobName.trim().toLowerCase())
+    if (exact.length === 1) return { project: exact[0] }
+    return { error: `More than one of your jobs matches “${jobName}” (${data.slice(0, 5).map((p) => p.name).join(', ')}). Be more specific.` }
+  }
+  return { project: data[0] }
+}
+
+// Owner email on worker clock in/out — same endpoint the dashboard uses; it
+// re-resolves worker/owner/job server-side from the worker's JWT, so nothing
+// here is trusted. Best-effort: a failed email never fails the clock action.
+async function notifyOwner(ctx, projectId, action, timestamp) {
+  try {
+    const origin = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://getjobtally.com'
+    await fetch(`${origin}/api/notify-owner`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.token}` },
+      body: JSON.stringify({ projectId, action, timestamp }),
+    })
+  } catch { /* best-effort */ }
 }
 
 // Validate + execute one write tool. Returns { ok, message, result } or { error }.
@@ -898,6 +939,87 @@ async function runTool(tool, args, ctx) {
     return { ok: true, message: 'Settings updated.', result: { changed: Object.keys(patch) } }
   }
 
+  // ---- worker self-service (crew persona; every row is the worker's own) ----
+  if (tool === 'clock_in') {
+    const resolved = await resolveMyJob(token, args.job_name)
+    if (resolved.error) return { error: resolved.error }
+    // Same guard as the dashboard: never let a worker be clocked in twice.
+    const open = await userReq(token, `time_entries?worker_id=eq.${uid}&clocked_out_at=is.null&select=id&limit=1`, 'GET')
+    if (!open.ok || !Array.isArray(open.data)) return { error: 'Could not check your clock status. Try again.' }
+    if (open.data.length > 0) return { error: 'You are already clocked in — clock out first.' }
+    const clockInTime = new Date().toISOString()
+    // Mirrors the dashboard's clock-in insert; no GPS from the assistant.
+    const { ok, data } = await userReq(token, 'time_entries', 'POST', {
+      client_id: crypto.randomUUID(),
+      project_id: resolved.project.id,
+      worker_id: uid,
+      clocked_in_at: clockInTime,
+      gps_lat: null,
+      gps_lng: null,
+    })
+    if (!ok) return { error: 'Clock-in was blocked — check with your boss that you’re still on that job.' }
+    const row = Array.isArray(data) ? data[0] : data
+    await notifyOwner(ctx, resolved.project.id, 'in', clockInTime)
+    return {
+      ok: true,
+      message: `Clocked in on “${resolved.project.name}.” Have a good shift.`,
+      result: { id: row && row.id, project: resolved.project.name },
+    }
+  }
+
+  if (tool === 'clock_out') {
+    const open = await userReq(
+      token,
+      `time_entries?worker_id=eq.${uid}&clocked_out_at=is.null&select=id,project_id,clocked_in_at&limit=1`,
+      'GET'
+    )
+    if (!open.ok || !Array.isArray(open.data)) return { error: 'Could not check your clock status. Try again.' }
+    if (open.data.length === 0) return { error: 'You’re not clocked in right now.' }
+    const entry = open.data[0]
+    const now = new Date()
+    // Mirrors the dashboard's clock-out math (floor minutes, rate × hours).
+    const totalMinutes = Math.floor((now - new Date(entry.clocked_in_at)) / 60000)
+    const laborCost = rc((totalMinutes / 60) * ((ctx.profile && ctx.profile.hourly_rate) || 0))
+    const upd = await userReq(token, `time_entries?id=eq.${entry.id}`, 'PATCH', {
+      clocked_out_at: now.toISOString(),
+      total_minutes: totalMinutes,
+      labor_cost: laborCost,
+    })
+    if (!upd.ok) return { error: 'Could not save your clock-out. Try again in a moment.' }
+    await notifyOwner(ctx, entry.project_id, 'out', now.toISOString())
+    return {
+      ok: true,
+      message: `Clocked out — ${(totalMinutes / 60).toFixed(2)}h this shift (${money(laborCost)}).`,
+      result: { id: entry.id, minutes: totalMinutes, pay: laborCost },
+    }
+  }
+
+  if (tool === 'request_time_off') {
+    if (!isDateKey(args.start_date)) return { error: 'Give the start date as YYYY-MM-DD.' }
+    const endDate = args.end_date != null && args.end_date !== '' ? args.end_date : args.start_date
+    if (!isDateKey(endDate)) return { error: 'Give the end date as YYYY-MM-DD.' }
+    if (endDate < args.start_date) return { error: 'End date must be on or after the start date.' }
+    if (!ctx.profile || !ctx.profile.owner_id) return { error: 'You’re not linked to a boss yet.' }
+    // Shape must satisfy the worker INSERT policy (FIX-11): own worker_id,
+    // their real owner_id, status pending.
+    const { ok, data } = await userReq(token, 'time_off_requests', 'POST', {
+      owner_id: ctx.profile.owner_id,
+      worker_id: uid,
+      start_date: args.start_date,
+      end_date: endDate,
+      reason: clean(args.reason, 300) || null,
+      status: 'pending',
+    })
+    if (!ok) return { error: 'Could not send your request. Try again.' }
+    const row = Array.isArray(data) ? data[0] : data
+    const span = endDate !== args.start_date ? `${args.start_date} through ${endDate}` : args.start_date
+    return {
+      ok: true,
+      message: `Time-off request sent to your boss for ${span}. You’ll see it as approved or denied once they decide.`,
+      result: { id: row && row.id, start_date: args.start_date, end_date: endDate },
+    }
+  }
+
   return { error: 'Unknown or unsupported action.' }
 }
 
@@ -912,6 +1034,9 @@ const WRITE_TOOLS = new Set([
   'update_settings', 'invite_worker', 'remove_worker',
 ])
 
+// Crew persona — the ONLY tools a worker token can execute.
+const WORKER_WRITE_TOOLS = new Set(['clock_in', 'clock_out', 'request_time_off'])
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) {
@@ -923,7 +1048,13 @@ export default async function handler(req, res) {
 
   const profile = await getProfile(user.id)
   if (!profile) return res.status(403).json({ error: 'No profile' })
-  if (profile.role !== 'owner') return res.status(403).json({ error: 'Owner-only for now' })
+  const isOwner = profile.role === 'owner'
+  if (!isOwner && profile.role !== 'worker') {
+    return res.status(403).json({ error: 'No access' })
+  }
+  if (!isOwner && !profile.owner_id) {
+    return res.status(403).json({ error: 'You’re not linked to a boss yet.' })
+  }
 
   if (!(await allowedRate(user.id, 60, 3600))) {
     return res.status(429).json({ error: 'Too many actions — slow down a moment.' })
@@ -932,28 +1063,32 @@ export default async function handler(req, res) {
   const body = req.body || {}
   const tool = typeof body.tool === 'string' ? body.tool : ''
   const args = body.args && typeof body.args === 'object' ? body.args : {}
-  if (!WRITE_TOOLS.has(tool)) return res.status(400).json({ error: 'Not an executable action.' })
+  // Per-role whitelist: an owner token can never run a worker tool, and a
+  // worker token can never run an owner tool — regardless of what was proposed.
+  const allowed = isOwner ? WRITE_TOOLS : WORKER_WRITE_TOOLS
+  if (!allowed.has(tool)) return res.status(400).json({ error: 'Not an executable action.' })
 
   // Client timezone offset in minutes (Date.getTimezoneOffset), clamped.
   const tz = Number.isFinite(body.tz) ? Math.max(-840, Math.min(840, body.tz)) : 0
 
-  const ownerScope = user.id // owner actor → their own tenant
-  const ctx = { uid: user.id, token: user.token, tz, origin: req.headers.origin }
+  // Audit rows always land in the OWNER's tenant, whoever the actor is.
+  const ownerScope = isOwner ? user.id : profile.owner_id
+  const ctx = { uid: user.id, token: user.token, tz, origin: req.headers.origin, profile }
 
   let outcome
   try {
     outcome = await runTool(tool, args, ctx)
   } catch (e) {
     console.error('assistant-execute error:', e)
-    await logAction(user.id, ownerScope, tool, args, 'failed', { error: 'exception' })
+    await logAction(user.id, profile.role, ownerScope, tool, args, 'failed', { error: 'exception' })
     return res.status(502).json({ error: 'Could not complete that action.' })
   }
 
   if (outcome.error) {
-    await logAction(user.id, ownerScope, tool, args, 'failed', { error: outcome.error })
+    await logAction(user.id, profile.role, ownerScope, tool, args, 'failed', { error: outcome.error })
     return res.status(400).json({ error: outcome.error })
   }
 
-  await logAction(user.id, ownerScope, tool, args, 'executed', outcome.result || null)
+  await logAction(user.id, profile.role, ownerScope, tool, args, 'executed', outcome.result || null)
   return res.json({ ok: true, message: outcome.message })
 }
