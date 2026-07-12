@@ -91,11 +91,23 @@ function addDaysKey(key, days) {
 }
 
 // ---- Read tools (execute inline, under the user's RLS) --------------------
+const ilikeSafe = (s) => encodeURIComponent(String(s).replace(/[%*,()]/g, ''))
+
+// Every word must appear in `field`, in any order — "Delgado basement" still
+// finds "Basement Finish – Delgado Residence". Null when one word (plain
+// substring match already covers it).
+function wordFilter(field, needle) {
+  const words = String(needle).trim().split(/\s+/).filter((w) => w.length > 1)
+  if (words.length < 2) return null
+  return `and=(${words.map((w) => `${field}.ilike.*${ilikeSafe(w)}*`).join(',')})`
+}
+
 async function findProjects(userToken, jobName) {
-  const q = jobName
-    ? `projects?select=*&name=ilike.*${encodeURIComponent(String(jobName).replace(/[%*]/g, ''))}*&order=created_at.desc`
-    : `projects?select=*&order=created_at.desc&limit=25`
-  return userGet(userToken, q)
+  if (!jobName) return userGet(userToken, `projects?select=*&order=created_at.desc&limit=25`)
+  const rows = await userGet(userToken, `projects?select=*&name=ilike.*${ilikeSafe(jobName)}*&order=created_at.desc`)
+  if (rows && rows.length) return rows
+  const wf = wordFilter('name', jobName)
+  return wf ? userGet(userToken, `projects?select=*&${wf}&order=created_at.desc`) : rows
 }
 
 // Resolve a job name to one project or an ambiguity/miss object.
@@ -110,10 +122,11 @@ async function readJob(userToken, jobName) {
 
 async function findWorkers(userToken, uid, workerName) {
   const base = `profiles?select=id,full_name,hourly_rate&owner_id=eq.${uid}&role=eq.worker`
-  const q = workerName
-    ? `${base}&full_name=ilike.*${encodeURIComponent(String(workerName).replace(/[%*]/g, ''))}*`
-    : base
-  return userGet(userToken, q)
+  if (!workerName) return userGet(userToken, base)
+  const rows = await userGet(userToken, `${base}&full_name=ilike.*${ilikeSafe(workerName)}*`)
+  if (rows && rows.length) return rows
+  const wf = wordFilter('full_name', workerName)
+  return wf ? userGet(userToken, `${base}&${wf}`) : rows
 }
 
 async function jobProfit(userToken, p) {
@@ -1078,7 +1091,8 @@ export default async function handler(req, res) {
   const system =
     `You are the JobTally assistant for ${who}${company}, a contractor business owner. ` +
     `You can look anything up AND make changes for them — jobs, money, crew, schedule, estimates, invoices, permits, compliance. ` +
-    `Today's date is ${todayKey(tz)}. Replies are read on a phone: short and plain, no markdown tables. Money is USD.\n\n` +
+    `Today's date is ${todayKey(tz)} and yesterday was ${addDaysKey(todayKey(tz), -1)}. Work out relative dates ("yesterday", "last Friday") from today's date yourself — never ask the owner for a date you can compute. ` +
+    `Replies are read on a phone: short and plain, no markdown tables. Money is USD.\n\n` +
     `HOW THE APP'S MONEY WORKS (never deviate):\n` +
     `- contract_price = the job's REVENUE (base contract + APPROVED change orders). It is NOT profit.\n` +
     `- Profit so far = contract price minus everything spent (material/other receipts + labor from clocked time). Never call the contract price "profit."\n` +
