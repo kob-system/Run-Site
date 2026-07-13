@@ -87,6 +87,25 @@ const addDaysKey = (key, days) => {
   return dateKey(d)
 }
 
+// Supabase caps an unbounded select() at ~1000 rows, which silently undercounts
+// money on big accounts. For sums that must be complete, page through with
+// .range() until a short page comes back. `queryFor(from, to)` returns a
+// supabase query with .range(from, to) already applied.
+const fetchAllRows = async (queryFor) => {
+  const pageSize = 1000
+  const all = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await queryFor(from, from + pageSize - 1)
+    if (error) throw error
+    const batch = data || []
+    all.push(...batch)
+    if (batch.length < pageSize) break
+    from += pageSize
+  }
+  return all
+}
+
 function Toast({ message, type = 'success', onClose }) {
   useEffect(() => {
     if (!message) return
@@ -100,7 +119,8 @@ function Toast({ message, type = 'success', onClose }) {
       background: type === 'success' ? '#16A34A' : '#DC2626',
       color: 'white', padding: '12px 24px', borderRadius: '24px',
       fontSize: '14px', fontWeight: '600', zIndex: 999,
-      boxShadow: '0 4px 12px rgba(0,0,0,0.2)', whiteSpace: 'nowrap'
+      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+      maxWidth: 'calc(100vw - 48px)', whiteSpace: 'normal', wordBreak: 'break-word', textAlign: 'center'
     }}>{message}</div>
   )
 }
@@ -170,7 +190,7 @@ function PhotoViewer({ receipt, onClose, onDelete }) {
 
 // Renders a job photo whose source may be a full URL (seed/demo data) or a
 // storage path in the private 'receipts' bucket (real uploads → signed URL).
-function JobPhoto({ path, alt, style, onClick }) {
+function JobPhoto({ path, alt, style, onClick, signedUrl }) {
   const [url, setUrl] = useState(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
@@ -178,11 +198,14 @@ function JobPhoto({ path, alt, style, onClick }) {
     setUrl(null); setErr(false)
     if (!path) { setErr(true); return }
     if (/^https?:\/\//.test(path)) { setUrl(path); return }
+    // Prefer a batched signed URL passed by the gallery (one storage request for
+    // the whole grid, T2.5). Fall back to signing this one path (e.g. lightbox).
+    if (signedUrl) { setUrl(signedUrl); return }
     supabase.storage.from('receipts').createSignedUrl(path, 3600)
       .then(({ data }) => { if (active) { if (data && data.signedUrl) setUrl(data.signedUrl); else setErr(true) } })
       .catch(() => { if (active) setErr(true) })
     return () => { active = false }
-  }, [path])
+  }, [path, signedUrl])
   const base = { background: '#eef1f5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }
   if (err) return <div onClick={onClick} style={{ ...base, ...style }}>📷</div>
   if (!url) return <div onClick={onClick} style={{ ...base, ...style }} />
@@ -194,8 +217,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [projects, setProjects] = useState([])
   const [workers, setWorkers] = useState([])
   const [workerStats, setWorkerStats] = useState({}) // keyed by worker id
+  const [workersError, setWorkersError] = useState(false) // true when worker stats / assignments / time-off failed to load
   const [spendByProject, setSpendByProject] = useState({}) // keyed by project id: { materials, labor, other }
+  const [spendError, setSpendError] = useState(false) // true when the live spend fetch failed (don't render a silent $0)
   const [selectedProject, setSelectedProject] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false) // job detail tables in flight (show loading, not a false empty-state)
   const [projectTab, setProjectTab] = useState('receipts')
   const [receipts, setReceipts] = useState([])
   const [timeEntries, setTimeEntries] = useState([])
@@ -237,6 +263,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [dailyLogs, setDailyLogs] = useState([])
   const [changeOrders, setChangeOrders] = useState([])
   const [jobPhotos, setJobPhotos] = useState([])
+  const [photoUrls, setPhotoUrls] = useState({}) // storage path → signed URL, batch-signed once per gallery load
   const [punchItems, setPunchItems] = useState([])
   const [materialItems, setMaterialItems] = useState([])
   const [jobDocuments, setJobDocuments] = useState([])
@@ -341,7 +368,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       if (error) throw error
       setAssignedWorkerIds([...new Set((data || []).map(r => r.worker_id))])
     } catch (e) {
-      // non-fatal — the nudge just won't show
+      // non-fatal — the nudge just won't show — but flag it so the Workers tab
+      // can offer a retry instead of pretending everything loaded (T1.5).
+      console.error('Assignments fetch failed:', e)
+      setWorkersError(true)
     }
   }, [])
 
@@ -354,7 +384,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       if (error) throw error
       setTimeOff(data || [])
     } catch (e) {
-      // non-fatal — the rest of the Workers tab still works
+      // non-fatal — the rest of the Workers tab still works — but flag it (T1.5).
+      console.error('Time-off fetch failed:', e)
+      setWorkersError(true)
     }
   }, [profile.id])
 
@@ -385,8 +417,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         }
       })
       setWorkerStats(stats)
+      setWorkersError(false)
     } catch (e) {
       console.error('Worker stats fetch failed:', e)
+      setWorkersError(true)
     }
   }, [])
 
@@ -396,8 +430,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     const workerIds = workers.map(w => w.id)
     if (!workerIds.length) { setPayroll([]); setPaychecks([]); return }
     try {
-      const [{ data: times }, { data: checks }] = await Promise.all([
-        supabase.from('time_entries').select('worker_id, total_minutes, labor_cost, clocked_in_at').in('worker_id', workerIds).not('clocked_out_at', 'is', null),
+      // Page past the 1000-row cap so weekly gross is complete on busy crews.
+      const [times, { data: checks }] = await Promise.all([
+        fetchAllRows((from, to) => supabase.from('time_entries').select('worker_id, total_minutes, labor_cost, clocked_in_at').in('worker_id', workerIds).not('clocked_out_at', 'is', null).range(from, to)),
         supabase.from('paychecks').select('*').eq('owner_id', profile.id)
       ])
       setPaychecks(checks || [])
@@ -438,20 +473,24 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // columns. This keeps profit accurate, counts every receipt category, and
   // means editing/deleting a record self-corrects the totals automatically.
   const fetchSpend = useCallback(async (projectList) => {
-    if (!projectList?.length) { setSpendByProject({}); setCoByProject({}); return }
+    if (!projectList?.length) { setSpendByProject({}); setCoByProject({}); setSpendError(false); return }
     try {
       const ids = projectList.map(p => p.id)
-      const [{ data: rcpts }, { data: times }, { data: cos }] = await Promise.all([
-        supabase.from('receipts').select('project_id, amount, category').eq('owner_id', profile.id),
-        supabase.from('time_entries').select('project_id, labor_cost').in('project_id', ids).not('clocked_out_at', 'is', null),
+      // Receipts + time entries are the high-volume tables that drive spend, so
+      // page past the 1000-row cap (fetchAllRows) — otherwise big accounts under-
+      // count. tax_amount is part of what a receipt actually cost the owner.
+      const [rcpts, times, { data: cos }] = await Promise.all([
+        fetchAllRows((from, to) => supabase.from('receipts').select('project_id, amount, category, tax_amount').eq('owner_id', profile.id).range(from, to)),
+        fetchAllRows((from, to) => supabase.from('time_entries').select('project_id, labor_cost').in('project_id', ids).not('clocked_out_at', 'is', null).range(from, to)),
         supabase.from('change_orders').select('project_id, amount, status').eq('owner_id', profile.id)
       ])
       const spend = {}
       ids.forEach(id => { spend[id] = { materials: 0, labor: 0, other: 0 } })
       ;(rcpts || []).forEach(r => {
         if (!spend[r.project_id]) spend[r.project_id] = { materials: 0, labor: 0, other: 0 }
-        if (r.category === 'materials') spend[r.project_id].materials += r.amount || 0
-        else spend[r.project_id].other += r.amount || 0
+        const cost = (r.amount || 0) + (r.tax_amount || 0)
+        if (r.category === 'materials') spend[r.project_id].materials += cost
+        else spend[r.project_id].other += cost
       })
       ;(times || []).forEach(t => {
         if (!spend[t.project_id]) spend[t.project_id] = { materials: 0, labor: 0, other: 0 }
@@ -463,8 +502,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       })
       setSpendByProject(spend)
       setCoByProject(co)
+      setSpendError(false)
     } catch (e) {
+      // Don't leave a silent $0 — surface a retry affordance instead (T1.5).
       console.error('Spend fetch failed:', e)
+      setSpendError(true)
     }
   }, [profile.id])
 
@@ -537,30 +579,37 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     if (activeTab === 'payroll' && workers.length) fetchPayroll()
   }, [activeTab, workers, fetchPayroll])
 
+  // Invoices/estimates are fetched once, then reused across tabs — the
+  // *Loaded flags stop every tab visit from refiring the query (T2.4). Mutations
+  // (add/edit/delete invoice/estimate) still call fetch* directly as the refresh
+  // path, which resets the data regardless of the flag.
   useEffect(() => {
-    if (activeTab === 'invoices') fetchInvoices()
-  }, [activeTab, fetchInvoices])
+    if (activeTab === 'invoices' && !invoicesLoaded) fetchInvoices()
+  }, [activeTab, invoicesLoaded, fetchInvoices])
 
   useEffect(() => {
-    if (activeTab === 'estimates') fetchEstimates()
-  }, [activeTab, fetchEstimates])
+    if (activeTab === 'estimates' && !estimatesLoaded) fetchEstimates()
+  }, [activeTab, estimatesLoaded, fetchEstimates])
 
   useEffect(() => {
-    if (activeTab === 'home') { fetchInvoices(); fetchEstimates(); fetchUpcomingSchedule(); fetchCompliance() }
-    if (activeTab === 'clients') fetchInvoices()
+    if (activeTab === 'home') { if (!invoicesLoaded) fetchInvoices(); if (!estimatesLoaded) fetchEstimates(); fetchUpcomingSchedule(); fetchCompliance() }
+    if (activeTab === 'clients' && !invoicesLoaded) fetchInvoices()
     if (activeTab === 'calendar') fetchUpcomingSchedule()
     if (activeTab === 'compliance') fetchCompliance()
     if (activeTab === 'warranties') fetchWarranties()
-    if (activeTab === 'insights') { fetchInvoices(); fetchEstimates() }
-  }, [activeTab, fetchInvoices, fetchEstimates, fetchUpcomingSchedule, fetchCompliance, fetchWarranties])
+    if (activeTab === 'insights') { if (!invoicesLoaded) fetchInvoices(); if (!estimatesLoaded) fetchEstimates() }
+  }, [activeTab, invoicesLoaded, estimatesLoaded, fetchInvoices, fetchEstimates, fetchUpcomingSchedule, fetchCompliance, fetchWarranties])
 
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
     // Clear the previous job's detail data first, so opening job B never
     // flashes job A's receipts/photos/etc. while these queries are in flight.
     setReceipts([]); setTimeEntries([]); setScheduleEntries([]); setMileageEntries([])
-    setDailyLogs([]); setChangeOrders([]); setJobPhotos([]); setPunchItems([])
+    setDailyLogs([]); setChangeOrders([]); setJobPhotos([]); setPhotoUrls({}); setPunchItems([])
     setMaterialItems([]); setJobDocuments([]); setPermits([])
+    // Tabs render a loading state (not a false "no receipts/photos" empty-state)
+    // while these queries are in flight (T2.6).
+    setDetailLoading(true)
     try {
       const pid = project.id
       // Load all 11 detail tables in parallel (was 11 serial round-trips → ~10x
@@ -584,15 +633,59 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       setMileageEntries(m.data || [])
       setDailyLogs(lg.data || [])
       setChangeOrders(cor.data || [])
-      setJobPhotos(ph.data || [])
+      const photos = ph.data || []
+      setJobPhotos(photos)
       setPunchItems(pu.data || [])
       setMaterialItems(mt.data || [])
       setJobDocuments(dc.data || [])
       setPermits(pm.data || [])
+      // Sign every storage-path photo in ONE request instead of one-per-photo
+      // (T2.5). Full-URL seed/demo photos need no signing.
+      const paths = photos.map(p => p.photo_url).filter(u => u && !/^https?:\/\//.test(u))
+      if (paths.length) {
+        const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 3600)
+        const map = {}
+        ;(signed || []).forEach(s => { if (s && s.signedUrl && s.path) map[s.path] = s.signedUrl })
+        setPhotoUrls(map)
+      }
     } catch (e) {
       showToast('Failed to load job details', 'error')
+    } finally {
+      setDetailLoading(false)
     }
   }
+
+  // Refetch a SINGLE detail table for the open job instead of re-running all 11
+  // detail queries after a one-row mutation (T2.3). Keeps the changed tab in
+  // sync without the full-refetch storm; other tabs already hold their data.
+  // selectStr defaults to '*'; pass a join (e.g. '*, profiles(full_name)') for
+  // tables the list rows need it. `after(rows)` runs post-set for extra work
+  // like signing photo URLs. Both optional → old 4-arg callers keep working.
+  const refetchDetail = async (table, setter, orderCol, ascending, selectStr, after) => {
+    if (!selectedProject) return
+    try {
+      const { data, error } = await supabase.from(table).select(selectStr || '*').eq('project_id', selectedProject.id).order(orderCol, { ascending })
+      if (error) throw error
+      const rows = data || []
+      setter(rows)
+      if (after) await after(rows)
+    } catch (e) {
+      console.error('Detail refetch failed (' + table + '):', e)
+    }
+  }
+
+  // Job photos need their storage paths signed after a refetch (same batch-sign
+  // as the full load). Its own helper so add/delete photo can refresh one table
+  // instead of re-running all 11 detail queries (T2.3).
+  const refetchJobPhotos = () => refetchDetail('job_photos', setJobPhotos, 'created_at', false, '*', async (photos) => {
+    const paths = photos.map(p => p.photo_url).filter(u => u && !/^https?:\/\//.test(u))
+    if (paths.length) {
+      const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 3600)
+      const map = {}
+      ;(signed || []).forEach(s => { if (s && s.signedUrl && s.path) map[s.path] = s.signedUrl })
+      setPhotoUrls(map)
+    }
+  })
 
   // Owner manually logs a worker's time on a job (for crew who don't clock in
   // via the worker app). Mirrors the worker clock-out cost math:
@@ -621,7 +714,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       if (error) throw error
       setShowNewTime(false)
       setTimeForm({ worker_id: '', work_date: '', start_time: '', end_time: '' })
-      await fetchProjectDetails(selectedProject)
+      await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
       showToast('Time added ✓')
     } catch (e) {
       setInlineError('Failed to add time. Try again.')
@@ -720,7 +813,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       if (error) throw error
       setShowNewMileage(false)
       setMileageForm({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
-      await fetchProjectDetails(selectedProject)
+      await refetchDetail('mileage_entries', setMileageEntries, 'trip_date', false)
       showToast('Mileage added ✓')
     } catch (e) {
       setInlineError('Failed to add mileage. Try again.')
@@ -733,7 +826,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('mileage_entries').delete().eq('id', entry.id)
       if (error) throw error
-      await fetchProjectDetails(selectedProject)
+      await refetchDetail('mileage_entries', setMileageEntries, 'trip_date', false)
       showToast('Mileage deleted ✓')
     } catch (e) {
       showToast('Failed to delete mileage', 'error')
@@ -752,7 +845,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       })
       if (error) throw error
       setShowNewLog(false); setLogForm({ log_date: '', weather: '', note: '' })
-      await fetchProjectDetails(selectedProject); showToast('Log saved ✓')
+      await refetchDetail('daily_logs', setDailyLogs, 'log_date', false); showToast('Log saved ✓')
     } catch (e) { setInlineError('Failed to save log. Try again.') }
     setLoading(false)
   }
@@ -761,7 +854,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('daily_logs').delete().eq('id', entry.id)
       if (error) throw error
-      await fetchProjectDetails(selectedProject); showToast('Log deleted ✓')
+      await refetchDetail('daily_logs', setDailyLogs, 'log_date', false); showToast('Log deleted ✓')
     } catch (e) { showToast('Failed to delete log', 'error') }
   }
 
@@ -777,7 +870,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       })
       if (error) throw error
       setShowNewChange(false); setChangeForm({ description: '', amount: '', status: 'approved' })
-      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Extra added ✓')
+      await refetchDetail('change_orders', setChangeOrders, 'created_at', false); await fetchProjects(); showToast('Extra added ✓')
     } catch (e) { setInlineError('Failed to add extra. Try again.') }
     setLoading(false)
   }
@@ -786,7 +879,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('change_orders').delete().eq('id', co.id)
       if (error) throw error
-      await fetchProjectDetails(selectedProject); await fetchProjects(); showToast('Extra deleted ✓')
+      await refetchDetail('change_orders', setChangeOrders, 'created_at', false); await fetchProjects(); showToast('Extra deleted ✓')
     } catch (e) { showToast('Failed to delete extra', 'error') }
   }
 
@@ -797,7 +890,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('punch_items').insert({ owner_id: profile.id, project_id: selectedProject.id, description: punchInput.trim() })
       if (error) throw error
-      setPunchInput(''); await fetchProjectDetails(selectedProject)
+      setPunchInput(''); await refetchDetail('punch_items', setPunchItems, 'created_at', true)
     } catch (e) { showToast('Failed to add item', 'error') }
   }
   const togglePunch = async (item) => {
@@ -808,6 +901,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     } catch (e) { showToast('Failed to update', 'error') }
   }
   const deletePunch = async (item) => {
+    if (!window.confirm('Delete this item?')) return
     try { const { error } = await supabase.from('punch_items').delete().eq('id', item.id); if (error) throw error; setPunchItems(items => items.filter(it => it.id !== item.id)) } catch (e) { showToast('Failed to delete', 'error') }
   }
 
@@ -817,7 +911,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('material_items').insert({ owner_id: profile.id, project_id: selectedProject.id, name: materialInput.name.trim(), qty: materialInput.qty.trim() || null })
       if (error) throw error
-      setMaterialInput({ name: '', qty: '' }); await fetchProjectDetails(selectedProject)
+      setMaterialInput({ name: '', qty: '' }); await refetchDetail('material_items', setMaterialItems, 'created_at', true)
     } catch (e) { showToast('Failed to add item', 'error') }
   }
   const toggleMaterial = async (item) => {
@@ -828,6 +922,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     } catch (e) { showToast('Failed to update', 'error') }
   }
   const deleteMaterial = async (item) => {
+    if (!window.confirm('Delete this item?')) return
     try { const { error } = await supabase.from('material_items').delete().eq('id', item.id); if (error) throw error; setMaterialItems(items => items.filter(it => it.id !== item.id)) } catch (e) { showToast('Failed to delete', 'error') }
   }
 
@@ -841,7 +936,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       if (upErr) throw upErr
       const { error } = await supabase.from('job_documents').insert({ owner_id: profile.id, project_id: selectedProject.id, name: file.name, file_url: fileName })
       if (error) throw error
-      await fetchProjectDetails(selectedProject); showToast('Document added ✓')
+      await refetchDetail('job_documents', setJobDocuments, 'created_at', false); showToast('Document added ✓')
     } catch (err) { showToast('Upload failed', 'error') }
     setUploadingDoc(false)
   }
@@ -855,7 +950,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   }
   const deleteDocument = async (doc) => {
     if (!window.confirm('Delete this document?')) return
-    try { const { error } = await supabase.from('job_documents').delete().eq('id', doc.id); if (error) throw error; await fetchProjectDetails(selectedProject); showToast('Document deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
+    try { const { error } = await supabase.from('job_documents').delete().eq('id', doc.id); if (error) throw error; await refetchDetail('job_documents', setJobDocuments, 'created_at', false); showToast('Document deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
   }
 
   const addJobPhoto = async (e) => {
@@ -870,7 +965,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         owner_id: profile.id, project_id: selectedProject.id, photo_url: fileName, caption: null
       })
       if (error) throw error
-      await fetchProjectDetails(selectedProject); showToast('Photo added ✓')
+      await refetchJobPhotos(); showToast('Photo added ✓')
     } catch (err) { showToast('Photo upload failed', 'error') }
     setUploadingPhoto(false)
   }
@@ -880,7 +975,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const { error } = await supabase.from('job_photos').delete().eq('id', photo.id)
       if (error) throw error
       setPhotoLightbox(null)
-      await fetchProjectDetails(selectedProject); showToast('Photo deleted ✓')
+      await refetchJobPhotos(); showToast('Photo deleted ✓')
     } catch (e) { showToast('Failed to delete photo', 'error') }
   }
 
@@ -1017,18 +1112,18 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const { error } = await supabase.from('permits').insert({ owner_id: profile.id, project_id: selectedProject.id, name: permitForm.name, status: permitForm.status, permit_number: permitForm.permit_number || null, inspection_on: permitForm.inspection_on || null, notes: permitForm.notes || null })
       if (error) throw error
       setShowNewPermit(false); setPermitForm({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
-      await fetchProjectDetails(selectedProject); showToast('Permit added ✓')
+      await refetchDetail('permits', setPermits, 'created_at', false); showToast('Permit added ✓')
     } catch (e) { setInlineError('Failed to add. Try again.') }
     setLoading(false)
   }
   const cyclePermitStatus = async (p) => {
     const order = ['applied', 'approved', 'inspection', 'passed', 'failed']
     const next = order[(order.indexOf(p.status) + 1) % order.length]
-    try { const { error } = await supabase.from('permits').update({ status: next }).eq('id', p.id); if (error) throw error; await fetchProjectDetails(selectedProject) } catch (e) { showToast('Failed to update', 'error') }
+    try { const { error } = await supabase.from('permits').update({ status: next }).eq('id', p.id); if (error) throw error; await refetchDetail('permits', setPermits, 'created_at', false) } catch (e) { showToast('Failed to update', 'error') }
   }
   const deletePermit = async (p) => {
     if (!window.confirm('Delete this permit?')) return
-    try { const { error } = await supabase.from('permits').delete().eq('id', p.id); if (error) throw error; await fetchProjectDetails(selectedProject); showToast('Deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
+    try { const { error } = await supabase.from('permits').delete().eq('id', p.id); if (error) throw error; await refetchDetail('permits', setPermits, 'created_at', false); showToast('Deleted ✓') } catch (e) { showToast('Failed to delete', 'error') }
   }
 
   // ---- Email a quote / invoice to the client (opens their mail app, prefilled) ----
@@ -1168,7 +1263,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       setShowNewReceipt(false)
       setReceiptForm({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
       setScanResult(null); setScanError('')
-      await fetchProjectDetails(selectedProject)
+      await refetchDetail('receipts', setReceipts, 'created_at', false)
       await fetchProjects()
       showToast('Receipt saved ✓')
     } catch (e) {
@@ -1190,7 +1285,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       if (error) throw error
       setShowNewSchedule(false)
       setScheduleForm({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
-      await fetchProjectDetails(selectedProject)
+      await refetchDetail('schedule_entries', setScheduleEntries, 'scheduled_date', true, '*, profiles!schedule_entries_worker_id_fkey(full_name)')
       showToast('Scheduled ✓')
     } catch (e) {
       setInlineError('Failed to save schedule. Try again.')
@@ -1246,6 +1341,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     } catch (e) {
       showToast('Failed to advance stage', 'error')
     }
+  }
+
+  // Header status-pill tap: advance the job forward (Not started → In progress →
+  // Done), or once it's Done offer to reopen it. Mirrors the clickable permit /
+  // warranty pills so the pill is the obvious stage control (T4.1).
+  const cycleStage = (project) => {
+    if (project.stage === 'end') return reopenJob(project)
+    return advanceStage(project)
   }
 
   const exportReportCSV = () => {
@@ -1378,7 +1481,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const { error } = await supabase.from('receipts').delete().eq('id', receipt.id)
       if (error) throw error
       setPhotoViewer(null)
-      await fetchProjectDetails(selectedProject)
+      await refetchDetail('receipts', setReceipts, 'created_at', false)
       await fetchProjects()
       showToast('Receipt deleted ✓')
     } catch (e) {
@@ -1391,7 +1494,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('time_entries').delete().eq('id', entry.id)
       if (error) throw error
-      await fetchProjectDetails(selectedProject)
+      await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
       await fetchProjects()
       showToast('Time entry deleted ✓')
     } catch (e) {
@@ -1549,7 +1652,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         <div className="topbar">
           <button aria-label="Back" onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
-          <span className={'status-pill status-' + selectedProject.stage}>{stageLabel(selectedProject.stage)}</span>
+          <span className={'status-pill status-' + selectedProject.stage} role="button" tabIndex={0} aria-label={`Job status: ${stageLabel(selectedProject.stage)}. ${selectedProject.stage === 'end' ? 'Activate to reopen.' : 'Activate to advance.'}`} style={{ cursor: 'pointer' }} onClick={() => cycleStage(selectedProject)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleStage(selectedProject) } }}>{stageLabel(selectedProject.stage)} ↻</span>
         </div>
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
@@ -1579,6 +1682,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           )
         })()}
         <div className="page">
+          {detailLoading ? (
+            <div className="empty-state"><p>Loading…</p></div>
+          ) : (
+          <>
           {projectTab === 'budget' && (
             <div>
               {/* Profit hero — the one number that matters, surfaced at the top
@@ -1589,7 +1696,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Projected Profit</p>
                   <p style={{ fontSize: '32px', fontWeight: 800, lineHeight: 1.1, color: projProfit >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
                   <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
-                    {Math.round((projProfit / contractOf(selectedProject)) * 100) + '% margin · '}target {formatCurrency(selectedProject.profit_target)}
+                    {(() => {
+                      // Guard against absurd margins on tiny contracts (e.g. a $50
+                      // job losing $190 → -380%). Below -100% the loss exceeds the
+                      // whole contract, so say "over budget" instead of a wild number.
+                      const margin = Math.round((projProfit / contractOf(selectedProject)) * 100)
+                      return margin >= -100 ? margin + '% margin · ' : 'over budget · '
+                    })()}target {formatCurrency(selectedProject.profit_target)}
                   </p>
                   {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px', fontWeight: 600 }}>⚠️ Projected to go over budget</p>}
                 </div>
@@ -1670,20 +1783,20 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px' }}>⚠️ Projected to go over budget</p>}
               </div>
               {selectedProject.stage !== 'end' && (
-                <button className="btn-secondary" onClick={() => advanceStage(selectedProject)}>
-                  {selectedProject.stage === 'start' ? 'Start work →' : 'Mark as Complete ✓'}
+                <button className="btn-primary" onClick={() => advanceStage(selectedProject)}>
+                  {selectedProject.stage === 'start' ? 'Start work →' : 'Mark as complete ✓'}
                 </button>
               )}
-              <button className="btn-secondary" onClick={openEditJob}>✎ Edit Job Details</button>
+              <button className="btn-secondary" onClick={openEditJob}>✎ Edit job details</button>
               {selectedProject.stage === 'end' && (
-                <button className="btn-secondary" onClick={() => reopenJob(selectedProject)}>↩ Reopen Job</button>
+                <button className="btn-secondary" onClick={() => reopenJob(selectedProject)}>↩ Reopen job</button>
               )}
             </div>
           )}
 
           {projectTab === 'receipts' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add Receipt</button>
+              <button className="btn-primary" onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add receipt</button>
               {receipts.map(r => (
                 <div key={r.id} className="card" role="button" tabIndex={0} onClick={() => setPhotoViewer(r)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPhotoViewer(r) } }} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1703,7 +1816,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
           {projectTab === 'time' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add Time</button>
+              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1742,7 +1855,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
           {projectTab === 'mileage' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add Mileage</button>
+              <button className="btn-primary" onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
               {mileageEntries.length > 0 && (
                 <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
                   <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Mileage Deduction</p>
@@ -1756,7 +1869,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 <div key={m.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
-                      <h3>{(m.miles || 0).toLocaleString()} mi <span style={{ fontWeight: '400', color: '#888', fontSize: '13px' }}>@ ${m.rate}/mi</span></h3>
+                      <h3>{(m.miles || 0).toLocaleString()} mi <span style={{ fontWeight: '400', color: '#888', fontSize: '13px' }}>@ {formatCurrency(m.rate)}/mi</span></h3>
                       <p style={{ fontSize: '12px', color: '#717171' }}>{m.trip_date ? new Date(m.trip_date + 'T00:00:00').toLocaleDateString() : ''}{m.notes ? ` · ${m.notes}` : ''}</p>
                     </div>
                     <p style={{ fontWeight: '700', color: '#16A34A', fontSize: '16px' }}>{formatCurrency((m.miles || 0) * (m.rate || 0))}</p>
@@ -1771,13 +1884,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           {projectTab === 'photos' && (
             <div>
               <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
-                {uploadingPhoto ? 'Uploading…' : '📷 Add Photo'}
+                {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
                 {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
                 <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
                 {jobPhotos.map(ph => (
-                  <JobPhoto key={ph.id} path={ph.photo_url} alt={ph.caption} onClick={() => setPhotoLightbox(ph)}
+                  <JobPhoto key={ph.id} path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption} onClick={() => setPhotoLightbox(ph)}
                     style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px', cursor: 'pointer' }} />
                 ))}
               </div>
@@ -1788,7 +1901,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           {projectTab === 'documents' && (
             <div>
               <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
-                {uploadingDoc ? 'Uploading…' : '📎 Add Document'}
+                {uploadingDoc ? 'Uploading…' : '📎 Add document'}
                 <input type="file" onChange={addDocument} disabled={uploadingDoc} style={{ display: 'none' }} />
               </label>
               {jobDocuments.map(doc => (
@@ -1797,7 +1910,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                     <h3 style={{ color: '#E07B2A' }}>📄 {doc.name}</h3>
                     <p style={{ fontSize: '11px', color: '#717171' }}>{doc.created_at ? new Date(doc.created_at).toLocaleDateString() : ''} · tap to open</p>
                   </div>
-                  <button aria-label="Delete document" onClick={() => deleteDocument(doc)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '20px', cursor: 'pointer', padding: '0 6px' }}>×</button>
+                  <button aria-label="Delete document" onClick={() => deleteDocument(doc)} style={{ background: 'white', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: 13, cursor: 'pointer', padding: '6px 12px', borderRadius: 8 }}>Delete</button>
                 </div>
               ))}
               {jobDocuments.length === 0 && <div className="empty-state"><p>No documents yet. Add the contract, permit, or plans for this job.</p></div>}
@@ -1814,7 +1927,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
                   <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
                   <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
-                  <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                  <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
                 </div>
               ))}
               {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done.</p></div>}
@@ -1832,7 +1945,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
                   <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
                   <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
-                  <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                  <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
                 </div>
               ))}
               {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them.</p></div>}
@@ -1867,7 +1980,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
           {projectTab === 'permits' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add Permit</button>
+              <button className="btn-primary" onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add permit</button>
               {permits.map(p => {
                 const sc = (p.status === 'passed' || p.status === 'approved') ? 'status-end' : p.status === 'failed' ? 'status-start' : 'status-mid'
                 return (
@@ -1876,9 +1989,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                       <div style={{ flex: 1, paddingRight: '10px' }}>
                         <h3>{p.name}</h3>
                         <p>{p.permit_number ? `#${p.permit_number}` : ''}{p.inspection_on ? ` · inspection ${new Date(p.inspection_on + 'T00:00:00').toLocaleDateString()}` : ''}</p>
-                        <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={`Status: ${p.status}. Activate to advance.`} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cyclePermitStatus(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cyclePermitStatus(p) } }}>{p.status}</span>
+                        <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={`Status: ${p.status}. Activate to advance.`} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cyclePermitStatus(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cyclePermitStatus(p) } }}>{p.status} ↻</span>
                       </div>
-                      <button aria-label="Remove permit" onClick={() => deletePermit(p)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                      <button aria-label="Remove permit" onClick={() => deletePermit(p)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
                     </div>
                   </div>
                 )
@@ -1889,7 +2002,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
           {projectTab === 'log' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewLog(true); setInlineError('') }}>+ Add Log Entry</button>
+              <button className="btn-primary" onClick={() => { setShowNewLog(true); setInlineError('') }}>+ Add log entry</button>
               {dailyLogs.map(l => (
                 <div key={l.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1906,7 +2019,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
           {projectTab === 'schedule' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule Worker</button>
+              <button className="btn-primary" onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule worker</button>
               {scheduleEntries.map(s => (
                 <div key={s.id} className="card">
                   <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
@@ -1918,6 +2031,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job.</p></div>}
             </div>
           )}
+          </>
+          )}
         </div>
 
         {showNewReceipt && (
@@ -1927,14 +2042,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group">
                 <label>📷 Scan Receipt Photo</label>
                 <input type="file" accept="image/*" capture="environment" onChange={scanReceipt} style={{ padding: '8px 0' }} />
-                {scanning && <p style={{ color: '#E07B2A', fontSize: '13px', marginTop: '6px' }}>🔍 Scanning receipt...</p>}
+                {scanning && <p style={{ color: '#E07B2A', fontSize: '13px', marginTop: '6px' }}>🔍 Scanning receipt…</p>}
                 {scanError && <p style={{ color: '#DC2626', fontSize: '13px', marginTop: '6px' }}>{scanError}</p>}
               </div>
               {scanResult && (
                 <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
                   <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', marginBottom: '8px' }}>📷 Scanned — confirm before saving</p>
                   <p style={{ fontSize: '15px', fontWeight: '600' }}>Store: {scanResult.store}</p>
-                  <p style={{ fontSize: '15px', fontWeight: '600' }}>Amount: ${scanResult.amount}</p>
+                  <p style={{ fontSize: '15px', fontWeight: '600' }}>Amount: {formatCurrency(scanResult.amount)}</p>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                     <button onClick={confirmScan} style={{ flex: 1, background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontWeight: '600', cursor: 'pointer' }}>Looks right ✓</button>
                     <button onClick={() => setScanResult(null)} style={{ flex: 1, background: 'transparent', color: '#16A34A', border: '2px solid #16A34A', borderRadius: '8px', padding: '10px', fontWeight: '600', cursor: 'pointer' }}>Edit manually</button>
@@ -1947,7 +2062,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Sales Tax ($) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={receiptForm.tax} onChange={e => setReceiptForm({ ...receiptForm, tax: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({ ...receiptForm, category: e.target.value })}>{RECEIPT_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select></div>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addReceipt} disabled={loading || !receiptForm.amount}>{loading ? 'Saving...' : 'Save Receipt'}</button>
+              <button className="btn-primary" onClick={addReceipt} disabled={loading || !receiptForm.amount}>{loading ? 'Saving…' : 'Save receipt'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewReceipt(false); setScanResult(null); setScanError(''); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -1963,7 +2078,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Start Time</label><input type="time" value={scheduleForm.start_time} onChange={e => setScheduleForm({ ...scheduleForm, start_time: e.target.value })} /></div>
               <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} /></div>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving...' : 'Schedule'}</button>
+              <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving…' : 'Schedule'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -1979,7 +2094,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Notes (optional)</label><input value={mileageForm.notes} onChange={e => setMileageForm({ ...mileageForm, notes: e.target.value })} placeholder="Supply run to Home Depot" /></div>
               <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Deduction = {formatCurrency((parseFloat(mileageForm.miles) || 0) * (parseFloat(mileageForm.rate) || 0))} · set the rate to the current IRS standard mileage rate.</p>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addMileage} disabled={loading}>{loading ? 'Saving...' : 'Add Mileage'}</button>
+              <button className="btn-primary" onClick={addMileage} disabled={loading}>{loading ? 'Saving…' : 'Add mileage'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewMileage(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -1991,7 +2106,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <h2>Add Time</h2>
               <div className="input-group">
                 <label>Worker</label>
-                <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — $${w.hourly_rate}/hr` : ''}</option>)}</select>
+                <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — ${formatCurrency(w.hourly_rate)}/hr` : ''}</option>)}</select>
                 {!showInvite && (
                   <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
                     {workers.length === 0 ? '+ Invite a worker to send them a link' : 'Don’t see them? + Invite a new worker'}
@@ -2039,7 +2154,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               })()}
               {workers.length === 0 && !showInvite && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>No workers yet — tap “Invite a worker” above to send someone a sign-up link. Once they join, you can log their time here.</p>}
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving...' : 'Add Time'}</button>
+              <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving…' : 'Add time'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>Cancel</button>
             </div>
           </div>
@@ -2059,7 +2174,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Profit Target ($)</label><input type="number" value={editJobForm.profit_target} onChange={e => setEditJobForm({ ...editJobForm, profit_target: e.target.value })} placeholder="0.00" /></div>
               <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Contract price = ${((parseFloat(editJobForm.materials_budget) || 0) + (parseFloat(editJobForm.labor_budget) || 0) + (parseFloat(editJobForm.profit_target) || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={saveEditJob} disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
+              <button className="btn-primary" onClick={saveEditJob} disabled={loading}>{loading ? 'Saving…' : 'Save changes'}</button>
               <button className="btn-secondary" onClick={() => { setShowEditJob(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -2073,7 +2188,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Weather (optional)</label><input value={logForm.weather} onChange={e => setLogForm({ ...logForm, weather: e.target.value })} placeholder="Sunny, 70°" /></div>
               <div className="input-group"><label>What happened on site?</label><textarea rows={4} value={logForm.note} onChange={e => setLogForm({ ...logForm, note: e.target.value })} placeholder="Framed the addition. Inspector signed off. Waiting on cabinet delivery." /></div>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addLog} disabled={loading}>{loading ? 'Saving...' : 'Save Log'}</button>
+              <button className="btn-primary" onClick={addLog} disabled={loading}>{loading ? 'Saving…' : 'Save log'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewLog(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -2088,7 +2203,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Permit # (optional)</label><input value={permitForm.permit_number} onChange={e => setPermitForm({ ...permitForm, permit_number: e.target.value })} placeholder="B-2026-0481" /></div>
               <div className="input-group"><label>Inspection date (optional)</label><input type="date" value={permitForm.inspection_on} onChange={e => setPermitForm({ ...permitForm, inspection_on: e.target.value })} /></div>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addPermit} disabled={loading}>{loading ? 'Saving...' : 'Add Permit'}</button>
+              <button className="btn-primary" onClick={addPermit} disabled={loading}>{loading ? 'Saving…' : 'Add permit'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewPermit(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -2103,7 +2218,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Status</label><select value={changeForm.status} onChange={e => setChangeForm({ ...changeForm, status: e.target.value })}><option value="approved">Approved</option><option value="pending">Pending</option><option value="declined">Declined</option></select></div>
               <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>Approved extras add to what the client owes and to your projected profit.</p>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addChangeOrder} disabled={loading}>{loading ? 'Saving...' : 'Add extra / add-on'}</button>
+              <button className="btn-primary" onClick={addChangeOrder} disabled={loading}>{loading ? 'Saving…' : 'Add extra / add-on'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewChange(false); setInlineError('') }}>Cancel</button>
             </div>
           </div>
@@ -2132,7 +2247,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // MAIN DASHBOARD
   return (
     <div>
-      <div className="topbar"><h1>JobTally</h1><button onClick={() => supabase.auth.signOut()}>Sign Out</button></div>
+      <div className="topbar"><h1>JobTally</h1></div>
       <div className="page">
 
         {activeTab === 'money' && (
@@ -2189,13 +2304,18 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>Manage your plan, payment method, and invoices.</p>
               <button className="btn-secondary" onClick={() => { window.location.assign('?billing') }} style={{ width: '100%' }}>Manage subscription & plan</button>
             </div>
+            <div className="card">
+              <h3 style={{ marginBottom: '4px' }}>Account</h3>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>Sign out of JobTally on this device.</p>
+              <button className="btn-secondary" onClick={() => supabase.auth.signOut()} style={{ width: '100%' }}>Sign out</button>
+            </div>
           </div>
         )}
 
         {activeTab === 'compliance' && (
           <div>
             <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
-            <button className="btn-primary" onClick={() => { setShowNewCompliance(true); setInlineError('') }}>+ Add Insurance / License</button>
+            <button className="btn-primary" onClick={() => { setShowNewCompliance(true); setInlineError('') }}>+ Add insurance / license</button>
             {complianceItems.map(it => {
               const days = it.expires_on ? Math.ceil((new Date(it.expires_on + 'T00:00:00') - new Date()) / 86400000) : null
               const color = days == null ? '#888' : days < 0 ? '#DC2626' : days <= 30 ? '#E07B2A' : '#16A34A'
@@ -2208,7 +2328,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                       <p style={{ textTransform: 'capitalize' }}>{it.kind}{it.reference ? ` · ${it.reference}` : ''}</p>
                       {it.expires_on && <p style={{ fontSize: '12px', color, fontWeight: '600', marginTop: '2px' }}>Expires {new Date(it.expires_on + 'T00:00:00').toLocaleDateString()}{label ? ` · ${label}` : ''}</p>}
                     </div>
-                    <button aria-label="Delete item" onClick={() => deleteCompliance(it)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                    <button aria-label="Delete item" onClick={() => deleteCompliance(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
                   </div>
                 </div>
               )
@@ -2220,7 +2340,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         {activeTab === 'warranties' && (
           <div>
             <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
-            <button className="btn-primary" onClick={() => { setShowNewWarranty(true); setInlineError('') }}>+ Add Callback</button>
+            <button className="btn-primary" onClick={() => { setShowNewWarranty(true); setInlineError('') }}>+ Add callback</button>
             {warranties.map(w => {
               const sc = w.status === 'closed' ? 'status-end' : w.status === 'scheduled' ? 'status-mid' : 'status-start'
               return (
@@ -2229,9 +2349,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                     <div style={{ flex: 1, paddingRight: '10px' }}>
                       <h3>{w.description}</h3>
                       <p>{w.projects ? w.projects.name : ''}{w.due_on ? ` · due ${new Date(w.due_on + 'T00:00:00').toLocaleDateString()}` : ''}</p>
-                      <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={`Status: ${w.status}. Activate to advance.`} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cycleWarrantyStatus(w)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleWarrantyStatus(w) } }}>{w.status}</span>
+                      <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={`Status: ${w.status}. Activate to advance.`} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cycleWarrantyStatus(w)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleWarrantyStatus(w) } }}>{w.status} ↻</span>
                     </div>
-                    <button aria-label="Delete callback" onClick={() => deleteWarranty(w)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '18px', cursor: 'pointer' }}>×</button>
+                    <button aria-label="Delete callback" onClick={() => deleteWarranty(w)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
                   </div>
                 </div>
               )
@@ -2404,7 +2524,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                     <p>{c.jobs} job{c.jobs !== 1 ? 's' : ''} · {formatCurrency(c.contract)} total</p>
                     {c.owed > 0 && <p style={{ color: '#DC2626', fontWeight: '600', fontSize: '13px', marginTop: '2px' }}>{formatCurrency(c.owed)} owed</p>}
                   </div>
-                  <div style={{ display: 'flex', gap: '6px', marginLeft: '8px' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginLeft: '8px', justifyContent: 'flex-end' }}>
                     {c.phone && <a href={`tel:${c.phone}`} style={{ background: '#16A34A', color: 'white', textDecoration: 'none', padding: '8px 11px', borderRadius: '8px', fontSize: '14px' }}>📞</a>}
                     {c.phone && <a href={`sms:${c.phone}`} style={{ background: '#1C2B3A', color: 'white', textDecoration: 'none', padding: '8px 11px', borderRadius: '8px', fontSize: '14px' }}>💬</a>}
                     {c.email && <a href={`mailto:${c.email}`} style={{ background: '#E07B2A', color: 'white', textDecoration: 'none', padding: '8px 11px', borderRadius: '8px', fontSize: '14px' }}>✉️</a>}
@@ -2450,7 +2570,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="stat-card"><div className="stat-value">{completedProjects.length}</div><div className="stat-label">Completed</div></div>
               <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Grand total</div></div>
             </div>
-            <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New Job</button>
+            <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New job</button>
+
+            {spendError && (
+              <div className="alert-danger" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', margin: '12px 0' }}>
+                <span>Couldn't load spending — totals may be off.</span>
+                <button onClick={() => fetchSpend(projects)} style={{ background: 'none', border: '1px solid #DC2626', color: '#DC2626', borderRadius: '8px', padding: '6px 12px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>Retry</button>
+              </div>
+            )}
 
             {activeProjects.length > 0 && (
               <div>
@@ -2507,15 +2634,26 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             )}
 
             {initialLoading && projects.length === 0 && <div className="empty-state"><p>Loading…</p></div>}
-            {!initialLoading && projects.length === 0 && <div className="empty-state"><p>No jobs yet. Create your first job!</p></div>}
+            {!initialLoading && projects.length === 0 && (
+              <div className="empty-state" style={{ textAlign: 'center' }}>
+                <p style={{ marginBottom: '14px' }}>Add a job to see live profit, crew hours, and receipts as the work happens.</p>
+                <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ Create your first job</button>
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'workers' && (
           <div>
             <BackBtn label="Crew" onClick={() => setActiveTab('crew')} />
+            {workersError && (
+              <div className="alert-danger" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span>Some crew data couldn't load.</span>
+                <button onClick={() => { fetchWorkerStats(workers); fetchAssignments(); fetchTimeOff() }} style={{ background: 'none', border: '1px solid #DC2626', color: '#DC2626', borderRadius: '8px', padding: '6px 12px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>Retry</button>
+              </div>
+            )}
             {!showInvite && (
-              <button onClick={() => setShowInvite(true)} className="btn-primary" style={{ marginBottom: '12px' }}>+ Add Worker</button>
+              <button onClick={() => setShowInvite(true)} className="btn-primary" style={{ marginBottom: '12px' }}>+ Add worker</button>
             )}
             {showInvite && (
               <div className="card" style={{ marginBottom: '12px', background: '#FFF9F4', border: '1px solid #F0C9A8' }}>
@@ -2584,7 +2722,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                       <h3>{w.full_name}</h3>
                       <p>{w.email}</p>
                       {w.hourly_rate > 0
-                        ? <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>${w.hourly_rate}/hr</p>
+                        ? <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{formatCurrency(w.hourly_rate)}/hr</p>
                         : <button onClick={() => { setShowEditRate(w); setEditRate(''); setInlineError('') }} style={{ marginTop: '4px', background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '4px 10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>⚠️ Set hourly rate — their pay reads $0 until you do</button>}
                       {stats && (
                         <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
@@ -2603,7 +2741,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
-                      <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', minHeight: '44px', cursor: 'pointer' }}>Edit Rate</button>
+                      <button onClick={() => { setShowEditRate(w); setEditRate(w.hourly_rate || ''); setInlineError('') }} style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', minHeight: '44px', cursor: 'pointer' }}>Edit rate</button>
                       <button onClick={() => { setShowAssignWorker(w); setAssignProjectId(''); setInlineError('') }} style={{ background: '#1C2B3A', color: 'white', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', minHeight: '44px', cursor: 'pointer' }}>Assign</button>
                       <button onClick={() => removeWorker(w)} style={{ background: 'transparent', color: '#DC2626', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', minHeight: '44px', cursor: 'pointer' }}>Remove</button>
                     </div>
@@ -2627,17 +2765,19 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               const rows = payroll.filter(r => r.worker_id === w.id)
               const unpaidTotal = rows.reduce((s, r) => {
                 const paid = paychecks.find(c => c.worker_id === r.worker_id && c.week_start === r.week_start)
-                return s + (paid ? 0 : r.gross)
+                // Hours added to a week AFTER it was paid are still owed (T1.6).
+                return s + (paid ? Math.max(0, r.gross - (paid.gross_pay || 0)) : r.gross)
               }, 0)
               return (
                 <div key={w.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: rows.length ? '8px' : '0' }}>
-                    <div><h3>{w.full_name}</h3><p>${w.hourly_rate || 0}/hr</p></div>
+                    <div><h3>{w.full_name}</h3><p>{formatCurrency(w.hourly_rate)}/hr</p></div>
                     {unpaidTotal > 0 && <div style={{ textAlign: 'right' }}><p style={{ fontSize: '11px', color: '#888' }}>Owed</p><p style={{ fontWeight: '700', color: '#DC2626', fontSize: '16px' }}>{formatCurrency(unpaidTotal)}</p></div>}
                   </div>
                   {rows.length === 0 && <p style={{ fontSize: '13px', color: '#888' }}>No hours clocked yet.</p>}
                   {rows.map(r => {
                     const paid = paychecks.find(c => c.worker_id === r.worker_id && c.week_start === r.week_start)
+                    const paidExtra = paid ? r.gross - (paid.gross_pay || 0) : 0 // hours added since the paycheck was recorded
                     return (
                       <div key={r.week_start} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
                         <div>
@@ -2645,8 +2785,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                           <p style={{ fontSize: '12px', color: '#717171' }}>{formatTime(r.minutes)} · {formatCurrency(r.gross)}</p>
                         </div>
                         {paid
-                          ? <span style={{ fontSize: '12px', fontWeight: '700', color: '#16A34A' }}>Paid ✓</span>
-                          : <button onClick={() => recordPaycheck(r)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark Paid</button>
+                          ? <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: '12px', fontWeight: '700', color: '#16A34A' }}>Paid ✓</span>
+                              {paidExtra > 0.005 && <p style={{ fontSize: '11px', fontWeight: '700', color: '#DC2626', marginTop: '2px' }}>+{formatCurrency(paidExtra)} added since paid</p>}
+                            </div>
+                          : <button onClick={() => recordPaycheck(r)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark paid</button>
                         }
                       </div>
                     )
@@ -2663,7 +2806,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
               Quote a job, send it, and turn a "yes" into a job with one tap.
             </p>
-            <button className="btn-primary" onClick={openNewEstimate}>+ New Estimate</button>
+            <button className="btn-primary" onClick={openNewEstimate}>+ New estimate</button>
             {estimates.map(est => {
               const total = estTotal(est.items, est.tax_rate)
               const statusColor = est.status === 'accepted' ? 'status-end' : est.status === 'sent' ? 'status-mid' : 'status-start'
@@ -2679,7 +2822,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
                     {est.status !== 'accepted' && <button onClick={() => openEditEstimate(est)} style={btnSm('#1C2B3A')}>Edit</button>}
-                    {est.status === 'draft' && <button onClick={() => markEstimateStatus(est, 'sent')} style={btnSm('#E07B2A')}>Mark Sent</button>}
+                    {est.status === 'draft' && <button onClick={() => markEstimateStatus(est, 'sent')} style={btnSm('#E07B2A')}>Mark sent</button>}
                     {(est.status === 'draft' || est.status === 'sent') && <button onClick={() => emailEstimate(est)} style={btnSm('#6366F1')}>✉️ Email</button>}
                     {est.status !== 'accepted' && <button onClick={() => acceptEstimate(est)} style={btnSm('#16A34A')}>Accept → Job</button>}
                     {est.status !== 'accepted' && est.status !== 'declined' && <button onClick={() => markEstimateStatus(est, 'declined')} style={btnSmOutline()}>Decline</button>}
@@ -2719,7 +2862,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                       </div>
                     </div>
                   </div>
-                  <button className="btn-primary" onClick={() => { setShowNewInvoice(true); setInlineError('') }}>+ New Invoice</button>
+                  <button className="btn-primary" onClick={() => { setShowNewInvoice(true); setInlineError('') }}>+ New invoice</button>
                   {unpaid.length > 0 && <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 8px', padding: '0 4px' }}>Owed to you</p>}
                   {unpaid.map(inv => (
                     <div key={inv.id} className="card">
@@ -2729,7 +2872,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                           <p>{inv.projects ? inv.projects.name : ''}{inv.projects && inv.projects.client_name ? ` · ${inv.projects.client_name}` : ''}</p>
                           <p style={{ fontSize: '11px', color: '#717171' }}>{inv.due_date ? `Due ${new Date(inv.due_date + 'T00:00:00').toLocaleDateString()}` : (inv.issued_date ? `Sent ${new Date(inv.issued_date + 'T00:00:00').toLocaleDateString()}` : '')}</p>
                         </div>
-                        <button onClick={() => markInvoicePaid(inv)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark Paid</button>
+                        <button onClick={() => markInvoicePaid(inv)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark paid</button>
                       </div>
                       <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                         {inv.projects && inv.projects.client_email && <button onClick={() => emailInvoice(inv)} style={btnSm('#6366F1')}>✉️ Email</button>}
@@ -2831,7 +2974,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <h2>Edit {showEditRate.full_name}</h2>
             <div className="input-group"><label>Hourly Rate ($)</label><input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} placeholder="22" /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={saveWorkerRate} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
+            <button className="btn-primary" onClick={saveWorkerRate} disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
             <button className="btn-secondary" onClick={() => { setShowEditRate(null); setInlineError('') }}>Cancel</button>
           </div>
         </div>
@@ -2848,7 +2991,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </select>
             </div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={() => assignWorkerToProject(showAssignWorker.id)} disabled={loading}>{loading ? 'Assigning...' : 'Assign'}</button>
+            <button className="btn-primary" onClick={() => assignWorkerToProject(showAssignWorker.id)} disabled={loading}>{loading ? 'Assigning…' : 'Assign'}</button>
             <button className="btn-secondary" onClick={() => { setShowAssignWorker(null); setInlineError('') }}>Cancel</button>
           </div>
         </div>
@@ -2869,7 +3012,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <p style={{ fontSize: '13px', color: '#15803D', fontWeight: 600, marginBottom: '4px' }}>Contract price = ${((parseFloat(jobForm.materials_budget) || 0) + (parseFloat(jobForm.labor_budget) || 0) + (parseFloat(jobForm.profit_target) || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             <p style={{ fontSize: '12px', color: '#6B7280', marginBottom: '8px' }}>That's what your client pays — materials + labor + profit added up. You can change it later.</p>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating...' : 'Create Job'}</button>
+            <button className="btn-primary" onClick={createJob} disabled={loading}>{loading ? 'Creating…' : 'Create job'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewJob(false); setInlineError('') }}>Cancel</button>
           </div>
         </div>
@@ -2885,7 +3028,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <div className="input-group"><label>Expires</label><input type="date" value={complianceForm.expires_on} onChange={e => setComplianceForm({ ...complianceForm, expires_on: e.target.value })} /></div>
             <div className="input-group"><label>Notes (optional)</label><input value={complianceForm.notes} onChange={e => setComplianceForm({ ...complianceForm, notes: e.target.value })} placeholder="Carrier, agent, etc." /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={addCompliance} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
+            <button className="btn-primary" onClick={addCompliance} disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewCompliance(false); setInlineError('') }}>Cancel</button>
           </div>
         </div>
@@ -2899,7 +3042,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <div className="input-group"><label>What's the callback?</label><input value={warrantyForm.description} onChange={e => setWarrantyForm({ ...warrantyForm, description: e.target.value })} placeholder="Re-caulk shower (warranty)" /></div>
             <div className="input-group"><label>Due (optional)</label><input type="date" value={warrantyForm.due_on} onChange={e => setWarrantyForm({ ...warrantyForm, due_on: e.target.value })} /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={addWarranty} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
+            <button className="btn-primary" onClick={addWarranty} disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewWarranty(false); setInlineError('') }}>Cancel</button>
           </div>
         </div>
@@ -2937,7 +3080,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}><span>Total</span><span>{formatCurrency(estTotal(estimateItems, estimateForm.tax_rate))}</span></div>
             </div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={saveEstimate} disabled={loading}>{loading ? 'Saving...' : 'Save Estimate'}</button>
+            <button className="btn-primary" onClick={saveEstimate} disabled={loading}>{loading ? 'Saving…' : 'Save estimate'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewEstimate(false); setEditingEstimateId(null); setInlineError('') }}>Cancel</button>
           </div>
         </div>
@@ -2955,7 +3098,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <div className="input-group"><label>Notes (optional)</label><input value={invoiceForm.notes} onChange={e => setInvoiceForm({ ...invoiceForm, notes: e.target.value })} placeholder="50% deposit to start" /></div>
             <div className="input-group"><label>Payment link <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input value={invoiceForm.payment_link} onChange={e => setInvoiceForm({ ...invoiceForm, payment_link: e.target.value })} placeholder="Your Stripe / Square / PayPal link" /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={addInvoice} disabled={loading}>{loading ? 'Creating...' : 'Create Invoice'}</button>
+            <button className="btn-primary" onClick={addInvoice} disabled={loading}>{loading ? 'Creating…' : 'Create invoice'}</button>
             <button className="btn-secondary" onClick={() => { setShowNewInvoice(false); setInlineError('') }}>Cancel</button>
           </div>
         </div>

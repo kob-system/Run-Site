@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatTime } from '../utils/formatTime'
 import AssistantPanel from '../components/AssistantPanel'
+import ConfirmSheet from '../components/ConfirmSheet'
 
 const OFFLINE_KEY = 'runsite_offline_entry'
 const MAX_RETRIES = 3
@@ -63,6 +64,8 @@ export default function WorkerDashboard({ profile }) {
   const [timeOffForm, setTimeOffForm] = useState({ start_date: '', end_date: '', reason: '' })
   const [timeOffError, setTimeOffError] = useState('')
   const [timeOffSubmitting, setTimeOffSubmitting] = useState(false)
+  // Styled replacement for native confirm(): { message, confirmLabel, onConfirm }.
+  const [confirmSheet, setConfirmSheet] = useState(null)
 
   // Refs so the sync lock / retry timer / mounted check are synchronous and not
   // subject to stale-closure bugs the way React state is.
@@ -132,7 +135,14 @@ export default function WorkerDashboard({ profile }) {
   // Guard sign-out: if hours are saved on this phone but not yet synced,
   // confirm before logging out so a worker can't accidentally lose them.
   const handleSignOut = () => {
-    if (offlineEntry && !window.confirm("You have hours saved on this phone that haven't synced yet. Sign out anyway?")) return
+    if (offlineEntry) {
+      setConfirmSheet({
+        message: "You have hours saved on this phone that haven't synced yet. Sign out anyway?",
+        confirmLabel: 'Sign Out',
+        onConfirm: () => { setConfirmSheet(null); supabase.auth.signOut() }
+      })
+      return
+    }
     supabase.auth.signOut()
   }
 
@@ -437,8 +447,15 @@ export default function WorkerDashboard({ profile }) {
     setLoading(false)
   }
 
-  const clockOut = async () => {
-    if (!window.confirm('End your shift now?')) return
+  const clockOut = () => {
+    setConfirmSheet({
+      message: 'End your shift now?',
+      confirmLabel: 'End Shift',
+      onConfirm: () => { setConfirmSheet(null); doClockOut() }
+    })
+  }
+
+  const doClockOut = async () => {
     setLoading(true)
     setError('')
     const entry = activeEntry || offlineEntry
@@ -500,6 +517,9 @@ export default function WorkerDashboard({ profile }) {
       notifyOwner('out', now.toISOString(), activeEntry.project_id)
       setActiveEntry(null)
       setTimer(0)
+      // Refetch history so the just-finished shift lands in "This week" right
+      // away — otherwise its hours/pay drop out until the next reload.
+      fetchHistory()
       showToast('Clocked out ✓')
     } catch (e) {
       // Online but the update failed — defer offline if we can dedup it, else retry.
@@ -856,6 +876,14 @@ export default function WorkerDashboard({ profile }) {
           fontSize: '14px', fontWeight: '600', zIndex: 999, boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
         }}>{toast}</div>
       )}
+
+      <ConfirmSheet
+        open={!!confirmSheet}
+        message={confirmSheet?.message}
+        confirmLabel={confirmSheet?.confirmLabel}
+        onConfirm={confirmSheet?.onConfirm}
+        onCancel={() => setConfirmSheet(null)}
+      />
 
       <AssistantPanel role="worker" onDataChanged={() => { checkActiveEntry(); fetchHistory(); fetchSchedule(); fetchTimeOff() }} />
     </div>

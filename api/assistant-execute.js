@@ -268,7 +268,7 @@ async function resolveMyJob(userToken, jobName) {
 // here is trusted. Best-effort: a failed email never fails the clock action.
 async function notifyOwner(ctx, projectId, action, timestamp) {
   try {
-    const origin = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://getjobtally.com'
+    const origin = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://www.getjobtally.com'
     await fetch(`${origin}/api/notify-owner`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.token}` },
@@ -286,11 +286,17 @@ async function runTool(tool, args, ctx) {
     const amount = asNum(args.amount)
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) return { error: 'Amount must be between $0 and $100,000.' }
     const category = ['materials', 'labor', 'other'].includes(args.category) ? args.category : 'materials'
-    const resolved = await resolveJob(token, args.job_name)
+    // A crew member can log a scanned receipt, but it always books to the BOSS's
+    // tenant: owner_id = their owner, and the job must be one they're assigned to
+    // (worker_projects view; the receipts INSERT RLS re-checks project_workers).
+    const isWorker = ctx.profile && ctx.profile.role === 'worker'
+    const ownerId = isWorker ? (ctx.profile && ctx.profile.owner_id) : uid
+    if (isWorker && !ownerId) return { error: 'You’re not linked to a boss yet.' }
+    const resolved = isWorker ? await resolveMyJob(token, args.job_name) : await resolveJob(token, args.job_name)
     if (resolved.error) return { error: resolved.error }
     const { ok, data } = await userReq(token, 'receipts', 'POST', {
       project_id: resolved.project.id,
-      owner_id: uid,
+      owner_id: ownerId,
       amount,
       category,
       store: clean(args.store, 120) || null,
@@ -812,7 +818,7 @@ async function runTool(tool, args, ctx) {
       owner_id: uid, token: inviteToken, worker_name: workerName,
     })
     if (!ok) return { error: BLOCKED }
-    const origin = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://getjobtally.com'
+    const origin = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://www.getjobtally.com'
     const link = `${origin}/?invite=${inviteToken}`
     return {
       ok: true,
@@ -1034,8 +1040,10 @@ const WRITE_TOOLS = new Set([
   'update_settings', 'invite_worker', 'remove_worker',
 ])
 
-// Crew persona — the ONLY tools a worker token can execute.
-const WORKER_WRITE_TOOLS = new Set(['clock_in', 'clock_out', 'request_time_off'])
+// Crew persona — the ONLY tools a worker token can execute. add_expense is
+// allowed but the handler forces it to book under the BOSS's tenant (owner_id =
+// the worker's owner_id) and only to a job the worker is assigned to.
+const WORKER_WRITE_TOOLS = new Set(['clock_in', 'clock_out', 'request_time_off', 'add_expense'])
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
