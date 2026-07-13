@@ -4,10 +4,12 @@ import { supabase } from '../supabaseClient'
 // In-app AI assistant. A floating ✨ button opens a bottom sheet.
 // Type a question or an action; reads answer inline, writes show a confirm card
 // before anything saves. Every executed action is audited (Activity tab).
-// v0.4: role="worker" mounts the crew persona (clock in/out, hours, schedule,
-// time off — the API enforces the toolset server-side, this only sets copy),
-// mic dictation where the browser supports SpeechRecognition, and owner-only
-// receipt photo → /api/scan-receipt → normal add_expense confirm flow.
+// v0.5: role="worker" mounts the crew persona (clock in/out, hours, schedule,
+// time off, AND logging a scanned receipt/expense — the API enforces the toolset
+// server-side and books a crew expense to the boss's tenant, this only sets copy).
+// Mic dictation (live interim text) where the browser supports SpeechRecognition,
+// and receipt photo → /api/scan-receipt → normal add_expense confirm flow, now
+// for owner and crew alike (date + tax read off the receipt flow into the ask).
 const NAVY = '#1C2B3A'
 const ORANGE = '#E07B2A'
 const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
@@ -114,23 +116,43 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
     }
     const rec = new SR()
     rec.lang = 'en-US'
-    rec.interimResults = false
+    rec.interimResults = true // live text as they speak, not just at the end
     rec.maxAlternatives = 1
+    // Keep whatever they'd already typed; append the dictation live on top of it.
+    const base = input ? input.trim() + ' ' : ''
     rec.onresult = (e) => {
-      const t = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : ''
-      if (t) setInput((prev) => (prev ? prev + ' ' : '') + t)
+      let finalText = ''
+      let interim = ''
+      for (let i = 0; i < e.results.length; i++) {
+        const seg = e.results[i][0] ? e.results[i][0].transcript : ''
+        if (e.results[i].isFinal) finalText += seg
+        else interim += seg
+      }
+      setInput((base + (finalText + interim)).replace(/\s+/g, ' ').trimStart())
     }
     rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
+    rec.onerror = (e) => {
+      setListening(false)
+      const err = e && e.error
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        pushMsg({ role: 'assistant', text: 'I need microphone access to hear you — allow the mic for this site in your browser settings, then tap 🎤 again. You can always just type instead.' })
+      } else if (err === 'no-speech') {
+        pushMsg({ role: 'assistant', text: "Didn't catch anything — tap 🎤 and speak, or just type it." })
+      } else if (err === 'audio-capture') {
+        pushMsg({ role: 'assistant', text: "Can't find a microphone on this device — go ahead and type it instead." })
+      }
+    }
     recogRef.current = rec
     try {
       rec.start()
       setListening(true)
     } catch { setListening(false) }
-  }, [listening])
+  }, [listening, input])
 
-  // Receipt photo (owner only): photo → /api/scan-receipt (Haiku vision) →
-  // auto-send the store/amount so the normal add_expense confirm flow takes over.
+  // Receipt photo (owner or crew): photo → /api/scan-receipt (Haiku vision) →
+  // auto-send the store/amount/date so the normal add_expense confirm flow takes
+  // over. amount is the receipt TOTAL (tax already included), so the cost booked
+  // to the job counts the tax. A crew scan books to the boss's records server-side.
   const onReceiptPick = useCallback(async (e) => {
     const file = e.target.files && e.target.files[0]
     e.target.value = ''
@@ -155,12 +177,20 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       const data = await resp.json().catch(() => null)
       const store = data && data.store ? String(data.store).slice(0, 80) : ''
       const amount = data && Number(data.amount) > 0 ? Number(data.amount).toFixed(2) : ''
+      // date is YYYY-MM-DD or null; tax is a number string or null (both optional).
+      const date = data && /^\d{4}-\d{2}-\d{2}$/.test(String(data.date || '')) ? data.date : ''
+      const tax = data && Number(data.tax) > 0 ? Number(data.tax).toFixed(2) : ''
       if (!resp.ok || (!store && !amount)) {
         pushMsg({ role: 'assistant', text: (data && data.error) || 'Couldn’t read that receipt — try a clearer photo, or just tell me the store and amount.' })
         return
       }
       setScanning(false)
-      await send(`I scanned a receipt${store ? ` from ${store}` : ''}${amount ? ` for $${amount}` : ''} — add it as an expense. Ask me which job if you need to.`)
+      // amount is the TOTAL (tax included), so it's the right figure for the job cost.
+      await send(
+        `I scanned a receipt${store ? ` from ${store}` : ''}${amount ? ` for $${amount} total` : ''}` +
+        `${tax ? ` (includes $${tax} sales tax)` : ''}${date ? ` dated ${date}` : ''} — ` +
+        `add it as an expense. Ask me which job if you need to.`
+      )
     } catch {
       pushMsg({ role: 'assistant', text: 'Couldn’t read that receipt. Tell me the store and amount instead.' })
     } finally {
@@ -208,7 +238,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
         onClick={() => setOpen(true)}
         aria-label="Open assistant"
         style={{
-          position: 'fixed', right: 16, bottom: 84, zIndex: 900,
+          position: 'fixed', right: 16, bottom: 'calc(84px + env(safe-area-inset-bottom))', zIndex: 900,
           width: 56, height: 56, borderRadius: 28, border: 'none',
           background: ORANGE, color: 'white', fontSize: 24, cursor: 'pointer',
           boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
@@ -257,13 +287,10 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
               )}
               {(busy || scanning) && <div style={{ alignSelf: 'flex-start', color: '#9ca3af', fontSize: 13, fontStyle: 'italic' }}>{scanning ? 'reading receipt…' : 'thinking…'}</div>}
             </div>
-            <div style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid #e5e7eb', background: 'white' }}>
-              {isOwner && (
-                <>
-                  <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
-                  <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
-                </>
-              )}
+            <div style={{ display: 'flex', gap: 8, padding: 12, paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: '1px solid #e5e7eb', background: 'white' }}>
+              {/* Receipt scan — owner and crew both; a crew scan books to the boss server-side. */}
+              <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
+              <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
               {SR && (
                 <button onClick={toggleMic} disabled={busy || scanning} aria-label={listening ? 'Stop listening' : 'Speak'} title={listening ? 'Stop listening' : 'Speak'} style={{ width: 44, border: listening ? 'none' : '1px solid #d1d5db', borderRadius: 10, background: listening ? '#dc2626' : 'white', fontSize: 18, cursor: 'pointer' }}>🎤</button>
               )}

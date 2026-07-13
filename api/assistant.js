@@ -19,7 +19,7 @@ const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY
-const MODEL = 'claude-haiku-4-5-20251001'
+const MODEL = 'claude-sonnet-5'
 
 async function getUser(req) {
   const auth = req.headers.authorization || ''
@@ -1077,6 +1077,25 @@ const WORKER_WRITE_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'add_expense',
+    description:
+      "Log a material/expense cost (e.g. a scanned receipt) to one of THIS crew member's assigned jobs. " +
+      "It books to the boss's records, not the worker's. The amount is the receipt TOTAL (tax included). " +
+      'WRITE — they confirm before it saves.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ...JOB_ARG,
+        amount: { type: 'number', description: 'Dollar TOTAL of the receipt, tax included, e.g. 42.50' },
+        store: { type: 'string', description: 'Where it was bought (optional).' },
+        category: { type: 'string', enum: ['materials', 'labor', 'other'], description: 'Defaults to materials.' },
+        description: { type: 'string', description: 'What it was (optional).' },
+      },
+      required: ['job_name', 'amount'],
+      additionalProperties: false,
+    },
+  },
 ]
 
 const WORKER_WRITE_NAMES = new Set(WORKER_WRITE_TOOLS.map((t) => t.name))
@@ -1182,30 +1201,58 @@ function summarize(tool, a) {
   }
 }
 
-async function callClaude(system, messages, tools) {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 1200,
-      system,
-      tools,
-      messages,
-    }),
-  })
-  const data = await r.json()
-  if (!r.ok) {
-    console.error('assistant: Anthropic error', r.status, data && data.error)
-    const e = new Error('anthropic')
-    e.status = r.status
-    throw e
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Anthropic can return transient 429 (rate limit), 529 (overloaded), or 5xx.
+// Retry those transparently with exponential backoff before giving up; 4xx
+// (auth/validation) fail fast since a retry won't help. No new deps.
+const isRetryableStatus = (s) => s === 429 || s === 529 || (s >= 500 && s < 600)
+
+async function withRetry(fn) {
+  const backoffs = [400, 900, 2000]
+  let lastErr
+  for (let attempt = 0; attempt <= backoffs.length; attempt++) {
+    try {
+      return await fn()
+    } catch (e) {
+      lastErr = e
+      if (attempt < backoffs.length && e && isRetryableStatus(e.status)) {
+        console.error('assistant: retrying Anthropic call', e.status, 'attempt', attempt + 1)
+        await sleep(backoffs[attempt])
+        continue
+      }
+      throw e
+    }
   }
-  return data
+  throw lastErr
+}
+
+async function callClaude(system, messages, tools) {
+  return withRetry(async () => {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 1200,
+        system,
+        tools,
+        messages,
+      }),
+    })
+    const data = await r.json()
+    if (!r.ok) {
+      console.error('assistant: Anthropic error', r.status, data && data.error)
+      const e = new Error('anthropic')
+      e.status = r.status
+      throw e
+    }
+    return data
+  })
 }
 
 export default async function handler(req, res) {
@@ -1265,15 +1312,16 @@ export default async function handler(req, res) {
 
   const workerSystem =
     `You are the JobTally assistant for ${who}, a crew member${company}. ` +
-    `You can look up THEIR OWN stuff — assigned jobs, clocked hours and pay, schedule, time-off requests — and do three things for them: clock in, clock out, and request time off. ` +
+    `You can look up THEIR OWN stuff — assigned jobs, clocked hours and pay, schedule, time-off requests — and do a few things for them: clock in, clock out, request time off, and log a material/receipt expense to a job they're on. ` +
     `Today's date is ${todayKey(tz)} and yesterday was ${addDaysKey(todayKey(tz), -1)}. Work out relative dates ("tomorrow", "next Monday") from today's date yourself — never ask for a date you can compute. ` +
     `Replies are read on a phone on a jobsite: SHORT and plain, no markdown tables. Money is USD.\n\n` +
     `RULES:\n` +
     `- Use the read tools to look things up — never invent job names, hours, or pay numbers.\n` +
     `- Check clock_status before proposing clock_in or clock_out (can't clock in twice; can't clock out if not clocked in).\n` +
-    `- For clock in/out or time off, call the matching write tool. The app shows them a confirm card before it saves, so don't ask "are you sure?" yourself — just call the tool.\n` +
+    `- For clock in/out, time off, or logging a receipt/expense, call the matching write tool. The app shows them a confirm card before it saves, so don't ask "are you sure?" yourself — just call the tool.\n` +
+    `- Logging an expense: use add_expense with the receipt TOTAL (tax already included) and which of THEIR jobs it's for. It books to the boss's records — the crew member can't see the job's money, only add the cost.\n` +
     `- One change per message: if they ask for several at once, do the first and tell them to send the next after confirming.\n` +
-    `- Their pay = their clocked hours × their hourly rate. You cannot see or discuss the business's money, other crew members' pay, or anything owner-side — if asked, say that's owner-only and they should ask their boss.\n` +
+    `- Their pay = their clocked hours × their hourly rate. You cannot see or discuss the business's money, other crew members' pay, job profit, or anything owner-side — if asked, say that's owner-only and they should ask their boss.\n` +
     `- If a required detail is missing (which job, which dates), ask ONE short question instead of guessing.\n` +
     `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.`
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, Suspense } from 'react'
 import { supabase } from './supabaseClient'
 import { captureAttribution, saveSignupAttribution } from './utils/attribution'
+import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
 // Everything below is code-split. A logged-out stranger hitting the root should
@@ -19,7 +20,9 @@ const Landing = React.lazy(() => import('./pages/Landing'))
 // Single Suspense fallback for every code-split screen, so each return site can
 // just wrap its element in <Screen>…</Screen> instead of repeating the boilerplate.
 const Screen = ({ children }) => (
-  <Suspense fallback={<div className="loading">Loading JobTally...</div>}>{children}</Suspense>
+  <ErrorBoundary>
+    <Suspense fallback={<div className="loading">Loading JobTally...</div>}>{children}</Suspense>
+  </ErrorBoundary>
 )
 
 export default function App() {
@@ -62,6 +65,25 @@ export default function App() {
   // or campaign actually brought this account in. First touch wins.
   useEffect(() => {
     captureAttribution()
+  }, [])
+
+  // Global safety net for errors that escape React's render tree — unhandled
+  // promise rejections (failed fetches, async handlers) and uncaught runtime
+  // errors. Logged here; structured so a telemetry sink could report them later
+  // without touching every call site. The ErrorBoundary handles render errors.
+  useEffect(() => {
+    const onError = (event) => {
+      console.error('Global error:', event.error || event.message)
+    }
+    const onRejection = (event) => {
+      console.error('Unhandled promise rejection:', event.reason)
+    }
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onRejection)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onRejection)
+    }
   }, [])
 
   const fetchProfile = async (user) => {
@@ -177,7 +199,7 @@ export default function App() {
 
   }
   if (loadError) return (
-    <div className="loading">
+    <div className="loading recovery">
       <p>We couldn't reach your account. Check your connection.</p>
       <button
         onClick={() => window.location.reload()}
@@ -192,7 +214,7 @@ export default function App() {
   // "Loading..." with no escape. Show a recovery screen that sends them back to
   // the login screen instead.
   return (
-    <div className="loading">
+    <div className="loading recovery">
       <p>We couldn't load your account.</p>
       <button
         onClick={() => supabase.auth.signOut()}
