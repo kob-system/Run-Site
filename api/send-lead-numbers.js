@@ -27,11 +27,18 @@ const money = (v) => {
 const fmt = (n) => (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('en-US')
 
 // Stable uuid-shaped key from the caller's IP so rate_limit_hit(uuid,...) can
-// count anonymous callers too.
+// count anonymous callers too. Uses the platform-trusted client IP — NEVER the
+// first X-Forwarded-For hop, which is client-supplied and spoofable (an attacker
+// could mint a fresh rate-limit bucket every request and turn this into an
+// uncapped email cannon). Matches find-owner.js: prefer x-real-ip, else the LAST
+// XFF hop (the one Vercel appended), else the socket address.
 function ipKey(req) {
-  const fwd = req.headers['x-forwarded-for']
-  const ip = (typeof fwd === 'string' && fwd.split(',')[0].trim()) ||
-    (req.socket && req.socket.remoteAddress) || 'unknown'
+  const xff = (req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean)
+  const ip =
+    (req.headers['x-real-ip'] || '').trim() ||
+    (xff.length ? xff[xff.length - 1] : '') ||
+    (req.socket && req.socket.remoteAddress) ||
+    'unknown'
   const h = crypto.createHash('sha256').update('lead:' + ip).digest('hex')
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`
 }

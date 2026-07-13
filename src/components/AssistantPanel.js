@@ -67,7 +67,10 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
         headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
         body: JSON.stringify({ message: text, history, tz: new Date().getTimezoneOffset() }),
       })
-      const data = await r.json()
+      // Parse defensively: a 5xx from Vercel can be an HTML error page, not JSON.
+      // Falling through to the connection-error catch would mislabel a server
+      // fault as "check your connection."
+      const data = await r.json().catch(() => ({}))
       if (!r.ok) { pushMsg({ role: 'assistant', text: data.error || 'Something went wrong.' }); return }
       if (data.type === 'confirm') {
         setPending({ tool: data.tool, args: data.args, summary: data.summary })
@@ -92,7 +95,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
         headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
         body: JSON.stringify({ tool: p.tool, args: p.args, tz: new Date().getTimezoneOffset() }),
       })
-      const data = await r.json()
+      const data = await r.json().catch(() => ({}))
       pushMsg({ role: 'assistant', text: r.ok ? (data.message || 'Done ✓') : (data.error || "Couldn't do that.") })
       if (r.ok) {
         if (typeof onDataChanged === 'function') onDataChanged() // refresh dashboard money after a confirmed write

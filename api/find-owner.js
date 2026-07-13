@@ -41,8 +41,17 @@ async function rateOk(ip) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { ownerEmail } = req.body
-  if (!ownerEmail) return res.status(400).json({ error: 'Missing ownerEmail' })
+  // `|| {}` guard: a POST with no/!json body leaves req.body undefined, and this
+  // destructure runs OUTSIDE the try below — without the guard it would throw an
+  // uncaught TypeError and 500 instead of a clean 400.
+  const { ownerEmail } = req.body || {}
+  if (!ownerEmail || typeof ownerEmail !== 'string') {
+    return res.status(400).json({ error: 'Missing ownerEmail' })
+  }
+  // Cheap shape check so a junk value never becomes a wasted service-role query.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail.trim()) || ownerEmail.length > 254) {
+    return res.status(400).json({ error: 'Invalid email' })
+  }
 
   // Use the platform-trusted client IP. NEVER the first X-Forwarded-For entry —
   // that hop is client-supplied, so an attacker can spoof a fresh value per

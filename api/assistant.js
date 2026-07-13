@@ -1279,8 +1279,16 @@ export default async function handler(req, res) {
 
   const body = req.body || {}
   const userMessage = typeof body.message === 'string' ? body.message.trim() : ''
-  // Prior turns (optional), passed straight through from the client. Kept small.
-  const history = Array.isArray(body.history) ? body.history.slice(-8) : []
+  // Prior turns (optional). This is CLIENT-supplied, so it's sanitized rather
+  // than trusted verbatim: keep only plain {role:'user'|'assistant', content:string}
+  // turns and drop anything else. Without this a caller could inject raw
+  // tool_use/tool_result blocks into the Claude message stream — e.g. a forged
+  // "tool_result" the model would treat as real data. Content is length-capped
+  // so a bloated history can't blow the token budget.
+  const history = (Array.isArray(body.history) ? body.history : [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .slice(-8)
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }))
   // Owner's timezone offset in minutes (getTimezoneOffset), so "today" and
   // week grouping match their clock, not the server's UTC.
   const tz = Number.isFinite(body.tz) ? Math.max(-840, Math.min(840, body.tz)) : 0
@@ -1328,6 +1336,10 @@ export default async function handler(req, res) {
   const system = isOwner ? ownerSystem : workerSystem
   const tools = isOwner ? [...READ_TOOLS, ...WRITE_TOOLS] : [...WORKER_READ_TOOLS, ...WORKER_WRITE_TOOLS]
   const writeNames = isOwner ? WRITE_NAMES : WORKER_WRITE_NAMES
+  // Defense-in-depth: the model can only emit tools we hand it, but guard the
+  // exec loop with the role's allowlist anyway so a future change (or an
+  // unexpected block) can never run an owner tool for a worker.
+  const allowedNames = new Set(tools.map((t) => t.name))
   const messages = [...history, { role: 'user', content: userMessage }]
   const ctx = { token: user.token, uid: user.id, tz }
 
@@ -1364,8 +1376,12 @@ export default async function handler(req, res) {
         const results = []
         for (const t of toolUses) {
           let out
-          try { out = await execRead(t.name, t.input || {}, ctx) }
-          catch (e) { out = { error: 'Could not complete that lookup.' } }
+          if (!allowedNames.has(t.name)) {
+            out = { error: 'Not permitted.' }
+          } else {
+            try { out = await execRead(t.name, t.input || {}, ctx) }
+            catch (e) { out = { error: 'Could not complete that lookup.' } }
+          }
           results.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify(out) })
         }
         messages.push({ role: 'user', content: results })

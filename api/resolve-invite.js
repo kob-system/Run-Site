@@ -2,11 +2,20 @@
 // to, for the signup screen. The worker is NOT logged in yet, so this
 // runs with the service-role key (bypasses RLS), mirroring find-owner.js.
 // Returns only what the signup screen needs — never leaks other fields.
+import { rateOk } from './_ratelimit'
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
   const { token } = req.body || {}
-  if (!token) return res.status(400).json({ error: 'Missing token' })
+  if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Missing token' })
+
+  // Defense-in-depth per-IP throttle. Tokens are 122-bit random (unguessable),
+  // so this isn't a brute-force block — it caps enumeration/abuse of the
+  // unauth service-role endpoint. Fails open, so a real signup is never blocked.
+  if (!(await rateOk(req, 'resolve_invite', 30, 600))) {
+    return res.status(429).json({ error: 'Too many attempts, please try again shortly' })
+  }
 
   try {
     const base = process.env.REACT_APP_SUPABASE_URL

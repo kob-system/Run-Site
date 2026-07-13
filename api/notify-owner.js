@@ -42,7 +42,10 @@ async function allowedRate(uid, bucket, max, windowSecs) {
       body: JSON.stringify({ p_user: uid, p_bucket: bucket, p_max: max, p_window_secs: windowSecs })
     })
     if (!r.ok) return true
-    return (await r.json()) === true
+    // Allow unless the limiter explicitly denies. Matches find-owner's
+    // `!== false` convention so an unexpected payload shape never silently
+    // blocks a legitimate clock-in notification.
+    return (await r.json()) !== false
   } catch { return true }
 }
 

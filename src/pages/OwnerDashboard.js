@@ -394,13 +394,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     if (!workerList?.length) return
     try {
       const workerIds = workerList.map(w => w.id)
-      const { data, error } = await supabase
+      // Page past the 1000-row cap — a busy crew's lifetime shifts exceed it, and
+      // an undercount here understates each worker's hours + labor cost.
+      const data = await fetchAllRows((from, to) => supabase
         .from('time_entries')
         .select('worker_id, total_minutes, labor_cost, clocked_in_at')
         .in('worker_id', workerIds)
         .not('clocked_out_at', 'is', null)
-
-      if (error) throw error
+        .range(from, to))
 
       const now = new Date()
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
@@ -699,7 +700,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     if (endAt <= startAt) return setInlineError('End time must be after start time')
     const worker = workers.find(w => w.id === timeForm.worker_id)
     const totalMinutes = Math.floor((endAt - startAt) / 60000)
-    const laborCost = (totalMinutes / 60) * (worker?.hourly_rate || 0)
+    // Round to cents on the way in — otherwise float noise ((m/60)*rate) persists
+    // to the DB and shows up as $123.4560001 in sums. Matches roundCents everywhere else.
+    const laborCost = roundCents((totalMinutes / 60) * (worker?.hourly_rate || 0))
     setLoading(true)
     setInlineError('')
     try {
@@ -1129,7 +1132,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // ---- Email a quote / invoice to the client (opens their mail app, prefilled) ----
   const emailEstimate = (est) => {
     const items = Array.isArray(est.items) ? est.items : []
-    const lines = items.map(it => `• ${it.description}: ${it.qty} × $${Number(it.unit_price).toFixed(2)} = $${estItemAmount(it).toFixed(2)}`).join('\n')
+    const lines = items.map(it => `• ${it.description}: ${it.qty} × $${(Number(it.unit_price) || 0).toFixed(2)} = $${estItemAmount(it).toFixed(2)}`).join('\n')
     const total = estTotal(est.items, est.tax_rate)
     const subject = `Estimate${est.title ? ': ' + est.title : ''}`
     const body = `Hi ${est.client_name || ''},\n\nHere's your estimate${est.title ? ' for ' + est.title : ''}:\n\n${lines}\n\nTotal: $${total.toFixed(2)}${est.notes ? '\n\n' + est.notes : ''}\n\nReply to approve and we'll get on the schedule.\n\nThanks,\n${profile.company_name || profile.full_name || ''}`
@@ -1228,9 +1231,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             },
             body: JSON.stringify({ imageBase64: base64, mediaType: file.type })
           })
-          const result = await response.json()
+          const result = await response.json().catch(() => ({}))
           if (result.store || result.amount) setScanResult(result)
-          else setScanError("Couldn't read this receipt — fill in the fields below.")
+          else setScanError(result.error || "Couldn't read this receipt — fill in the fields below.")
         } catch { setScanError("Couldn't read this receipt — fill in the fields below.") }
         setScanning(false)
       }
@@ -1421,12 +1424,15 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const yEndDate = `${reportYear}-12-31`
       const yEndTs = `${yEndDate}T23:59:59`
       const projectIds = projects.map(p => p.id)
-      const [{ data: rcpts }, { data: miles }, timesRes] = await Promise.all([
-        supabase.from('receipts').select('category, amount, tax_amount, created_at').eq('owner_id', profile.id).gte('created_at', yStart).lte('created_at', yEndTs),
-        supabase.from('mileage_entries').select('miles, rate, trip_date').eq('owner_id', profile.id).gte('trip_date', yStart).lte('trip_date', yEndDate),
+      // Page every source past the 1000-row cap — a full year of receipts, trips,
+      // or shifts on a busy account exceeds it, and a silent undercount here would
+      // understate deductions on the accountant-facing tax pack.
+      const [rcpts, miles, times] = await Promise.all([
+        fetchAllRows((from, to) => supabase.from('receipts').select('category, amount, tax_amount, created_at').eq('owner_id', profile.id).gte('created_at', yStart).lte('created_at', yEndTs).range(from, to)),
+        fetchAllRows((from, to) => supabase.from('mileage_entries').select('miles, rate, trip_date').eq('owner_id', profile.id).gte('trip_date', yStart).lte('trip_date', yEndDate).range(from, to)),
         projectIds.length
-          ? supabase.from('time_entries').select('labor_cost, clocked_in_at').in('project_id', projectIds).not('clocked_out_at', 'is', null).gte('clocked_in_at', yStart).lte('clocked_in_at', yEndTs)
-          : Promise.resolve({ data: [] })
+          ? fetchAllRows((from, to) => supabase.from('time_entries').select('labor_cost, clocked_in_at').in('project_id', projectIds).not('clocked_out_at', 'is', null).gte('clocked_in_at', yStart).lte('clocked_in_at', yEndTs).range(from, to))
+          : Promise.resolve([])
       ])
       const r2 = roundCents
       const byCat = {}
@@ -1437,7 +1443,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       })
       const totalMiles = (miles || []).reduce((s, m) => s + (m.miles || 0), 0)
       const mileageDeduction = (miles || []).reduce((s, m) => s + (m.miles || 0) * (m.rate || 0), 0)
-      const laborTotal = (timesRes.data || []).reduce((s, t) => s + (t.labor_cost || 0), 0)
+      const laborTotal = (times || []).reduce((s, t) => s + (t.labor_cost || 0), 0)
       const expensesTotal = Object.values(byCat).reduce((s, v) => s + v, 0)
       const income = reportJobs.reduce((s, p) => s + contractOf(p), 0)
       const deductions = expensesTotal + laborTotal + mileageDeduction

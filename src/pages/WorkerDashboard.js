@@ -103,6 +103,7 @@ export default function WorkerDashboard({ profile }) {
   }, [])
 
   useEffect(() => {
+    checkActiveEntry()   // verify clock status up front (gates the Clock In button)
     fetchAssignedProjects()
     fetchSchedule()
     fetchHistory()   // populate the "This week" summary up front
@@ -119,11 +120,14 @@ export default function WorkerDashboard({ profile }) {
     }
   }, [projects, selectedProject])
 
-  // Verify clock-in status on load AND whenever connectivity returns, so an
-  // offline-at-launch worker isn't permanently gated out of clocking in. Also
-  // re-fetch jobs/schedule/history on reconnect so a worker who launched offline
-  // isn't stranded on "No jobs assigned" / a stale summary until a full reload.
+  // Re-fetch on RECONNECT only. The mount effect above already does the first
+  // load; without the guard this fires again on mount (isOnline starts true),
+  // double-fetching. Skipping the initial run also means an offline-at-launch
+  // worker who later gets signal gets a single clean re-sync of clock status +
+  // jobs/schedule/history, instead of being stranded on stale data.
+  const didInitOnlineRef = useRef(false)
   useEffect(() => {
+    if (!didInitOnlineRef.current) { didInitOnlineRef.current = true; return }
     if (isOnline) {
       checkActiveEntry()
       fetchAssignedProjects()

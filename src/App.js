@@ -34,16 +34,25 @@ export default function App() {
   const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // onAuthStateChange fires INITIAL_SESSION immediately with the stored session
+    // (or null), so it fully replaces a separate getSession() call — using both
+    // double-fetched the profile on every mount. It then fires on every auth
+    // transition thereafter.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
-      if (session) fetchProfile(session.user)
-      else setLoading(false)
-    })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) fetchProfile(session.user)
-      else { setProfile(null); setLoading(false) }
+      // TOKEN_REFRESHED fires ~hourly with the same user; the profile and
+      // subscription don't change, so refetching each time is wasted work.
+      if (event === 'TOKEN_REFRESHED') return
+      if (session) {
+        // Defer out of the auth callback: invoking supabase (fetchProfile) while
+        // still inside onAuthStateChange can deadlock the client's internal auth
+        // lock. setTimeout(…,0) runs it on the next tick, after the lock releases.
+        setTimeout(() => fetchProfile(session.user), 0)
+      } else {
+        setProfile(null)
+        setSub(undefined)
+        setLoading(false)
+      }
     })
 
     return () => subscription.unsubscribe()
@@ -176,6 +185,17 @@ export default function App() {
       new URLSearchParams(window.location.search).has('billing') ||
       window.location.hash === '#billing'
     const subStatus = sub && sub.status
+    // Renewal-lag grace. At the exact renewal instant Stripe's charge succeeds
+    // and the stored current_period_end is briefly in the past until the
+    // customer.subscription.updated webhook lands (seconds, occasionally longer
+    // under webhook backlog). A strict "> now" check would flash a paywall at a
+    // fully-paid owner in that gap. Allowing a 24h skew bridges the lag WITHOUT
+    // granting a genuinely lapsed account access, because a real cancellation
+    // flips status away from active/trialing (handled by the status guard above).
+    const RENEWAL_GRACE_MS = 24 * 60 * 60 * 1000
+    const periodEndValid =
+      !!sub.current_period_end &&
+      new Date(sub.current_period_end).getTime() > Date.now() - RENEWAL_GRACE_MS
     const active =
       // comp = grandfathered/free grant; no period end to check.
       subStatus === 'comp' ||
@@ -185,11 +205,10 @@ export default function App() {
       // exhausts retries it flips them to canceled/unpaid, which lands here as
       // active=false and locks — the correct terminal state.
       subStatus === 'past_due' ||
-      // active/trialing require a REAL future period end. A null period end no
-      // longer fails open (it used to grant indefinite access to a stale row).
-      ((subStatus === 'active' || subStatus === 'trialing') &&
-        !!sub.current_period_end &&
-        new Date(sub.current_period_end) > new Date())
+      // active/trialing require a REAL period end within the renewal-grace skew.
+      // A null period end no longer fails open (it used to grant indefinite
+      // access to a stale row).
+      ((subStatus === 'active' || subStatus === 'trialing') && periodEndValid)
 
     // New owners get a 7-day no-card free window from signup — full app, no
     // Stripe — before they ever see the paywall. After that they must start a

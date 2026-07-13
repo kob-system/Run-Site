@@ -83,24 +83,33 @@ export default async function handler(req, res) {
     // grant the 7-day trial ONLY to an owner who has never subscribed before.
     let existingCustomer = null
     let hadPriorSub = false
+    let rows
     try {
-      const rows = await sbGet(
+      rows = await sbGet(
         `subscriptions?owner_id=eq.${encodeURIComponent(user.id)}&select=stripe_customer_id,stripe_subscription_id,status`
       )
-      const row = rows && rows[0]
-      if (row) {
-        if (row.stripe_customer_id) existingCustomer = row.stripe_customer_id
-        if (row.stripe_subscription_id) hadPriorSub = true
-        // 'comp' is a grandfathered/free grant — block checkout too, so a comp'd
-        // owner can't start a paid subscription that the webhook would upsert on
-        // top of (and silently overwrite) their comp status.
-        if (['active', 'trialing', 'past_due', 'comp'].includes(row.status)) {
-          return res.status(409).json({
-            error: 'You already have an active subscription — use Manage billing to change your plan.',
-          })
-        }
+    } catch (readErr) {
+      // A read FAILURE is not the same as "no prior subscription." Swallowing it
+      // and falling through would let a genuine infra/RLS error mint a duplicate
+      // Stripe customer AND grant a fresh 7-day trial to a returning subscriber
+      // (trial farming). The subscriptions table exists in prod, so this path is
+      // a real error — fail closed and ask the owner to retry.
+      console.error('create-checkout-session: subscription read failed:', readErr)
+      return res.status(503).json({ error: 'Could not verify your billing status. Please try again.' })
+    }
+    const row = rows && rows[0]
+    if (row) {
+      if (row.stripe_customer_id) existingCustomer = row.stripe_customer_id
+      if (row.stripe_subscription_id) hadPriorSub = true
+      // 'comp' is a grandfathered/free grant — block checkout too, so a comp'd
+      // owner can't start a paid subscription that the webhook would upsert on
+      // top of (and silently overwrite) their comp status.
+      if (['active', 'trialing', 'past_due', 'comp'].includes(row.status)) {
+        return res.status(409).json({
+          error: 'You already have an active subscription — use Manage billing to change your plan.',
+        })
       }
-    } catch { /* table may not exist yet; fall through to email */ }
+    }
 
     const params = {
       mode: 'subscription',
