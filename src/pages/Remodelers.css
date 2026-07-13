@@ -38,7 +38,7 @@
 .rl-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
 @media (min-width: 640px) { .rl-grid { grid-template-columns: 1fr 1fr; } }
 .rl-feature { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
-.rl-feature .rl-emoji { font-size: 26px; }
+.rl-feature .rl-icon { display: inline-flex; color: var(--orange); }
 .rl-feature h3 { font-size: 17px; font-weight: 700; margin: 10px 0 6px; }
 .rl-feature p { font-size: 14px; color: var(--text-secondary); }
 

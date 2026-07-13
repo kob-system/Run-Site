@@ -68,7 +68,11 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
   const exportData = async () => {
     setErr(''); setBusy('export')
     try {
-      const tables = ['projects', 'receipts', 'time_entries', 'invoices', 'estimates', 'change_orders', 'material_items']
+      const tables = [
+        'projects', 'receipts', 'time_entries', 'invoices', 'estimates',
+        'change_orders', 'material_items', 'daily_logs', 'punch_items',
+        'job_photos', 'warranties',
+      ]
       const dump = { exported_at: new Date().toISOString(), account: profile && profile.email }
       for (const t of tables) {
         const { data, error } = await supabase.from(t).select('*')
@@ -106,6 +110,14 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
             ? ` — ${status === 'trialing' ? 'trial ends' : status === 'past_due' ? 'retry by' : 'renews'} ${periodEnd.toLocaleDateString()}`
             : ''}
           . Use <strong>Manage billing</strong> below to change your plan, update your card, or cancel.
+        </p>
+      ) : status ? (
+        // A prior sub row exists but it's not active (canceled / unpaid /
+        // expired) — a RETURNING owner, not a new account. The 7-day free trial
+        // is for new accounts only, so don't promise it again here.
+        <p style={{ color: '#667085', marginTop: 0 }}>
+          Your subscription isn’t active. Resubscribe below to restore full access — billing starts today
+          (the free trial is for new accounts only). Your data is safe and you can cancel anytime from Manage billing.
         </p>
       ) : (
         <p style={{ color: '#667085', marginTop: 0 }}>
