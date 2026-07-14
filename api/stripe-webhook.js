@@ -28,14 +28,20 @@ async function readRawBody(req) {
 // parsed event on success, or null if the signature is missing/invalid/stale.
 function verify(rawBody, sigHeader) {
   if (!sigHeader || !WEBHOOK_SECRET) return null
-  const parts = {}
+  // Stripe sends one `t` and ONE OR MORE `v1` signatures (one per active signing
+  // secret). During a secret rotation both the old and new secret produce a v1;
+  // collect them all and accept if ANY matches, so rotation doesn't 400 events.
+  let t = null
+  const v1s = []
   for (const piece of sigHeader.split(',')) {
     const i = piece.indexOf('=')
-    if (i > 0) parts[piece.slice(0, i)] = piece.slice(i + 1)
+    if (i <= 0) continue
+    const key = piece.slice(0, i)
+    const val = piece.slice(i + 1)
+    if (key === 't') t = val
+    else if (key === 'v1') v1s.push(val)
   }
-  const t = parts.t
-  const v1 = parts.v1
-  if (!t || !v1) return null
+  if (!t || v1s.length === 0) return null
 
   // Reject events older than 5 minutes to blunt replay.
   const ageSec = Math.floor(Date.now() / 1000) - Number(t)
@@ -46,8 +52,11 @@ function verify(rawBody, sigHeader) {
     .update(`${t}.${rawBody}`, 'utf8')
     .digest('hex')
   const a = Buffer.from(expected)
-  const b = Buffer.from(v1)
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null
+  const matched = v1s.some((v1) => {
+    const b = Buffer.from(v1)
+    return a.length === b.length && crypto.timingSafeEqual(a, b)
+  })
+  if (!matched) return null
 
   try { return JSON.parse(rawBody) } catch { return null }
 }
@@ -225,8 +234,16 @@ export default async function handler(req, res) {
       case 'invoice.payment_failed': {
         // Reflect the dunning state; the subscription.updated event usually
         // covers this too, but handle it directly in case it arrives first.
-        if (obj.subscription) {
-          const sub = await stripeGet('subscriptions/' + obj.subscription)
+        // On the pinned 2026-06-24.dahlia API the top-level invoice.subscription
+        // field is gone — the ref lives at parent.subscription_details.subscription.
+        // Read the new location first, fall back to legacy top-level.
+        const subId =
+          obj.subscription ||
+          (obj.parent &&
+            obj.parent.subscription_details &&
+            obj.parent.subscription_details.subscription)
+        if (subId) {
+          const sub = await stripeGet('subscriptions/' + subId)
           const row = await rowFromSubscription(sub, null)
           await applyRow(row, event.created)
         }

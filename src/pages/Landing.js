@@ -288,7 +288,7 @@ export default function Landing() {
       {/* Final CTA */}
       <section className="ld-final">
         <h2>Know your number before the job's over.</h2>
-        <p>Set up takes about five minutes. Your crew clocks in tomorrow morning.</p>
+        <p>Setup takes about five minutes. Your crew clocks in tomorrow morning.</p>
         <a className="ld-cta" href={SIGNUP_URL}>Start free — no card needed</a>
       </section>
 

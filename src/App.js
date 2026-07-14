@@ -175,10 +175,21 @@ export default function App() {
     const wantsBilling =
       new URLSearchParams(window.location.search).has('billing') ||
       window.location.hash === '#billing'
+    const subStatus = sub && sub.status
     const active =
-      sub &&
-      ['active', 'trialing', 'comp'].includes(sub.status) &&
-      (!sub.current_period_end || new Date(sub.current_period_end) > new Date())
+      // comp = grandfathered/free grant; no period end to check.
+      subStatus === 'comp' ||
+      // Dunning grace: a paying owner whose renewal charge just failed goes
+      // past_due while Stripe retries (~2 weeks). Keep them in the app during
+      // that window instead of instant-locking a real customer. When Stripe
+      // exhausts retries it flips them to canceled/unpaid, which lands here as
+      // active=false and locks — the correct terminal state.
+      subStatus === 'past_due' ||
+      // active/trialing require a REAL future period end. A null period end no
+      // longer fails open (it used to grant indefinite access to a stale row).
+      ((subStatus === 'active' || subStatus === 'trialing') &&
+        !!sub.current_period_end &&
+        new Date(sub.current_period_end) > new Date())
 
     // New owners get a 7-day no-card free window from signup — full app, no
     // Stripe — before they ever see the paywall. After that they must start a

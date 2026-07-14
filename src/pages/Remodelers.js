@@ -11,27 +11,49 @@ import './Remodelers.css'
 // window — no invented trials, no invented pricing.
 const SIGNUP_URL = '/login?signup=1'
 
+// Clean stroke icons (inherit color via CSS `currentColor`) instead of emoji —
+// emoji render inconsistently across devices and read as unpolished on a public
+// marketing page.
+const svgProps = {
+  viewBox: '0 0 24 24', width: 26, height: 26, fill: 'none', stroke: 'currentColor',
+  strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+}
+const ICONS = {
+  pin: (
+    <svg {...svgProps}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
+  ),
+  receipt: (
+    <svg {...svgProps}><path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21Z" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h4" /></svg>
+  ),
+  money: (
+    <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M12 7v10" /><path d="M14.5 9.3a2.3 2.3 0 0 0-2.2-1.3h-.9a1.9 1.9 0 0 0 0 3.8h1.2a1.9 1.9 0 0 1 0 3.8h-1a2.3 2.3 0 0 1-2.2-1.4" /></svg>
+  ),
+  doc: (
+    <svg {...svgProps}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></svg>
+  ),
+}
+
 const FEATURES = [
   {
-    emoji: '📍',
+    icon: 'pin',
     title: 'Crew clock-in with GPS',
     body:
       "Your guys tap one button on their phone and they're on the clock — with a GPS stamp showing they were at the job when they hit it. You get an email the moment anyone clocks in or out. No more \"I was there at 7.\"",
   },
   {
-    emoji: '🧾',
+    icon: 'receipt',
     title: 'Snap a receipt, done',
     body:
       'Take a photo at the register. JobTally reads the store and the amount and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing.',
   },
   {
-    emoji: '💰',
+    icon: 'money',
     title: 'Per-job profit, live',
     body:
       "Every job shows what you're charging, what's gone out in labor and materials, and what's left for you — while the job is still running, not three months later when it's too late to fix.",
   },
   {
-    emoji: '📄',
+    icon: 'doc',
     title: 'Estimate → invoice → paid',
     body:
       'Write the estimate on your phone, turn it into an invoice with one tap, and see exactly who still owes you what. The money you already earned stops slipping through the cracks.',
@@ -150,7 +172,7 @@ export default function Remodelers() {
           <div className="rl-grid">
             {FEATURES.map((f) => (
               <div className="rl-feature" key={f.title}>
-                <span className="rl-emoji" aria-hidden="true">{f.emoji}</span>
+                <span className="rl-icon" aria-hidden="true">{ICONS[f.icon]}</span>
                 <h3>{f.title}</h3>
                 <p>{f.body}</p>
               </div>
