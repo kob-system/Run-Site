@@ -8,6 +8,8 @@
 // thing we DON'T trust from the client is who used it — `used_by` is derived
 // from a verified Supabase JWT when the caller has a session, and left null
 // otherwise, so a caller can't stamp an arbitrary uuid as the user.
+import { rateOk } from './_ratelimit'
+
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
@@ -29,7 +31,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
   const { token } = req.body || {}
-  if (!token) return res.status(400).json({ error: 'Missing token' })
+  if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Missing token' })
+
+  // Per-IP throttle on the unauth service-role write. Fails open.
+  if (!(await rateOk(req, 'claim_invite', 30, 600))) {
+    return res.status(429).json({ error: 'Too many attempts, please try again shortly' })
+  }
 
   try {
     const base = SUPABASE_URL

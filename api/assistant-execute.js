@@ -263,12 +263,21 @@ async function resolveMyJob(userToken, jobName) {
   return { project: data[0] }
 }
 
+// The origin to use for internal API calls and user-facing links. The browser's
+// Origin header can be the apex (https://getjobtally.com), but the apex
+// 308-redirects to www and DROPS the POST body — so an internal POST to the apex
+// silently loses its payload. Force the www host to avoid that.
+function appOrigin(ctx) {
+  let o = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://www.getjobtally.com'
+  return o.replace('https://getjobtally.com', 'https://www.getjobtally.com')
+}
+
 // Owner email on worker clock in/out — same endpoint the dashboard uses; it
 // re-resolves worker/owner/job server-side from the worker's JWT, so nothing
 // here is trusted. Best-effort: a failed email never fails the clock action.
 async function notifyOwner(ctx, projectId, action, timestamp) {
   try {
-    const origin = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://www.getjobtally.com'
+    const origin = appOrigin(ctx)
     await fetch(`${origin}/api/notify-owner`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.token}` },
@@ -818,8 +827,7 @@ async function runTool(tool, args, ctx) {
       owner_id: uid, token: inviteToken, worker_name: workerName,
     })
     if (!ok) return { error: BLOCKED }
-    const origin = typeof ctx.origin === 'string' && ctx.origin.startsWith('https://') ? ctx.origin : 'https://www.getjobtally.com'
-    const link = `${origin}/?invite=${inviteToken}`
+    const link = `${appOrigin(ctx)}/?invite=${inviteToken}`
     return {
       ok: true,
       message: `Invite for ${workerName} is ready — text them this link to join your crew:\n${link}`,
@@ -963,7 +971,19 @@ async function runTool(tool, args, ctx) {
       gps_lat: null,
       gps_lng: null,
     })
-    if (!ok) return { error: 'Clock-in was blocked — check with your boss that you’re still on that job.' }
+    if (!ok) {
+      // A failed insert is ambiguous: a genuine RLS/assignment block, OR a
+      // duplicate clock-in that lost the check-then-insert race (two taps) —
+      // which the partial unique index on (worker_id) WHERE clocked_out_at IS
+      // NULL turns into a 409. Re-check for an open entry: if one exists now,
+      // they're already clocked in — say that instead of the misleading
+      // "check with your boss" (which reads as "you're off the job").
+      const recheck = await userReq(token, `time_entries?worker_id=eq.${uid}&clocked_out_at=is.null&select=id&limit=1`, 'GET')
+      if (recheck.ok && Array.isArray(recheck.data) && recheck.data.length > 0) {
+        return { error: 'You are already clocked in — clock out first.' }
+      }
+      return { error: 'Clock-in was blocked — check with your boss that you’re still on that job.' }
+    }
     const row = Array.isArray(data) ? data[0] : data
     await notifyOwner(ctx, resolved.project.id, 'in', clockInTime)
     return {
