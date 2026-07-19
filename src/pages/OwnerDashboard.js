@@ -285,6 +285,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [showNewInvoice, setShowNewInvoice] = useState(false)
   const [photoLightbox, setPhotoLightbox] = useState(null)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [photoNote, setPhotoNote] = useState('') // optional note attached to the owner's next photo
   const [logForm, setLogForm] = useState({ log_date: '', weather: '', note: '' })
   const [changeForm, setChangeForm] = useState({ description: '', amount: '', status: 'approved' })
   const [invoiceForm, setInvoiceForm] = useState({ project_id: '', label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' })
@@ -964,10 +965,18 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const fileName = `${profile.id}/jobphotos/${Date.now()}_${file.name}`
       const { error: upErr } = await supabase.storage.from('receipts').upload(fileName, file)
       if (upErr) throw upErr
-      const { error } = await supabase.from('job_photos').insert({
-        owner_id: profile.id, project_id: selectedProject.id, photo_url: fileName, caption: null
-      })
+      const row = {
+        owner_id: profile.id, project_id: selectedProject.id, photo_url: fileName,
+        caption: photoNote.trim() || null, uploaded_by_name: 'You'
+      }
+      let { error } = await supabase.from('job_photos').insert(row)
+      // Retry without uploaded_by_name if FIX-DATABASE-21 isn't applied yet (42703).
+      if (error && error.code === '42703') {
+        const { uploaded_by_name, ...legacy } = row
+        ;({ error } = await supabase.from('job_photos').insert(legacy))
+      }
       if (error) throw error
+      setPhotoNote('')
       await refetchJobPhotos(); showToast('Photo added ✓')
     } catch (err) { showToast('Photo upload failed', 'error') }
     setUploadingPhoto(false)
@@ -1889,6 +1898,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
           {projectTab === 'photos' && (
             <div>
+              <input
+                type="text"
+                value={photoNote}
+                onChange={(e) => setPhotoNote(e.target.value)}
+                placeholder="Optional note for the next photo you add"
+                maxLength={140}
+                style={{ width: '100%', boxSizing: 'border-box', marginBottom: '8px', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
+              />
               <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
                 {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
                 {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
@@ -1896,8 +1913,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
                 {jobPhotos.map(ph => (
-                  <JobPhoto key={ph.id} path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption} onClick={() => setPhotoLightbox(ph)}
-                    style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px', cursor: 'pointer' }} />
+                  <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ cursor: 'pointer' }}>
+                    <JobPhoto path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption}
+                      style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px' }} />
+                    {ph.uploaded_by_name && ph.uploaded_by_name !== 'You' && (
+                      <p style={{ fontSize: '10px', color: '#717171', margin: '3px 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👷 {ph.uploaded_by_name}</p>
+                    )}
+                  </div>
                 ))}
               </div>
               {jobPhotos.length === 0 && <div className="empty-state"><p>No photos yet. Snap before/after shots — great for clients and your portfolio.</p></div>}
@@ -2238,7 +2260,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 <button aria-label="Close" onClick={() => setPhotoLightbox(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
               </div>
               <JobPhoto path={photoLightbox.photo_url} alt={photoLightbox.caption} style={{ width: '100%', borderRadius: '12px', objectFit: 'contain', maxHeight: '60vh', background: '#eef1f5' }} />
-              <p style={{ fontSize: '12px', color: '#717171', marginTop: '10px' }}>{photoLightbox.created_at ? new Date(photoLightbox.created_at).toLocaleDateString() : ''}</p>
+              <p style={{ fontSize: '12px', color: '#717171', marginTop: '10px' }}>{photoLightbox.uploaded_by_name && photoLightbox.uploaded_by_name !== 'You' ? '👷 ' + photoLightbox.uploaded_by_name + ' · ' : ''}{photoLightbox.created_at ? new Date(photoLightbox.created_at).toLocaleString() : ''}</p>
               <button onClick={() => deleteJobPhoto(photoLightbox)} style={{ marginTop: '16px', width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #DC2626', background: 'white', color: '#DC2626', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>Delete photo</button>
             </div>
           </div>
