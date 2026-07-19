@@ -59,6 +59,13 @@ export default function WorkerDashboard({ profile }) {
   const [statusError, setStatusError] = useState('')
   // Which job is mid-upload, so the "Uploading…" state shows on just that card.
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState(null)
+  // Photos the crew has added, keyed by project id → [rows]. Signed thumbnail
+  // URLs are batched into photoUrls (path → url). photoNote holds the optional
+  // per-job "note" draft the worker can attach to the next photo they add.
+  const [jobPhotos, setJobPhotos] = useState({})
+  const [photoUrls, setPhotoUrls] = useState({})
+  const [photoNote, setPhotoNote] = useState({})
+  const [photoLightbox, setPhotoLightbox] = useState(null)
   // Time-off requests this worker has filed (with owner's decision).
   const [timeOff, setTimeOff] = useState([])
   const [timeOffForm, setTimeOffForm] = useState({ start_date: '', end_date: '', reason: '' })
@@ -108,6 +115,7 @@ export default function WorkerDashboard({ profile }) {
     fetchSchedule()
     fetchHistory()   // populate the "This week" summary up front
     fetchTimeOff()
+    fetchJobPhotos()
   }, [])
 
   // One assigned job? Always pin selection to it so a reassignment is reflected.
@@ -133,6 +141,7 @@ export default function WorkerDashboard({ profile }) {
       fetchAssignedProjects()
       fetchSchedule()
       fetchHistory()
+      fetchJobPhotos()
     }
   }, [isOnline])
 
@@ -324,15 +333,52 @@ export default function WorkerDashboard({ profile }) {
       const fileName = `${project.owner_id}/jobphotos/${Date.now()}_${file.name}`
       const { error: upErr } = await supabase.storage.from('receipts').upload(fileName, file)
       if (upErr) throw upErr
-      const { error } = await supabase.from('job_photos').insert({
-        owner_id: project.owner_id, project_id: project.id, photo_url: fileName, caption: null
-      })
+      const caption = (photoNote[project.id] || '').trim() || null
+      const row = {
+        owner_id: project.owner_id, project_id: project.id, photo_url: fileName,
+        caption, uploaded_by_name: profile.full_name || 'Crew'
+      }
+      let { error } = await supabase.from('job_photos').insert(row)
+      // If FIX-DATABASE-21 hasn't been applied yet, the uploaded_by_name column
+      // won't exist (Postgres 42703). Retry without it so uploads never break.
+      if (error && error.code === '42703') {
+        const { uploaded_by_name, ...legacy } = row
+        ;({ error } = await supabase.from('job_photos').insert(legacy))
+      }
       if (error) throw error
-      showToast('Photo sent to your boss ✓')
+      setPhotoNote(prev => ({ ...prev, [project.id]: '' }))
+      showToast('Photo added ✓')
+      fetchJobPhotos()
     } catch (err) {
       showToast('Photo upload failed — try again')
     }
     setUploadingPhotoFor(null)
+  }
+
+  // Load the photos for every job this worker is on (so the crew can see the
+  // shots back, not just fire-and-forget them). Reads are allowed by the
+  // worker_select_job_photos row policy; the thumbnails are signed by the
+  // receipts_worker_read_jobphotos storage policy (both FIX-DATABASE-10/-21).
+  // If the storage policy isn't applied yet, signing simply yields no URL and
+  // the tile shows a 📷 placeholder — nothing errors.
+  const fetchJobPhotos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('job_photos').select('*').order('created_at', { ascending: false })
+      if (error) throw error
+      const byProject = {}
+      ;(data || []).forEach(p => { (byProject[p.project_id] ||= []).push(p) })
+      setJobPhotos(byProject)
+      const paths = (data || []).map(p => p.photo_url).filter(u => u && !/^https?:\/\//.test(u))
+      if (paths.length) {
+        const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 3600)
+        const map = {}
+        ;(signed || []).forEach(s => { if (s && s.signedUrl && s.path) map[s.path] = s.signedUrl })
+        setPhotoUrls(map)
+      }
+    } catch (e) {
+      // non-fatal — the Add Photo button still works without the gallery
+    }
   }
 
   const fetchSchedule = async () => {
@@ -738,6 +784,26 @@ export default function WorkerDashboard({ profile }) {
                           <input type="file" accept="image/*" onChange={(e) => addWorkerPhoto(e, p)} disabled={uploadingPhotoFor === p.id} style={{ display: 'none' }} />
                         </label>
                       </div>
+                      <input
+                        type="text"
+                        value={photoNote[p.id] || ''}
+                        onChange={(e) => setPhotoNote(prev => ({ ...prev, [p.id]: e.target.value }))}
+                        placeholder="Optional note for the next photo (e.g. framing done)"
+                        maxLength={140}
+                        style={{ width: '100%', boxSizing: 'border-box', marginTop: '10px', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
+                      />
+                      {(jobPhotos[p.id] || []).length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginTop: '10px' }}>
+                          {(jobPhotos[p.id] || []).map(ph => {
+                            const src = /^https?:\/\//.test(ph.photo_url) ? ph.photo_url : photoUrls[ph.photo_url]
+                            return (
+                              <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ width: '100%', aspectRatio: '1 / 1', borderRadius: '8px', overflow: 'hidden', background: '#eef1f5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', cursor: 'pointer' }}>
+                                {src ? <img src={src} alt={ph.caption || 'Job photo'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '📷'}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -872,6 +938,26 @@ export default function WorkerDashboard({ profile }) {
           </div>
         </div>
       )}
+
+      {photoLightbox && (() => {
+        const src = /^https?:\/\//.test(photoLightbox.photo_url) ? photoLightbox.photo_url : photoUrls[photoLightbox.photo_url]
+        return (
+          <div onClick={() => setPhotoLightbox(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: '16px', padding: '16px', maxWidth: '480px', width: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h2 style={{ fontSize: '16px', fontWeight: '700' }}>{photoLightbox.caption || 'Job photo'}</h2>
+                <button aria-label="Close" onClick={() => setPhotoLightbox(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#888' }}>×</button>
+              </div>
+              {src
+                ? <img src={src} alt={photoLightbox.caption || 'Job photo'} style={{ width: '100%', borderRadius: '12px', objectFit: 'contain', maxHeight: '60vh', background: '#eef1f5' }} />
+                : <div style={{ width: '100%', height: '200px', borderRadius: '12px', background: '#eef1f5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', fontSize: '32px' }}>📷</div>}
+              <p style={{ fontSize: '12px', color: '#717171', marginTop: '10px' }}>
+                {photoLightbox.uploaded_by_name ? `${photoLightbox.uploaded_by_name} · ` : ''}{photoLightbox.created_at ? new Date(photoLightbox.created_at).toLocaleString() : ''}
+              </p>
+            </div>
+          </div>
+        )
+      })()}
 
       {toast && (
         <div style={{
