@@ -68,7 +68,9 @@ export default async function handler(req, res) {
   // known-partner allowlist are honored, so a random or spoofed ?ref= can't
   // manufacture a commission-eligible attribution. Add partners here as they
   // sign on. Stamped onto the subscription + session metadata for payout.
-  const VALID_REFERRERS = ['josh']
+  // 'josh' pays a commission. 'fb' is a channel tag, not a partner — it tells us
+  // which Facebook group work actually converted, so the 20-min/day is measurable.
+  const VALID_REFERRERS = ['josh', 'fb']
   const rawRef = req.body && req.body.ref
   const cleanRef =
     typeof rawRef === 'string'

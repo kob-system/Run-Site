@@ -4,6 +4,11 @@
       "source": "/josh",
       "destination": "/remodelers?ref=josh&utm_source=flyer&utm_medium=referral&utm_campaign=josh-stack",
       "permanent": false
+    },
+    {
+      "source": "/fb",
+      "destination": "/remodelers?ref=fb&utm_source=facebook&utm_medium=group&utm_campaign=fb-groups",
+      "permanent": false
     }
   ],
   "rewrites": [
