@@ -57,6 +57,7 @@ export default function WorkerDashboard({ profile }) {
   const [scheduleError, setScheduleError] = useState('')
   const [clockReady, setClockReady] = useState(false)
   const [statusError, setStatusError] = useState('')
+  const [gpsIssue, setGpsIssue] = useState('')
   // Which job is mid-upload, so the "Uploading…" state shows on just that card.
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState(null)
   // Photos the crew has added, keyed by project id → [rows]. Signed thumbnail
@@ -454,13 +455,25 @@ export default function WorkerDashboard({ profile }) {
 
     let gpsLat = null
     let gpsLng = null
+    setGpsIssue('')
     try {
+      if (!navigator.geolocation) throw { code: 0 }
       const pos = await new Promise((resolve, reject) =>
         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
       )
       gpsLat = pos.coords.latitude
       gpsLng = pos.coords.longitude
-    } catch {}
+    } catch (e) {
+      // The clock-in still goes through without GPS — but never swallow the
+      // reason. A silent failure here hid a site-wide GPS outage for a week.
+      const code = e && e.code
+      setGpsIssue(
+        code === 1 ? 'Location is blocked for this site. Tap the lock icon in your browser bar and allow Location, then clock out and back in.'
+        : code === 2 ? "Your phone couldn't get a fix (no signal or GPS off). Your hours are saved — only the location is missing."
+        : code === 3 ? 'Getting your location timed out. Your hours are saved — only the location is missing.'
+        : "This browser can't share location. Your hours are saved — only the location is missing."
+      )
+    }
 
     const clockInTime = new Date().toISOString()
     const jobName = projects.find(p => p.id === selectedProject)?.name || ''
@@ -709,8 +722,13 @@ export default function WorkerDashboard({ profile }) {
                 <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '4px' }}>{activeJobAddress}</p>
               )}
               <p style={{ fontSize: '12px', fontWeight: '600', color: (currentEntry && currentEntry.gps_lat != null) ? '#16A34A' : '#9CA3AF', marginBottom: '4px' }}>
-                {!currentEntry ? '📍 GPS off' : (currentEntry.gps_lat != null ? '📍 GPS on — stamping your start/stop' : '📍 Clocked in — location unavailable')}
+                {!currentEntry ? '📍 GPS off' : (currentEntry.gps_lat != null ? '📍 GPS on — start location stamped' : '📍 Clocked in — location unavailable')}
               </p>
+              {currentEntry && currentEntry.gps_lat == null && gpsIssue && (
+                <p style={{ fontSize: '12px', color: '#B45309', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '8px', padding: '8px 10px', margin: '0 0 8px', textAlign: 'left', lineHeight: 1.4 }}>
+                  {gpsIssue}
+                </p>
+              )}
               {currentEntry
                 ? <div className="timer-display">{formatTimerDisplay(timer)}</div>
                 : <p style={{ fontSize: '15px', color: '#4B5563', margin: '10px 0 16px' }}>Tap the big button below when you get to the job.</p>}
