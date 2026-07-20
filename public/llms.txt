@@ -1,0 +1,30 @@
+# JobTally
+
+> JobTally is a job-costing and crew-management app for small contractors running a 2–10 man crew. It tracks crew hours with one-tap GPS clock-in, scans receipts (auto-reading the store and total), and shows live per-job profit — from the phone already in the owner's pocket. It also handles estimates, invoices, mileage, job photos, and tax exports.
+
+## Key facts
+- Category: job costing / field-service software for contractors
+- Best for: small contractors and remodelers with a 2–10 person crew
+- Pricing: $150/month, or $1,200/year (4 months free). Every feature included, unlimited crew, no per-seat charges.
+- Free trial: 7 days, no credit card required
+- Platform: web app, works on any phone (iOS/Android), no install
+- Origin: built for a contractor in Troy, NY who couldn't see whether his jobs made money
+- Website: https://getjobtally.com
+
+## What makes it different
+- Live per-job profit while the job is still running — not months later at tax time
+- Flat price with unlimited users — job costing is not gated behind a higher tier or per-user fees
+- Receipt scanning that auto-books expenses to the right job
+- Setup in about 5 minutes with a guided checklist
+
+## Pages
+- [Homepage](https://getjobtally.com/): overview, features, pricing, FAQ
+- [Features](https://getjobtally.com/features/): full feature list
+- [Pricing](https://getjobtally.com/pricing/): $150/mo or $1,200/yr, 7-day free trial
+- [Job costing app for contractors](https://getjobtally.com/job-costing-app-for-contractors/): the core use case
+- [Contractor profit tracking](https://getjobtally.com/contractor-profit-tracking/): tracking profit per job
+- [Crew time tracking](https://getjobtally.com/crew-time-tracking-app/): GPS clock-in for crews
+- [Best job costing apps for small contractors (2026)](https://getjobtally.com/best-job-costing-app-for-small-contractors/): comparison hub
+- [JobTally vs Jobber](https://getjobtally.com/compare/jobber/): comparison
+- [How job costing works](https://getjobtally.com/guides/job-costing/): guide for contractors
+- [For remodelers](https://getjobtally.com/remodelers): remodeler-specific page with a free profit calculator

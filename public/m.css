@@ -1,0 +1,74 @@
+/* JobTally marketing / SEO pages — shared stylesheet (self-hosted, CSP-safe). */
+:root{
+  --navy:#1C2B3A; --navy2:#33445a; --muted:#6b7a8d; --line:#e3e8ee;
+  --bg:#f4f6f9; --card:#ffffff; --accent:#1C2B3A; --ok:#16794c; --warn:#b45309;
+  --maxw:920px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--navy);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--navy)}
+img{max-width:100%;height:auto}
+
+/* nav */
+.m-nav{background:var(--navy);color:#fff}
+.m-nav-in{max-width:var(--maxw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:14px 22px}
+.m-nav a{color:#fff;text-decoration:none}
+.m-logo{font-weight:800;font-size:20px;letter-spacing:-.5px}
+.m-nav nav a{margin-left:18px;font-size:15px;opacity:.9}
+.m-nav nav a:hover{opacity:1}
+.m-nav .m-cta{background:#fff;color:var(--navy);padding:8px 14px;border-radius:8px;font-weight:700;opacity:1}
+
+/* layout */
+.m-wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+.m-hero{padding:52px 22px 30px;max-width:var(--maxw);margin:0 auto}
+.m-eyebrow{text-transform:uppercase;letter-spacing:1px;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:12px}
+h1{font-size:34px;line-height:1.15;letter-spacing:-.6px;margin-bottom:16px}
+h2{font-size:24px;line-height:1.2;letter-spacing:-.3px;margin:38px 0 14px}
+h3{font-size:18px;margin:24px 0 8px}
+p{font-size:17px;color:var(--navy2);margin-bottom:14px}
+.m-lead{font-size:19px;color:var(--navy2)}
+ul,ol{margin:0 0 16px 22px}
+li{font-size:17px;color:var(--navy2);margin-bottom:8px}
+strong{color:var(--navy)}
+section{padding:6px 22px}
+section .m-wrap{padding:0}
+
+/* verdict / callout box — the AI-quotable answer up top */
+.m-verdict{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--navy);border-radius:12px;padding:20px 22px;margin:22px auto;max-width:var(--maxw)}
+.m-verdict p{margin-bottom:0;font-size:17px}
+
+/* CTA */
+.m-cta-lg{display:inline-block;background:var(--navy);color:#fff;text-decoration:none;padding:14px 24px;border-radius:10px;font-weight:700;font-size:17px;margin:8px 0}
+.m-cta-note{font-size:14px;color:var(--muted);margin-top:6px}
+
+/* feature cards */
+.m-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:18px 0}
+.m-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+.m-card h3{margin-top:0}
+.m-card p{font-size:15px;margin-bottom:0}
+
+/* comparison table */
+.m-table-wrap{overflow-x:auto;margin:18px 0}
+table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:15px}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#eef2f6;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--navy2)}
+td.yes{color:var(--ok);font-weight:600}
+tr:last-child td{border-bottom:none}
+
+/* faq */
+.m-faq h3{margin:20px 0 6px}
+.m-faq p{margin-bottom:0}
+
+/* footer */
+.m-footer{background:var(--navy);color:#cfd8e3;margin-top:48px;padding:30px 22px}
+.m-footer-in{max-width:var(--maxw);margin:0 auto}
+.m-footer a{color:#fff;text-decoration:none;margin-right:14px;font-size:14px;line-height:2.2}
+.m-footer .m-fine{color:#9aa7b6;font-size:13px;margin-top:12px}
+
+/* final cta band */
+.m-final{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:30px;text-align:center;margin:30px auto;max-width:var(--maxw)}
+.m-final h2{margin-top:0}
+
+.m-updated{font-size:13px;color:var(--muted);margin-top:8px}
+@media(max-width:600px){h1{font-size:27px}h2{font-size:21px}.m-hero{padding-top:34px}}

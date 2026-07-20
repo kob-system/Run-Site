@@ -4,7 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#1C2B3A" />
-    <meta name="description" content="JobTally tracks your crew's hours, receipts, and per-job profit — live, from your phone. Built for contractors with a 2-10 man crew. 7 days free, no card." />
+    <title>JobTally — Job Costing &amp; Crew Tracking App for Contractors</title>
+    <meta name="description" content="JobTally is a job costing app for small contractors. Track crew hours (GPS clock-in), scan receipts, and see live per-job profit from your phone. Built for 2–10 man crews. 7 days free, no card." />
+    <meta name="keywords" content="job costing app, contractor profit tracking, crew time tracking app, construction job costing, receipt scanning app for contractors, contractor app" />
     <link rel="canonical" href="https://getjobtally.com/" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
     <meta property="og:title" content="JobTally — know what every job really makes" />
@@ -20,31 +22,166 @@
     <meta name="twitter:description" content="Crew GPS clock-in, receipt scanning, live per-job profit, estimates and invoices — from the phone in your pocket. 7 days free, no card needed." />
     <meta name="twitter:image" content="https://getjobtally.com/og-card.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <title>JobTally — know what every job really makes</title>
+
+    <!-- SoftwareApplication: what JobTally is, for search + AI answer engines -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "JobTally",
         "applicationCategory": "BusinessApplication",
+        "applicationSubCategory": "Job Costing & Field Service Software",
         "operatingSystem": "Web, iOS, Android",
         "url": "https://getjobtally.com/",
-        "description": "JobTally tracks your crew's hours, receipts, and per-job profit — live, from your phone. Built for contractors with a 2-10 man crew.",
+        "description": "JobTally is a job costing and crew management app for small contractors. It tracks crew hours with GPS clock-in, scans receipts, and shows live per-job profit — from the phone in your pocket. Built for contractors running a 2–10 man crew.",
+        "featureList": [
+          "Crew GPS time clock (one-tap clock in/out)",
+          "Receipt scanning (auto-reads store and total)",
+          "Live per-job profit tracking",
+          "Estimates and invoices from your phone",
+          "Mileage tracking",
+          "Job photos and daily logs",
+          "Reports and tax exports"
+        ],
         "offers": {
           "@type": "Offer",
           "price": "150.00",
           "priceCurrency": "USD",
-          "description": "$150/mo — every feature, unlimited crew. 7 days free, no card needed."
+          "description": "$150/mo — every feature, unlimited crew. Also $1,200/yr (4 months free). 7 days free up front, no card needed."
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "JobTally",
+          "url": "https://getjobtally.com/"
         }
       }
     </script>
+
+    <!-- Organization -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "JobTally",
+        "url": "https://getjobtally.com/",
+        "logo": "https://getjobtally.com/apple-touch-icon.png",
+        "description": "JobTally makes job costing software for small contractors — track crew hours, receipts, and per-job profit from a phone.",
+        "foundingLocation": {
+          "@type": "Place",
+          "address": { "@type": "PostalAddress", "addressLocality": "Troy", "addressRegion": "NY", "addressCountry": "US" }
+        }
+      }
+    </script>
+
+    <!-- WebSite -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "JobTally",
+        "url": "https://getjobtally.com/"
+      }
+    </script>
+
+    <!-- FAQPage: exact answers from the live landing page -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is JobTally?",
+            "acceptedAnswer": { "@type": "Answer", "text": "JobTally is a job costing and crew management app built for small contractors running a 2–10 man crew. It tracks your crew's hours with one-tap GPS clock-in, scans your receipts, and shows what every job is really making — live, from the phone already in your pocket. It also handles estimates, invoices, mileage, job photos, and tax exports." }
+          },
+          {
+            "@type": "Question",
+            "name": "How much does JobTally cost?",
+            "acceptedAnswer": { "@type": "Answer", "text": "JobTally is $150/mo with every feature included and unlimited crew — no per-seat charges. You can also pay $1,200/yr (4 months free). There is no add-on pricing." }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need a credit card to try JobTally?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. You get 7 days completely free, no card. If it earns its keep, it's $150/mo after that — every feature, unlimited crew." }
+          },
+          {
+            "@type": "Question",
+            "name": "What does my crew have to do?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Almost nothing. You text each guy an invite link, he sets a password, and from then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it." }
+          },
+          {
+            "@type": "Question",
+            "name": "I'm not a tech guy. How long is setup?",
+            "acceptedAnswer": { "@type": "Answer", "text": "About five minutes. When you first sign in, a setup guide walks you through your first job, your crew, and your first estimate and invoice — each step checks itself off as you go." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I cancel JobTally anytime?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Cancel anytime, no contract. Your data stays yours — you can export everything to a spreadsheet whenever you want, even after you cancel." }
+          }
+        ]
+      }
+    </script>
+
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f6f9; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f6f9; color: #1C2B3A; }
+      /* Static fallback shown in raw HTML for search engines / AI crawlers and as
+         a graceful loading splash. React (createRoot) clears #root and replaces
+         this the instant the app bundle runs — logged-in users never linger here. */
+      .seo-fallback { max-width: 820px; margin: 0 auto; padding: 40px 22px 64px; }
+      .seo-fallback header { text-align: center; margin-bottom: 28px; }
+      .seo-fallback .brand { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+      .seo-fallback h1 { font-size: 30px; line-height: 1.15; margin: 22px 0 12px; letter-spacing: -0.5px; }
+      .seo-fallback h2 { font-size: 20px; margin: 28px 0 10px; }
+      .seo-fallback p { font-size: 16px; line-height: 1.6; margin: 0 0 12px; color: #33445a; }
+      .seo-fallback ul { margin: 0 0 12px 20px; }
+      .seo-fallback li { font-size: 16px; line-height: 1.7; color: #33445a; }
+      .seo-fallback a.cta { display: inline-block; background: #1C2B3A; color: #fff; text-decoration: none; padding: 13px 22px; border-radius: 10px; font-weight: 700; margin: 8px 0 4px; }
+      .seo-fallback .note { font-size: 13px; color: #6b7a8d; }
+      .seo-fallback .load { text-align: center; color: #9aa7b6; font-size: 13px; margin-top: 40px; }
     </style>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
+    <noscript>You need to enable JavaScript to run the JobTally app. JobTally is a job costing app for small contractors — track crew hours, receipts, and per-job profit from your phone. Visit https://getjobtally.com to start a 7-day free trial, no card needed.</noscript>
+    <div id="root">
+      <!-- Static, crawlable fallback. React replaces this on load. -->
+      <div class="seo-fallback">
+        <header>
+          <div class="brand">JobTally</div>
+        </header>
+        <h1>Know what every job really makes.</h1>
+        <p>
+          JobTally is a <strong>job costing app for small contractors</strong>. It tracks your crew's hours,
+          your receipts, and your profit — live, from the phone already in your pocket. Built for contractors
+          running a <strong>2–10 man crew</strong>. Set up in about five minutes, works on any phone, no install.
+        </p>
+        <p><a class="cta" href="/login?signup=1">Start free — no card needed</a></p>
+        <p class="note">Free for 7 days. Then $150/mo, every feature, unlimited crew. Or $1,200/yr (4 months free).</p>
+
+        <h2>What JobTally does</h2>
+        <ul>
+          <li><strong>Crew GPS time clock</strong> — your guys clock in with one tap, GPS-stamped, so you know they were on the job.</li>
+          <li><strong>Receipt scanning</strong> — snap a photo at the register and JobTally reads the store and the total, then books it to the job.</li>
+          <li><strong>Live per-job profit</strong> — every job shows what you're charging, what's gone out in labor and materials, and what's left for you — while the job is still running, not months later.</li>
+          <li><strong>Estimates → invoices → paid</strong> — write the estimate on your phone, turn a "yes" into a job with one tap, and always see who still owes you.</li>
+          <li>Plus mileage tracking, job photos &amp; daily logs, schedule &amp; time off, reports &amp; tax exports — all included.</li>
+        </ul>
+
+        <h2>Simple pricing</h2>
+        <p>
+          One plan: <strong>$150/mo</strong>, every feature, unlimited crew — no per-seat charges, nothing gated.
+          Prefer to pay once? <strong>$1,200/yr</strong> (4 months free). Start with 7 days free, no card. Cancel anytime; your data stays yours.
+        </p>
+
+        <h2>Common questions</h2>
+        <p><strong>Do I need a credit card to try it?</strong> No — 7 days completely free, no card.</p>
+        <p><strong>What does my crew have to do?</strong> Almost nothing. Text each guy an invite link, he sets a password, and his app is basically one big Clock In / Clock Out button.</p>
+        <p><strong>How long is setup?</strong> About five minutes — a setup guide walks you through your first job, crew, estimate, and invoice.</p>
+
+        <p style="margin-top:22px"><a class="cta" href="/login?signup=1">Start free — no card needed</a></p>
+        <p class="load">Loading JobTally…</p>
+      </div>
+    </div>
   </body>
 </html>
