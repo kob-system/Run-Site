@@ -108,7 +108,15 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px' }}>
       <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>JobTally</h2>
       <h3 style={{ margin: '0 0 4px' }}>
-        {activeSub ? 'Your subscription' : (mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription')}
+        {activeSub
+          ? 'Your subscription'
+          : mode === 'paywall'
+          // A brand-new owner (no sub row at all) now lands here on their FIRST
+          // load — the card trial replaced the no-card window, so this is a
+          // welcome screen, not a cutoff. A RETURNING owner (`status` exists but
+          // isn't active) really is cut off, and gets the old heading.
+          ? (status ? 'Start your subscription to continue' : 'Start your 30-day free trial')
+          : 'Your subscription'}
       </h3>
       {activeSub ? (
         <p style={{ color: '#667085', marginTop: 0 }}>
@@ -132,8 +140,9 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
         </p>
       ) : (
         <p style={{ color: '#667085', marginTop: 0 }}>
-          New accounts start with a <strong>30-day free trial</strong> — no charge today. You enter your card on
-          Stripe's secure checkout and it auto-renews after the trial. Cancel anytime from Manage billing.
+          Pick a plan and get <strong>30 days free</strong> — <strong>$0 charged today</strong>. You enter your card on
+          Stripe's secure checkout so the app keeps running when the trial ends; billing starts on day 31.
+          Cancel anytime before then from Manage billing and you're never charged.
         </p>
       )}
 

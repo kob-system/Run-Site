@@ -8,6 +8,7 @@ import AssistantPanel from '../components/AssistantPanel'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
 import { track, EV } from '../utils/analytics'
+import { legacyFreeDaysLeft } from '../utils/trialWindow'
 
 // Deduction categories an accountant wants broken out at tax time.
 const RECEIPT_CATEGORIES = ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other']
@@ -2616,27 +2617,29 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         {activeTab === 'home' && (
           <div>
             {(() => {
-              // Free-trial countdown — so the 30-day free window (or a card trial)
-              // never ends as a surprise paywall. Hidden for paid/comp owners and
-              // when billing isn't enforced.
+              // Free-trial countdown — so the trial never ends as a surprise
+              // charge. Hidden for paid/comp owners and when billing isn't
+              // enforced. Two sources, in order: the real Stripe trial end
+              // (today's model) and, for grandfathered accounts only, what's
+              // left of the old no-card window (utils/trialWindow.js — the same
+              // rule public.has_app_access enforces on writes).
               const paid = sub && ['active', 'comp'].includes(sub.status)
               if (!billingEnforced || paid) return null
               let daysLeft = null, isCardTrial = false
               if (sub && sub.status === 'trialing' && sub.current_period_end) {
                 daysLeft = Math.max(0, Math.ceil((new Date(sub.current_period_end).getTime() - Date.now()) / 86400000))
                 isCardTrial = true
-              } else if (profile.created_at) {
-                // Must match FREE_WINDOW_DAYS in src/App.js and the interval in
-                // public.has_app_access (FIX-DATABASE-24). If this number drifts
-                // the banner counts down to a paywall that isn't there yet.
-                const msLeft = new Date(profile.created_at).getTime() + 30 * 86400000 - Date.now()
-                if (msLeft > 0) daysLeft = Math.max(1, Math.ceil(msLeft / 86400000))
+              } else {
+                daysLeft = legacyFreeDaysLeft(profile)
               }
               if (daysLeft === null) return null
               const urgent = daysLeft <= 2
+              // Say the charge out loud. An owner who forgot a card is on file
+              // and gets billed on day 31 is a chargeback and a bad review; one
+              // who was told the date every time they opened the app is not.
               const label = isCardTrial
-                ? `Trial — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left`
-                : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your free trial · no card needed`
+                ? `Free trial — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left, then billing starts`
+                : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your free trial`
               return (
                 <div role="button" tabIndex={0} onClick={() => window.location.assign('?billing')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.assign('?billing') } }}
                   style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '12px', padding: '10px 14px', borderRadius: '10px', border: '1px solid ' + (urgent ? '#FCA5A5' : '#FED7AA'), background: urgent ? '#FEF2F2' : '#FFF7ED' }}>

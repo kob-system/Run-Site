@@ -122,7 +122,7 @@ export default async function handler(req, res) {
             <p style="margin: 16px 0 0;">
               <a href="${APP_URL}/?signup=1&utm_source=lead-email&utm_medium=email&utm_campaign=calculator"
                  style="display:inline-block;background:#E07B2A;color:#fff;font-weight:700;font-size:15px;padding:12px 20px;border-radius:8px;text-decoration:none;">
-                Start free — no card needed
+                Start your 30-day free trial
               </a>
             </p>
             <p style="font-size: 12px; color: #888; margin: 16px 0 0;">

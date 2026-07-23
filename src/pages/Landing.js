@@ -65,7 +65,7 @@ const INCLUDED = [
 const FAQS = [
   {
     q: 'Do I need a credit card to try it?',
-    a: 'No. You get 30 days completely free, no card. If it earns its keep, it’s $150/mo after that — every feature, unlimited crew.',
+    a: 'You put a card in at signup, but you are not charged for 30 days — JobTally bills $0 during the trial, and if you cancel before day 31 you pay nothing. After that it’s $150/mo — every feature, unlimited crew.',
   },
   {
     q: 'What does my crew have to do?',
@@ -134,8 +134,8 @@ export default function Landing() {
               from the phone already in your pocket. Built for contractors running a
               2–10 man crew.
             </p>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free — no card needed</a>
-            <div className="ld-cta-note">Free for 30 days. Then $150/mo, everything included.</div>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start your 30-day free trial</a>
+            <div className="ld-cta-note">Free for 30 days — $0 charged today. Then $150/mo, everything included.</div>
             <ul className="ld-trust">
               <li>Set up in ~5 minutes</li>
               <li>Works on any phone</li>
@@ -238,7 +238,7 @@ export default function Landing() {
               you through your first job, your crew, your first estimate and invoice, checking
               each step off automatically as you go.
             </p>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('home')}>Start free — no card needed</a>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('home')}>Start your 30-day free trial</a>
           </div>
         </div>
       </section>
@@ -262,7 +262,7 @@ export default function Landing() {
             <div className="ld-step">
               <span className="ld-step-num">1</span>
               <h3>Create your account</h3>
-              <p>Two minutes, no card. Name, company, done.</p>
+              <p>Two minutes. Name, company, card, done.</p>
             </div>
             <div className="ld-step">
               <span className="ld-step-num">2</span>
@@ -313,11 +313,11 @@ export default function Landing() {
             <ul>
               <li>Unlimited crew — no per-seat charges</li>
               <li>Every feature included, nothing gated</li>
-              <li>30 days free up front, no card needed</li>
+              <li>30 days free up front — $0 charged today</li>
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free — no card needed</a>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start your 30-day free trial</a>
             <p className="ld-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
             </p>
@@ -344,7 +344,7 @@ export default function Landing() {
       <section className="ld-final">
         <h2>Know your number before the job's over.</h2>
         <p>Setup takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="ld-cta" href={SIGNUP_URL} onClick={cta('final')}>Start free — no card needed</a>
+        <a className="ld-cta" href={SIGNUP_URL} onClick={cta('final')}>Start your 30-day free trial</a>
       </section>
 
       <footer className="ld-footer">

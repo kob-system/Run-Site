@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient'
 import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import { track, trackOnce, setAnalyticsUser, EV } from './utils/analytics'
 import { seedSampleJob } from './utils/sampleJob'
+import { legacyFreeDaysLeft } from './utils/trialWindow'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
@@ -238,23 +239,18 @@ export default function App() {
       // access to a stale row).
       ((subStatus === 'active' || subStatus === 'trialing') && periodEndValid)
 
-    // New owners get a 30-day no-card free window from signup — full app, no
-    // Stripe — before they ever see the paywall. After that they must start a
-    // (card-based) trial or subscribe. The DB enforces the same window on writes
-    // (public.has_app_access), so this isn't just a client-side gate.
+    // The trial is now a CARD trial: a new owner hits this paywall on their
+    // first load, enters a card on Stripe Checkout, and comes back with
+    // status='trialing' — 30 free days, no charge, cancel anytime. That path is
+    // covered by `active` above, so there is no separate no-card grant here.
     //
-    // Why 30 and not 7: a contractor's job runs 2-6 weeks. The entire payoff of
-    // this product is "here's what that job actually made you" — at 7 days the
-    // trial expired before the app could ever show it, so nobody reached the
-    // moment that sells the subscription. 30 days lets one real job finish.
-    // MUST stay in lockstep with the interval in public.has_app_access
-    // (FIX-DATABASE-24) — the client decides what to render, the DB decides
-    // what it will accept.
-    const FREE_WINDOW_DAYS = 30
-    const createdAt = profile.created_at ? new Date(profile.created_at) : null
-    const inFreeWindow =
-      !!createdAt && Date.now() - createdAt.getTime() < FREE_WINDOW_DAYS * 24 * 60 * 60 * 1000
-    const hasAccess = active || inFreeWindow
+    // The one exception is an account created before the cutover, which signed
+    // up under the old no-card promise and keeps its window until it runs out.
+    // That's grandfathering, not a live offer, and it self-expires (see
+    // utils/trialWindow.js). The DB enforces the identical rule on writes
+    // (public.has_app_access, FIX-DATABASE-24) — the client decides what to
+    // render, the DB decides what it will accept.
+    const hasAccess = active || legacyFreeDaysLeft(profile) !== null
 
     // Only when enforcement is ON: wait for the subscription read before
     // deciding, so we never flash the dashboard and then yank it to a paywall.

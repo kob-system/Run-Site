@@ -132,8 +132,8 @@ export default function Remodelers() {
           what's left for you — from the phone already in your pocket. Built for remodelers
           and GCs with a 2–10 man crew.
         </p>
-        <a className="rl-cta" href={SIGNUP_URL}>Start free — no card needed</a>
-        <div className="rl-cta-note">Free for 30 days. Then $150/mo, everything included.</div>
+        <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
+        <div className="rl-cta-note">Free for 30 days — $0 charged today. Then $150/mo, everything included.</div>
         <br />
         <a className="rl-calc-link" href="#calculator">Not ready? Run your last job through the free profit calculator ↓</a>
       </section>
@@ -263,11 +263,11 @@ export default function Remodelers() {
             <ul>
               <li>Unlimited crew — no per-seat charges</li>
               <li>Every feature included, nothing gated</li>
-              <li>30 days free up front, no card needed</li>
+              <li>30 days free up front — $0 charged today</li>
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
-            <a className="rl-cta" href={SIGNUP_URL}>Start free — no card needed</a>
+            <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
             <p className="rl-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
             </p>
@@ -279,7 +279,7 @@ export default function Remodelers() {
       <section className="rl-final">
         <h2>Know your number before the job's over.</h2>
         <p>Set up takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="rl-cta" href={SIGNUP_URL}>Start free — no card needed</a>
+        <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
       </section>
 
       <footer className="rl-footer">

@@ -6,7 +6,7 @@
 - Category: job costing / field-service software for contractors
 - Best for: small contractors and remodelers with a 2–10 person crew
 - Pricing: $150/month, or $1,200/year (4 months free). Every feature included, unlimited crew, no per-seat charges.
-- Free trial: 30 days, no credit card required
+- Free trial: 30 days, credit card required at signup, $0 charged during the trial, cancel anytime
 - Platform: web app, works on any phone (iOS/Android), no install
 - Origin: built for a contractor in Troy, NY who couldn't see whether his jobs made money
 - Website: https://www.getjobtally.com

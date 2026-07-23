@@ -128,8 +128,11 @@ export default async function handler(req, res) {
     // subscription before (cancelled or lapsed) re-subscribes with no new trial,
     // so the trial can't be farmed by cancel-and-resubscribe.
     // 30, not 7, because a contractor's job runs 2-6 weeks — a 7-day trial ended
-    // before the app could ever show them what a finished job made. Matches the
-    // no-card free window (FREE_WINDOW_DAYS in src/App.js / has_app_access).
+    // before the app could ever show them what a finished job made.
+    // This IS the trial now: the app-side no-card window is retired, so a new
+    // owner hits the paywall on first load and their 30 free days come from
+    // Stripe holding a card and charging $0 until day 31. Nothing else grants
+    // access (see src/utils/trialWindow.js + public.has_app_access).
     if (!hadPriorSub) params['subscription_data[trial_period_days]'] = '30'
     if (ref) {
       // On the subscription so it persists for the life of the plan (used for

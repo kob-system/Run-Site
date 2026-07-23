@@ -1,7 +1,8 @@
 -- ============================================================
 -- FIX-DATABASE-24-growth-engine.sql
 -- Four growth changes that go together:
---   1. Free window 7 days -> 30 days (server side, matches src/App.js)
+--   1. Trial model -> 30 days WITH a card at signup. The old no-card window is
+--      retired; existing accounts are grandfathered (matches src/utils/trialWindow.js)
 --   2. projects.is_sample  — the seeded demo job a new owner lands on
 --   3. public.product_events — first-party funnel analytics (we had NONE)
 --   4. public.testimonials   — real, consented social proof for the landing page
@@ -12,14 +13,22 @@
 -- ============================================================
 
 -- ------------------------------------------------------------
--- 1) FREE WINDOW: 7 -> 30 DAYS
---    Supersedes the version in FIX-DATABASE-17-hole-cleanup.sql. Everything
---    else about the function is identical — only the interval changed.
---    WHY: a contractor's job runs 2-6 weeks. The whole payoff of this app is
---    "here's what that job actually made you", and at 7 days the trial died
---    BEFORE the product could ever show it. 30 days lets one real job finish.
---    This must stay in lockstep with FREE_WINDOW_DAYS in src/App.js — the
---    client decides what to render, this decides what the DB will accept.
+-- 1) TRIAL MODEL: 30 DAYS, CARD REQUIRED
+--    Supersedes the version in FIX-DATABASE-17-hole-cleanup.sql.
+--    WHY 30 and not 7: a contractor's job runs 2-6 weeks. The whole payoff of
+--    this app is "here's what that job actually made you", and at 7 days the
+--    trial died BEFORE the product could ever show it. 30 days lets one real
+--    job finish.
+--    WHY A CARD: the no-card window let anyone use the full app for a month
+--    and walk with zero friction to leave. A card at signup means the trial
+--    ends in a charge by default instead of in a decision — same 30 free days,
+--    far better conversion. New accounts now go straight to Stripe Checkout,
+--    which returns status='trialing' and lands in branch 2 below.
+--    GRANDFATHER: accounts that signed up under the old no-card promise keep
+--    their 30 days until it runs out naturally (branch 3). That branch is
+--    self-expiring — it can never return true after 2026-08-23.
+--    Must stay in lockstep with src/utils/trialWindow.js — the client decides
+--    what to render, this decides what the DB will accept.
 -- ------------------------------------------------------------
 create or replace function public.has_app_access(uid uuid)
 returns boolean
@@ -30,6 +39,9 @@ set search_path = public, pg_temp
 as $$
 declare
   v_created timestamptz;
+  -- Accounts created before this instant are grandfathered onto the old
+  -- no-card window. MUST match CARD_REQUIRED_SINCE in src/utils/trialWindow.js.
+  c_cutover constant timestamptz := timestamptz '2026-07-24 00:00:00+00';
 begin
   -- Comped / grandfathered accounts: always in.
   if exists (
@@ -50,9 +62,14 @@ begin
     return true;
   end if;
 
-  -- Otherwise, still inside the 30-day no-card free window from signup.
+  -- GRANDFATHER ONLY. An account that signed up under the old no-card promise
+  -- still gets its full 30 days — we don't paywall someone retroactively on a
+  -- deal they already took. Accounts created on or after the cutover get
+  -- nothing here: their trial IS the Stripe card trial, handled above.
   select p.created_at into v_created from public.profiles p where p.id = uid;
-  if v_created is not null and v_created > now() - interval '30 days' then
+  if v_created is not null
+     and v_created < c_cutover
+     and v_created > now() - interval '30 days' then
     return true;
   end if;
 
