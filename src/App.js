@@ -194,7 +194,7 @@ export default function App() {
     // flips status away from active/trialing (handled by the status guard above).
     const RENEWAL_GRACE_MS = 24 * 60 * 60 * 1000
     const periodEndValid =
-      !!sub.current_period_end &&
+      !!(sub && sub.current_period_end) &&
       new Date(sub.current_period_end).getTime() > Date.now() - RENEWAL_GRACE_MS
     const active =
       // comp = grandfathered/free grant; no period end to check.
