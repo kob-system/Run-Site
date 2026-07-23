@@ -1,6 +1,8 @@
 import React, { useState, useEffect, Suspense } from 'react'
 import { supabase } from './supabaseClient'
 import { captureAttribution, saveSignupAttribution } from './utils/attribution'
+import { track, trackOnce, setAnalyticsUser, EV } from './utils/analytics'
+import { seedSampleJob } from './utils/sampleJob'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
@@ -16,6 +18,7 @@ const WorkerDashboard = React.lazy(() => import('./pages/WorkerDashboard'))
 const Billing = React.lazy(() => import('./pages/Billing'))
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
 const Landing = React.lazy(() => import('./pages/Landing'))
+const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
 
 // Single Suspense fallback for every code-split screen, so each return site can
 // just wrap its element in <Screen>…</Screen> instead of repeating the boilerplate.
@@ -49,6 +52,7 @@ export default function App() {
         // lock. setTimeout(…,0) runs it on the next tick, after the lock releases.
         setTimeout(() => fetchProfile(session.user), 0)
       } else {
+        setAnalyticsUser(null)
         setProfile(null)
         setSub(undefined)
         setLoading(false)
@@ -97,6 +101,9 @@ export default function App() {
 
   const fetchProfile = async (user) => {
     setLoadError(false)
+    // Attach every subsequent event to this account. Set before any awaits so
+    // an event fired during the profile read isn't recorded as anonymous.
+    setAnalyticsUser(user.id)
     try {
       let { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
       if (error) throw error
@@ -122,6 +129,11 @@ export default function App() {
           // up from), so it survives confirming email on a different device.
           // Best-effort — never blocks account creation.
           if (!insErr) saveSignupAttribution(supabase, user.id, md.attribution || null)
+          // This branch runs exactly once per account — the moment the profile
+          // row comes into existence. That makes it the honest definition of
+          // "signup completed", and it's tracked here rather than in the login
+          // form so BOTH signup paths (instant and email-confirm) count.
+          if (!insErr) track(EV.SIGNUP_COMPLETED, { role: md.role })
           const res = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
           if (res.error) throw res.error
           data = res.data
@@ -130,7 +142,16 @@ export default function App() {
           if (insErr && !data) throw insErr
         }
       }
+      // A brand-new owner would otherwise land on a completely blank dashboard.
+      // Seed one finished demo job first, so the dashboard's own fetch picks it
+      // up on the initial render instead of appearing after a refresh. This is
+      // awaited on purpose, but it's nearly free: for any account that's already
+      // been seeded it short-circuits on localStorage without touching the DB.
+      if (data && data.role === 'owner') await seedSampleJob(supabase, data)
+
       setProfile(data)
+
+      if (data) trackOnce(EV.APP_OPENED, { role: data.role })
 
       // Owners carry a subscription; read it so the billing gate can decide.
       // Workers and any read failure (e.g. table not migrated yet) -> null,
@@ -178,6 +199,13 @@ export default function App() {
     }
     return <Screen><Login /></Screen>
   }
+  // Founder readout at /?metrics=1. Placed ahead of the role and billing
+  // branches so it's reachable from any signed-in account — the real gate is
+  // server-side (public.founder_funnel raises 'not authorized' unless the
+  // caller is in app_admins), so there's nothing to protect by hiding a URL.
+  if (new URLSearchParams(window.location.search).has('metrics')) {
+    return <Screen><FounderMetrics /></Screen>
+  }
   if (profile?.role === 'worker') return <Screen><WorkerDashboard profile={profile} /></Screen>
   if (profile) {
     const enforced = process.env.REACT_APP_BILLING_ENFORCED === 'true'
@@ -210,11 +238,19 @@ export default function App() {
       // access to a stale row).
       ((subStatus === 'active' || subStatus === 'trialing') && periodEndValid)
 
-    // New owners get a 7-day no-card free window from signup — full app, no
+    // New owners get a 30-day no-card free window from signup — full app, no
     // Stripe — before they ever see the paywall. After that they must start a
     // (card-based) trial or subscribe. The DB enforces the same window on writes
     // (public.has_app_access), so this isn't just a client-side gate.
-    const FREE_WINDOW_DAYS = 7
+    //
+    // Why 30 and not 7: a contractor's job runs 2-6 weeks. The entire payoff of
+    // this product is "here's what that job actually made you" — at 7 days the
+    // trial expired before the app could ever show it, so nobody reached the
+    // moment that sells the subscription. 30 days lets one real job finish.
+    // MUST stay in lockstep with the interval in public.has_app_access
+    // (FIX-DATABASE-24) — the client decides what to render, the DB decides
+    // what it will accept.
+    const FREE_WINDOW_DAYS = 30
     const createdAt = profile.created_at ? new Date(profile.created_at) : null
     const inFreeWindow =
       !!createdAt && Date.now() - createdAt.getTime() < FREE_WINDOW_DAYS * 24 * 60 * 60 * 1000

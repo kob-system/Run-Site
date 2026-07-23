@@ -6,6 +6,8 @@ import { computeProfit, computeMargin, computeContractPrice, roundCents } from '
 import { downloadCsv } from '../utils/csv'
 import AssistantPanel from '../components/AssistantPanel'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
+import { deleteSampleJob } from '../utils/sampleJob'
+import { track, EV } from '../utils/analytics'
 
 // Deduction categories an accountant wants broken out at tax time.
 const RECEIPT_CATEGORIES = ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other']
@@ -215,6 +217,12 @@ function JobPhoto({ path, alt, style, onClick, signedUrl }) {
 export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [activeTab, setActiveTab] = useState('home')
   const [projects, setProjects] = useState([])
+  const [removingSample, setRemovingSample] = useState(false) // demo-job cleanup in flight
+  // Social proof. The ask only ever fires after a REAL job closes in the black —
+  // see maybeAskForTestimonial. null = not asking.
+  const [testimonialAsk, setTestimonialAsk] = useState(null)
+  const [testimonialForm, setTestimonialForm] = useState({ quote: '', author_name: '', company_name: '', city: '', rating: 5, permission: false })
+  const [testimonialSaving, setTestimonialSaving] = useState(false)
   const [workers, setWorkers] = useState([])
   const [workerStats, setWorkerStats] = useState({}) // keyed by worker id
   const [workersError, setWorkersError] = useState(false) // true when worker stats / assignments / time-off failed to load
@@ -718,6 +726,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       if (error) throw error
       setShowNewTime(false)
       setTimeForm({ worker_id: '', work_date: '', start_time: '', end_time: '' })
+      track(EV.TIME_ADDED)
       await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
       showToast('Time added ✓')
     } catch (e) {
@@ -761,6 +770,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         owner_id: profile.id, token, worker_name: inviteName.trim()
       })
       if (error) throw error
+      track(EV.WORKER_INVITED)
       setInviteLink(`${window.location.origin}/?invite=${token}`)
       setInviteCopied(false)
     } catch (e) {
@@ -1063,6 +1073,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         profit_target: roundCents(profit), stage: 'start'
       }).select().single()
       if (error) throw error
+      track(EV.JOB_CREATED, { source: 'estimate' })
       await supabase.from('estimates').update({ status: 'accepted', project_id: proj ? proj.id : null }).eq('id', est.id)
       await fetchEstimates(); await fetchProjects()
       showToast('Job created from estimate ✓')
@@ -1203,6 +1214,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         stage: 'start'
       })
       if (error) throw error
+      track(EV.JOB_CREATED, { source: 'manual' })
       setShowNewJob(false)
       setJobForm({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
       await fetchProjects()
@@ -1272,6 +1284,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         category: receiptForm.category, photo_url: receiptForm.photo_url || null
       })
       if (error) throw error
+      // Category is a fixed enum and scanned is a boolean — shape, not content.
+      track(EV.RECEIPT_ADDED, { category: receiptForm.category, scanned: !!scanResult })
       setShowNewReceipt(false)
       setReceiptForm({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
       setScanResult(null); setScanError('')
@@ -1337,6 +1351,76 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     setLoading(false)
   }
 
+  // ---- Social proof -------------------------------------------------------
+  // The only honest moment to ask a contractor for a quote is the second the
+  // app just told him a real job made money. So that's the ONLY moment we ask:
+  // real job (never the demo), closed in the black, once per account, and never
+  // again once he's answered either way. Everything here is best-effort — a
+  // failed ask must never get in the way of finishing a job.
+  const TESTIMONIAL_KEY = `jobtally_testimonial_asked_${profile.id}`
+
+  const maybeAskForTestimonial = async (project) => {
+    try {
+      if (localStorage.getItem(TESTIMONIAL_KEY)) return
+    } catch { /* storage blocked — the DB check below is the real gate */ }
+    if (profitOf(project) <= 0) return
+    try {
+      // Authoritative check: already gave us one on another device?
+      const { data, error } = await supabase.from('testimonials').select('id').eq('owner_id', profile.id).limit(1)
+      if (error || (data && data.length)) return
+    } catch { return }
+    // Let the "Job completed ✓" toast land first — the ask should feel like a
+    // reaction to the good news, not an interruption of it.
+    setTimeout(() => {
+      setTestimonialForm({
+        quote: '', author_name: profile.full_name || '', company_name: profile.company_name || '',
+        city: '', rating: 5, permission: false,
+      })
+      setTestimonialAsk({ jobName: project.name, profit: profitOf(project) })
+      track(EV.TESTIMONIAL_PROMPTED)
+    }, 1400)
+  }
+
+  const closeTestimonial = (submitted) => {
+    // Marked asked either way — a "no" is an answer, and we don't nag.
+    try { localStorage.setItem(TESTIMONIAL_KEY, submitted ? 'submitted' : 'dismissed') } catch {}
+    if (!submitted) track(EV.TESTIMONIAL_DISMISSED)
+    setTestimonialAsk(null)
+    setInlineError('')
+  }
+
+  const submitTestimonial = async () => {
+    const quote = testimonialForm.quote.trim()
+    // Matches the CHECK constraint on public.testimonials so a too-short quote
+    // fails here with a readable message instead of a raw Postgres error.
+    if (quote.length < 10) return setInlineError('Give it a sentence or two (10 characters minimum).')
+    if (quote.length > 600) return setInlineError('Keep it under 600 characters.')
+    if (!testimonialForm.permission) return setInlineError('Tick the box if we can use it — we will not publish it otherwise.')
+    setTestimonialSaving(true)
+    setInlineError('')
+    try {
+      const { error } = await supabase.from('testimonials').insert({
+        owner_id: profile.id,
+        quote,
+        author_name: testimonialForm.author_name.trim() || null,
+        company_name: testimonialForm.company_name.trim() || null,
+        city: testimonialForm.city.trim() || null,
+        rating: testimonialForm.rating || null,
+        permission_granted: true,
+        // approved stays false — nothing reaches the landing page until it's
+        // reviewed by hand in Supabase. The insert policy enforces this too.
+        approved: false,
+      })
+      if (error) throw error
+      track(EV.TESTIMONIAL_SUBMITTED, { rating: testimonialForm.rating })
+      closeTestimonial(true)
+      showToast('Thank you — that means a lot 🙏')
+    } catch (e) {
+      setInlineError('Could not send it. Try again.')
+    }
+    setTestimonialSaving(false)
+  }
+
   const advanceStage = async (project) => {
     const stages = ['start', 'mid', 'end']
     const current = stages.indexOf(project.stage)
@@ -1350,6 +1434,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       await fetchProjects()
       setSelectedProject(prev => prev ? { ...prev, stage: next } : null)
       showToast(next === 'end' ? 'Job completed ✓' : 'Stage advanced ✓')
+      if (next === 'end' && !project.is_sample) {
+        // Whether it made money, not how much — a dollar figure is the owner's
+        // business, the boolean is ours (it's the number the app exists to show).
+        track(EV.JOB_COMPLETED, { profitable: profitOf(project) > 0 })
+        maybeAskForTestimonial(project)
+      }
     } catch (e) {
       showToast('Failed to advance stage', 'error')
     }
@@ -1418,7 +1508,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     setLoading(false)
   }
   const exportQboCustomers = () => {
-    const rows = buildQboCustomersCsv(projects)
+    // realProjects, not projects — the demo client must never be pushed into
+    // the owner's real QuickBooks customer list.
+    const rows = buildQboCustomersCsv(realProjects)
     if (rows.length <= 1) { showToast('No customers to export', 'error'); return }
     downloadCsv(rows, 'jobtally-quickbooks-customers.csv')
     showToast('QuickBooks customers exported ✓')
@@ -1432,18 +1524,26 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const yStart = `${reportYear}-01-01`
       const yEndDate = `${reportYear}-12-31`
       const yEndTs = `${yEndDate}T23:59:59`
-      const projectIds = projects.map(p => p.id)
+      // Real jobs only. The seeded demo job carries fabricated receipts and
+      // labor — putting those in front of an accountant would be a filing error
+      // with the owner's name on it, so it is stripped from every side of this
+      // export (income, expenses, labor).
+      const sampleIds = new Set(projects.filter(p => p.is_sample).map(p => p.id))
+      const projectIds = projects.filter(p => !p.is_sample).map(p => p.id)
       // Page every source past the 1000-row cap — a full year of receipts, trips,
       // or shifts on a busy account exceeds it, and a silent undercount here would
       // understate deductions on the accountant-facing tax pack.
-      const [rcpts, miles, times] = await Promise.all([
-        fetchAllRows((from, to) => supabase.from('receipts').select('category, amount, tax_amount, created_at').eq('owner_id', profile.id).gte('created_at', yStart).lte('created_at', yEndTs).range(from, to)),
+      const [rawRcpts, miles, times] = await Promise.all([
+        fetchAllRows((from, to) => supabase.from('receipts').select('category, amount, tax_amount, created_at, project_id').eq('owner_id', profile.id).gte('created_at', yStart).lte('created_at', yEndTs).range(from, to)),
         fetchAllRows((from, to) => supabase.from('mileage_entries').select('miles, rate, trip_date').eq('owner_id', profile.id).gte('trip_date', yStart).lte('trip_date', yEndDate).range(from, to)),
         projectIds.length
           ? fetchAllRows((from, to) => supabase.from('time_entries').select('labor_cost, clocked_in_at').in('project_id', projectIds).not('clocked_out_at', 'is', null).gte('clocked_in_at', yStart).lte('clocked_in_at', yEndTs).range(from, to))
           : Promise.resolve([])
       ])
       const r2 = roundCents
+      // Receipts come back by owner, not by job, so the demo job's are filtered
+      // here rather than in the query.
+      const rcpts = (rawRcpts || []).filter(r => !sampleIds.has(r.project_id))
       const byCat = {}
       let salesTax = 0
       ;(rcpts || []).forEach(r => {
@@ -1585,8 +1685,15 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Profit = contract price (incl. approved change orders) minus everything spent.
   const profitOf = (p) => computeProfit(contractOf(p), spendOf(p.id))
 
-  const activeProjects = projects.filter(p => p.stage !== 'end')
-  const completedProjects = projects.filter(p => p.stage === 'end')
+  // The seeded demo job (src/utils/sampleJob.js, flagged is_sample) exists to
+  // show a new owner what a finished job looks like. It is NOT their money, so
+  // it is excluded from every total, chart, export and onboarding check below —
+  // it only ever appears as its own clearly-labelled card on the Jobs tab.
+  const sampleProject = projects.find(p => p.is_sample) || null
+  const realProjects = sampleProject ? projects.filter(p => !p.is_sample) : projects
+
+  const activeProjects = realProjects.filter(p => p.stage !== 'end')
+  const completedProjects = realProjects.filter(p => p.stage === 'end')
   const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
   // Grand total = the contract value of all active jobs (materials + labor +
   // profit). Shown on the at-a-glance summaries; unlike projected profit it
@@ -1603,7 +1710,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const weekEndKey = addDaysKey(dateKey(new Date()), 7)
   const thisWeekSchedule = upcomingSchedule.filter(s => s.scheduled_date && s.scheduled_date <= weekEndKey)
   const clientsMap = {}
-  projects.forEach(p => {
+  realProjects.forEach(p => {
     const name = (p.client_name || '').trim(); if (!name) return
     if (!clientsMap[name]) clientsMap[name] = { name, phone: '', email: '', jobs: 0, contract: 0, billed: 0, owed: 0 }
     const c = clientsMap[name]
@@ -1654,6 +1761,76 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   const reportYears = [new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2]
   const reportJobs = completedProjects.filter(p => p.completed_at && new Date(p.completed_at).getFullYear() === reportYear)
+
+  // The social-proof ask. Built once here and rendered in BOTH returns below,
+  // because the moment that triggers it (marking a job complete) happens inside
+  // the project detail view — but the owner may hit Back before answering, and
+  // the ask shouldn't vanish just because he changed screens.
+  const testimonialModal = testimonialAsk && (
+    <div className="modal-overlay" onClick={() => closeTestimonial(false)}>
+      <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+        <h2>Nice — {formatCurrency(testimonialAsk.profit)} on that one</h2>
+        <p style={{ fontSize: '14px', color: '#4B5563', lineHeight: '1.55', marginBottom: '14px' }}>
+          You just closed <strong>{testimonialAsk.jobName}</strong> in the black. If JobTally helped,
+          would you put that in a sentence? Other contractors read it before they trust us with
+          their numbers.
+        </p>
+        <div className="input-group">
+          <label>Your words</label>
+          <textarea
+            rows={4}
+            maxLength={600}
+            value={testimonialForm.quote}
+            onChange={e => setTestimonialForm({ ...testimonialForm, quote: e.target.value })}
+            placeholder="I never knew what a job actually made me until this. Takes 5 minutes a day."
+          />
+          <p style={{ fontSize: '12px', color: '#9CA3AF', textAlign: 'right', margin: '2px 2px 0' }}>{testimonialForm.quote.length}/600</p>
+        </div>
+        <div className="input-group">
+          <label>How many stars?</label>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {[1, 2, 3, 4, 5].map(n => (
+              <button
+                key={n}
+                type="button"
+                aria-label={`${n} star${n > 1 ? 's' : ''}`}
+                onClick={() => setTestimonialForm({ ...testimonialForm, rating: n })}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px',
+                  fontSize: '28px', lineHeight: '1',
+                  color: n <= testimonialForm.rating ? '#F59E0B' : '#D1D5DB',
+                }}
+              >★</button>
+            ))}
+          </div>
+        </div>
+        <div className="input-group">
+          <label>Your name</label>
+          <input value={testimonialForm.author_name} onChange={e => setTestimonialForm({ ...testimonialForm, author_name: e.target.value })} maxLength={80} placeholder="Tony R." />
+        </div>
+        <div className="input-group">
+          <label>Company</label>
+          <input value={testimonialForm.company_name} onChange={e => setTestimonialForm({ ...testimonialForm, company_name: e.target.value })} maxLength={120} placeholder="R&amp;S Remodeling" />
+        </div>
+        <div className="input-group">
+          <label>City</label>
+          <input value={testimonialForm.city} onChange={e => setTestimonialForm({ ...testimonialForm, city: e.target.value })} maxLength={80} placeholder="Troy, NY" />
+        </div>
+        <label style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', fontSize: '13px', color: '#374151', lineHeight: '1.5', margin: '4px 2px 14px', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={testimonialForm.permission}
+            onChange={e => setTestimonialForm({ ...testimonialForm, permission: e.target.checked })}
+            style={{ marginTop: '2px', width: '17px', height: '17px', flexShrink: 0 }}
+          />
+          <span>JobTally can use this on the website. Your job numbers are never shown — only what you wrote above.</span>
+        </label>
+        {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+        <button className="btn-primary" onClick={submitTestimonial} disabled={testimonialSaving}>{testimonialSaving ? 'Sending…' : 'Send it'}</button>
+        <button className="btn-secondary" onClick={() => closeTestimonial(false)}>Not right now</button>
+      </div>
+    </div>
+  )
 
   // PROJECT DETAIL VIEW
   if (selectedProject) {
@@ -2267,6 +2444,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         )}
 
         {photoViewer && <PhotoViewer receipt={photoViewer} onClose={() => setPhotoViewer(null)} onDelete={deleteReceipt} />}
+        {testimonialModal}
         <Toast message={toast} type={toastType} onClose={() => setToast('')} />
       </div>
     )
@@ -2438,7 +2616,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         {activeTab === 'home' && (
           <div>
             {(() => {
-              // Free-trial countdown — so the 7-day free window (or a card trial)
+              // Free-trial countdown — so the 30-day free window (or a card trial)
               // never ends as a surprise paywall. Hidden for paid/comp owners and
               // when billing isn't enforced.
               const paid = sub && ['active', 'comp'].includes(sub.status)
@@ -2448,7 +2626,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 daysLeft = Math.max(0, Math.ceil((new Date(sub.current_period_end).getTime() - Date.now()) / 86400000))
                 isCardTrial = true
               } else if (profile.created_at) {
-                const msLeft = new Date(profile.created_at).getTime() + 7 * 86400000 - Date.now()
+                // Must match FREE_WINDOW_DAYS in src/App.js and the interval in
+                // public.has_app_access (FIX-DATABASE-24). If this number drifts
+                // the banner counts down to a paywall that isn't there yet.
+                const msLeft = new Date(profile.created_at).getTime() + 30 * 86400000 - Date.now()
                 if (msLeft > 0) daysLeft = Math.max(1, Math.ceil(msLeft / 86400000))
               }
               if (daysLeft === null) return null
@@ -2466,7 +2647,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             })()}
             {!initialLoading && (() => {
               const steps = [
-                { key: 'job', label: 'Create your first job', done: projects.length > 0, cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') } },
+                { key: 'job', label: 'Create your first job', done: realProjects.length > 0, cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') } },
                 { key: 'crew', label: 'Add your crew', done: workers.length > 0, cta: () => setActiveTab('workers') },
                 { key: 'estimate', label: 'Send your first estimate', done: estimates.length > 0, cta: () => setActiveTab('estimates') },
                 { key: 'invoice', label: 'Create your first invoice', done: invoices.length > 0, cta: () => setActiveTab('invoices') },
@@ -2607,6 +2788,39 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </div>
             )}
 
+            {sampleProject && (
+              <div className="card" style={{ border: '2px dashed #93C5FD', background: '#F0F7FF', marginTop: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+                  <div>
+                    <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 800, letterSpacing: '1px', color: '#1D4ED8', background: '#DBEAFE', borderRadius: '6px', padding: '3px 8px', marginBottom: '6px' }}>EXAMPLE — NOT YOUR JOB</span>
+                    <h3 style={{ color: '#1C2B3A' }}>{sampleProject.name}</h3>
+                    <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px', lineHeight: '1.5' }}>
+                      This is what a finished job looks like once you've logged receipts and crew hours. Open it to see where the money went — it's left out of all your totals and exports.
+                    </p>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <p style={{ fontSize: '17px', fontWeight: 800, color: '#15803D' }}>{formatCurrency(profitOf(sampleProject))}</p>
+                    <p style={{ fontSize: '10px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Final profit</p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button className="btn-secondary" style={{ flex: 1, margin: 0 }} onClick={() => fetchProjectDetails(sampleProject)}>Open the example</button>
+                  <button
+                    className="btn-secondary"
+                    style={{ flex: 1, margin: 0, color: '#DC2626', borderColor: '#FCA5A5' }}
+                    disabled={removingSample}
+                    onClick={async () => {
+                      setRemovingSample(true)
+                      const ok = await deleteSampleJob(supabase, sampleProject.id)
+                      setRemovingSample(false)
+                      if (ok) { await fetchProjects(); showToast('Example removed ✓') }
+                      else showToast('Could not remove it — try again', 'error')
+                    }}
+                  >{removingSample ? 'Removing…' : 'Remove it'}</button>
+                </div>
+              </div>
+            )}
+
             {activeProjects.length > 0 && (
               <div>
                 <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 8px', padding: '0 4px' }}>Active</p>
@@ -2662,7 +2876,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             )}
 
             {initialLoading && projects.length === 0 && <div className="empty-state"><p>Loading…</p></div>}
-            {!initialLoading && projects.length === 0 && (
+            {/* realProjects, so an owner who only has the demo job still gets the
+                prompt to put their own work in. */}
+            {!initialLoading && realProjects.length === 0 && (
               <div className="empty-state" style={{ textAlign: 'center' }}>
                 <p style={{ marginBottom: '14px' }}>Add a job to see live profit, crew hours, and receipts as the work happens.</p>
                 <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ Create your first job</button>
@@ -2940,7 +3156,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 {reportYears.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
-            {projects.length > 0 && (
+            {realProjects.length > 0 && (
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '1px' }}>Send to QuickBooks</p>
                 <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '10px' }}>Download, then in QuickBooks: <b>⚙ Settings → Import Data → Invoices</b> (or Customers) and match the columns.</p>
@@ -3066,7 +3282,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         <div className="modal-overlay" onClick={() => { setShowNewWarranty(false); setInlineError('') }}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>Add Callback</h2>
-            <div className="input-group"><label>Job (optional)</label><select value={warrantyForm.project_id} onChange={e => setWarrantyForm({ ...warrantyForm, project_id: e.target.value })}><option value="">— None —</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div className="input-group"><label>Job (optional)</label><select value={warrantyForm.project_id} onChange={e => setWarrantyForm({ ...warrantyForm, project_id: e.target.value })}><option value="">— None —</option>{realProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
             <div className="input-group"><label>What's the callback?</label><input value={warrantyForm.description} onChange={e => setWarrantyForm({ ...warrantyForm, description: e.target.value })} placeholder="Re-caulk shower (warranty)" /></div>
             <div className="input-group"><label>Due (optional)</label><input type="date" value={warrantyForm.due_on} onChange={e => setWarrantyForm({ ...warrantyForm, due_on: e.target.value })} /></div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
@@ -3118,7 +3334,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         <div className="modal-overlay" onClick={() => { setShowNewInvoice(false); setInlineError('') }}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <h2>New Invoice</h2>
-            <div className="input-group"><label>Job</label><select value={invoiceForm.project_id} onChange={e => setInvoiceForm({ ...invoiceForm, project_id: e.target.value })}><option value="">-- Choose a job --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div className="input-group"><label>Job</label><select value={invoiceForm.project_id} onChange={e => setInvoiceForm({ ...invoiceForm, project_id: e.target.value })}><option value="">-- Choose a job --</option>{realProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
             <div className="input-group"><label>Label</label><input value={invoiceForm.label} onChange={e => setInvoiceForm({ ...invoiceForm, label: e.target.value })} placeholder="Deposit / Progress / Final" /></div>
             <div className="input-group"><label>Amount ($)</label><input type="number" value={invoiceForm.amount} onChange={e => setInvoiceForm({ ...invoiceForm, amount: e.target.value })} placeholder="2500" /></div>
             <div className="input-group"><label>Issued Date</label><input type="date" value={invoiceForm.issued_date} onChange={e => setInvoiceForm({ ...invoiceForm, issued_date: e.target.value })} /></div>
@@ -3131,6 +3347,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           </div>
         </div>
       )}
+
+      {testimonialModal}
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
