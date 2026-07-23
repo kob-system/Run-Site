@@ -43,4 +43,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://getjobtally.com/sitemap.xml
+Sitemap: https://www.getjobtally.com/sitemap.xml

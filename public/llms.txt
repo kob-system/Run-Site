@@ -9,7 +9,7 @@
 - Free trial: 7 days, no credit card required
 - Platform: web app, works on any phone (iOS/Android), no install
 - Origin: built for a contractor in Troy, NY who couldn't see whether his jobs made money
-- Website: https://getjobtally.com
+- Website: https://www.getjobtally.com
 
 ## What makes it different
 - Live per-job profit while the job is still running — not months later at tax time
@@ -18,13 +18,13 @@
 - Setup in about 5 minutes with a guided checklist
 
 ## Pages
-- [Homepage](https://getjobtally.com/): overview, features, pricing, FAQ
-- [Features](https://getjobtally.com/features/): full feature list
-- [Pricing](https://getjobtally.com/pricing/): $150/mo or $1,200/yr, 7-day free trial
-- [Job costing app for contractors](https://getjobtally.com/job-costing-app-for-contractors/): the core use case
-- [Contractor profit tracking](https://getjobtally.com/contractor-profit-tracking/): tracking profit per job
-- [Crew time tracking](https://getjobtally.com/crew-time-tracking-app/): GPS clock-in for crews
-- [Best job costing apps for small contractors (2026)](https://getjobtally.com/best-job-costing-app-for-small-contractors/): comparison hub
-- [JobTally vs Jobber](https://getjobtally.com/compare/jobber/): comparison
-- [How job costing works](https://getjobtally.com/guides/job-costing/): guide for contractors
-- [For remodelers](https://getjobtally.com/remodelers): remodeler-specific page with a free profit calculator
+- [Homepage](https://www.getjobtally.com/): overview, features, pricing, FAQ
+- [Features](https://www.getjobtally.com/features/): full feature list
+- [Pricing](https://www.getjobtally.com/pricing/): $150/mo or $1,200/yr, 7-day free trial
+- [Job costing app for contractors](https://www.getjobtally.com/job-costing-app-for-contractors/): the core use case
+- [Contractor profit tracking](https://www.getjobtally.com/contractor-profit-tracking/): tracking profit per job
+- [Crew time tracking](https://www.getjobtally.com/crew-time-tracking-app/): GPS clock-in for crews
+- [Best job costing apps for small contractors (2026)](https://www.getjobtally.com/best-job-costing-app-for-small-contractors/): comparison hub
+- [JobTally vs Jobber](https://www.getjobtally.com/compare/jobber/): comparison
+- [How job costing works](https://www.getjobtally.com/guides/job-costing/): guide for contractors
+- [For remodelers](https://www.getjobtally.com/remodelers): remodeler-specific page with a free profit calculator
