@@ -1,12 +1,14 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import './Landing.css'
+import { supabase } from '../supabaseClient'
+import { track, trackOnce, EV } from '../utils/analytics'
 
 // Public landing page at / — what a stranger sees before they have an
 // account. Rendered before the Login screen (App.js) for logged-out
 // visitors; logged-in users never hit it. Screenshots in /landing/* are
 // REAL app screens from the demo company (Summit Remodeling) — nothing
 // mocked up. CTAs point at the real signup: /login?signup=1 opens the
-// Create Account form. New owners get the existing 7-day no-card free
+// Create Account form. New owners get the existing 30-day no-card free
 // window — no invented trials, no invented pricing.
 const SIGNUP_URL = '/login?signup=1'
 
@@ -63,7 +65,7 @@ const INCLUDED = [
 const FAQS = [
   {
     q: 'Do I need a credit card to try it?',
-    a: 'No. You get 7 days completely free, no card. If it earns its keep, it’s $150/mo after that — every feature, unlimited crew.',
+    a: 'You put a card in at signup, but you are not charged for 30 days — JobTally bills $0 during the trial, and if you cancel before day 31 you pay nothing. After that it’s $150/mo — every feature, unlimited crew.',
   },
   {
     q: 'What does my crew have to do?',
@@ -80,9 +82,36 @@ const FAQS = [
 ]
 
 export default function Landing() {
+  // Real customer quotes, approved by hand in Supabase (testimonials.approved).
+  // Empty until someone actually says something — the section simply doesn't
+  // render rather than shipping invented praise.
+  const [quotes, setQuotes] = useState([])
+
   useEffect(() => {
     document.title = 'JobTally — know what every job really makes'
+    // Top of the funnel. Once per tab so a re-render doesn't inflate it.
+    trackOnce(EV.LANDING_VIEW)
   }, [])
+
+  useEffect(() => {
+    let alive = true
+    supabase
+      .from('testimonials')
+      .select('id, quote, author_name, company_name, city, rating')
+      .eq('approved', true)
+      .order('created_at', { ascending: false })
+      .limit(6)
+      .then(({ data, error }) => {
+        // A missing table (migration not run) or an RLS refusal both just mean
+        // "no proof to show" — never an error on a stranger's first visit.
+        if (alive && !error && data) setQuotes(data)
+      })
+    return () => { alive = false }
+  }, [])
+
+  // Which CTA got the click matters — hero vs pricing vs final tells us whether
+  // the page sells on the promise or on the price.
+  const cta = (where) => () => track(EV.LANDING_CTA, { where })
 
   return (
     <div className="ld">
@@ -91,7 +120,7 @@ export default function Landing() {
         <a className="ld-logo" href="/">JobTally</a>
         <nav>
           <a className="ld-signin" href="/login">Sign in</a>
-          <a className="ld-cta-sm" href={SIGNUP_URL}>Start free</a>
+          <a className="ld-cta-sm" href={SIGNUP_URL} onClick={cta('topbar')}>Start free</a>
         </nav>
       </header>
 
@@ -105,8 +134,8 @@ export default function Landing() {
               from the phone already in your pocket. Built for contractors running a
               2–10 man crew.
             </p>
-            <a className="ld-cta" href={SIGNUP_URL}>Start free — no card needed</a>
-            <div className="ld-cta-note">Free for 7 days. Then $150/mo, everything included.</div>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start your 30-day free trial</a>
+            <div className="ld-cta-note">Free for 30 days — $0 charged today. Then $150/mo, everything included.</div>
             <ul className="ld-trust">
               <li>Set up in ~5 minutes</li>
               <li>Works on any phone</li>
@@ -209,7 +238,7 @@ export default function Landing() {
               you through your first job, your crew, your first estimate and invoice, checking
               each step off automatically as you go.
             </p>
-            <a className="ld-cta" href={SIGNUP_URL}>Start free — no card needed</a>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('home')}>Start your 30-day free trial</a>
           </div>
         </div>
       </section>
@@ -233,7 +262,7 @@ export default function Landing() {
             <div className="ld-step">
               <span className="ld-step-num">1</span>
               <h3>Create your account</h3>
-              <p>Two minutes, no card. Name, company, done.</p>
+              <p>Two minutes. Name, company, card, done.</p>
             </div>
             <div className="ld-step">
               <span className="ld-step-num">2</span>
@@ -249,6 +278,32 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Social proof — real, approved quotes only. Renders nothing until there
+          are some, because a fake testimonial is worse than no testimonial. */}
+      {quotes.length > 0 && (
+        <section className="ld-proof">
+          <div className="ld-inner">
+            <h2>From contractors running it</h2>
+            <div className="ld-proof-grid">
+              {quotes.map((t) => {
+                const who = [t.author_name, t.company_name].filter(Boolean).join(' · ')
+                return (
+                  <figure className="ld-proof-card" key={t.id}>
+                    {t.rating ? <div className="ld-proof-stars" aria-label={`${t.rating} out of 5`}>{'★'.repeat(t.rating)}</div> : null}
+                    <blockquote>{t.quote}</blockquote>
+                    {(who || t.city) && (
+                      <figcaption>
+                        {who}{who && t.city ? ' — ' : ''}{t.city}
+                      </figcaption>
+                    )}
+                  </figure>
+                )
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Pricing */}
       <section className="ld-pricing">
         <div className="ld-inner">
@@ -258,11 +313,11 @@ export default function Landing() {
             <ul>
               <li>Unlimited crew — no per-seat charges</li>
               <li>Every feature included, nothing gated</li>
-              <li>7 days free up front, no card needed</li>
+              <li>30 days free up front — $0 charged today</li>
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
-            <a className="ld-cta" href={SIGNUP_URL}>Start free — no card needed</a>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start your 30-day free trial</a>
             <p className="ld-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
             </p>
@@ -289,7 +344,7 @@ export default function Landing() {
       <section className="ld-final">
         <h2>Know your number before the job's over.</h2>
         <p>Setup takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="ld-cta" href={SIGNUP_URL}>Start free — no card needed</a>
+        <a className="ld-cta" href={SIGNUP_URL} onClick={cta('final')}>Start your 30-day free trial</a>
       </section>
 
       <footer className="ld-footer">

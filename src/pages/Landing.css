@@ -95,6 +95,16 @@
 .ld-step h3 { font-size: 17px; font-weight: 700; margin: 14px 0 6px; }
 .ld-step p { font-size: 14px; color: rgba(255,255,255,0.7); }
 
+/* Social proof — real approved quotes. The section only renders when there are
+   some, so these rules are dormant until a customer actually says something. */
+.ld-proof { background: var(--bg); }
+.ld-proof-grid { max-width: 900px; margin: 26px auto 0; display: grid; grid-template-columns: 1fr; gap: 14px; }
+.ld-proof-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--orange); border-radius: var(--radius); padding: 20px 22px; margin: 0; }
+.ld-proof-stars { color: var(--orange); font-size: 15px; letter-spacing: 2px; margin-bottom: 8px; }
+.ld-proof-card blockquote { margin: 0; font-size: 16px; color: var(--text); }
+.ld-proof-card figcaption { margin-top: 10px; font-size: 14px; font-weight: 600; color: var(--text-muted); }
+@media (min-width: 720px) { .ld-proof-grid { grid-template-columns: 1fr 1fr; } }
+
 /* Pricing (mirrors the /remodelers card) */
 .ld-pricing { text-align: center; }
 .ld-price-card { max-width: 420px; margin: 28px auto 0; background: #fff; border: 2px solid var(--navy); border-radius: var(--radius-lg); padding: 28px 24px; box-shadow: var(--shadow-md); }

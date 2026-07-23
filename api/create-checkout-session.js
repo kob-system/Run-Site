@@ -82,7 +82,7 @@ export default async function handler(req, res) {
     // Look up this owner's existing subscription row (if any). It decides three
     // things: reuse the Stripe customer on a re-subscribe (no duplicate
     // customer); block a duplicate checkout when a plan is already live; and
-    // grant the 7-day trial ONLY to an owner who has never subscribed before.
+    // grant the 30-day trial ONLY to an owner who has never subscribed before.
     let existingCustomer = null
     let hadPriorSub = false
     let rows
@@ -93,7 +93,7 @@ export default async function handler(req, res) {
     } catch (readErr) {
       // A read FAILURE is not the same as "no prior subscription." Swallowing it
       // and falling through would let a genuine infra/RLS error mint a duplicate
-      // Stripe customer AND grant a fresh 7-day trial to a returning subscriber
+      // Stripe customer AND grant a fresh 30-day trial to a returning subscriber
       // (trial farming). The subscriptions table exists in prod, so this path is
       // a real error — fail closed and ask the owner to retry.
       console.error('create-checkout-session: subscription read failed:', readErr)
@@ -124,10 +124,16 @@ export default async function handler(req, res) {
       success_url: `${APP_URL}/?billing=success`,
       cancel_url: `${APP_URL}/?billing=cancel`,
     }
-    // First-time subscribers get the 7-day free trial. An owner who has had a
+    // First-time subscribers get a 30-day free trial. An owner who has had a
     // subscription before (cancelled or lapsed) re-subscribes with no new trial,
     // so the trial can't be farmed by cancel-and-resubscribe.
-    if (!hadPriorSub) params['subscription_data[trial_period_days]'] = '7'
+    // 30, not 7, because a contractor's job runs 2-6 weeks — a 7-day trial ended
+    // before the app could ever show them what a finished job made.
+    // This IS the trial now: the app-side no-card window is retired, so a new
+    // owner hits the paywall on first load and their 30 free days come from
+    // Stripe holding a card and charging $0 until day 31. Nothing else grants
+    // access (see src/utils/trialWindow.js + public.has_app_access).
+    if (!hadPriorSub) params['subscription_data[trial_period_days]'] = '30'
     if (ref) {
       // On the subscription so it persists for the life of the plan (used for
       // recurring commission), and on the session for immediate visibility.

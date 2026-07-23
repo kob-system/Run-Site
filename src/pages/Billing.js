@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import { track, trackOnce, EV } from '../utils/analytics'
 
 // Self-contained billing screen. Two modes:
 //   mode="paywall" — shown instead of the dashboard when billing is enforced and
@@ -47,8 +48,18 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
   const activeSub = ['active', 'trialing', 'past_due', 'comp'].includes(status)
   const periodEnd = sub && sub.current_period_end ? new Date(sub.current_period_end) : null
 
+  // The paywall is the single most expensive screen in the product — it's where
+  // a trial either turns into money or turns into a churned account. Once per
+  // tab so a re-render doesn't inflate it. `status` is a fixed enum, not PII.
+  useEffect(() => {
+    if (mode === 'paywall') trackOnce(EV.PAYWALL_HIT, { status: status || 'none' })
+  }, [mode, status])
+
   const go = async (action, arg) => {
     setErr(''); setBusy(arg || action)
+    // Fired before the redirect, so the drop-off between "clicked a plan" and
+    // "Stripe webhook says subscribed" is measurable.
+    if (action === 'checkout') track(EV.CHECKOUT_STARTED, { plan: arg, mode })
     try {
       const ref = (typeof localStorage !== 'undefined' && localStorage.getItem('jobtally_ref')) || undefined
       const { url } =
@@ -97,7 +108,15 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px' }}>
       <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>JobTally</h2>
       <h3 style={{ margin: '0 0 4px' }}>
-        {activeSub ? 'Your subscription' : (mode === 'paywall' ? 'Start your subscription to continue' : 'Your subscription')}
+        {activeSub
+          ? 'Your subscription'
+          : mode === 'paywall'
+          // A brand-new owner (no sub row at all) now lands here on their FIRST
+          // load — the card trial replaced the no-card window, so this is a
+          // welcome screen, not a cutoff. A RETURNING owner (`status` exists but
+          // isn't active) really is cut off, and gets the old heading.
+          ? (status ? 'Start your subscription to continue' : 'Start your 30-day free trial')
+          : 'Your subscription'}
       </h3>
       {activeSub ? (
         <p style={{ color: '#667085', marginTop: 0 }}>
@@ -113,7 +132,7 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
         </p>
       ) : status ? (
         // A prior sub row exists but it's not active (canceled / unpaid /
-        // expired) — a RETURNING owner, not a new account. The 7-day free trial
+        // expired) — a RETURNING owner, not a new account. The 30-day free trial
         // is for new accounts only, so don't promise it again here.
         <p style={{ color: '#667085', marginTop: 0 }}>
           Your subscription isn’t active. Resubscribe below to restore full access — billing starts today
@@ -121,8 +140,9 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
         </p>
       ) : (
         <p style={{ color: '#667085', marginTop: 0 }}>
-          New accounts start with a <strong>7-day free trial</strong> — no charge today. You enter your card on
-          Stripe's secure checkout and it auto-renews after the trial. Cancel anytime from Manage billing.
+          Pick a plan and get <strong>30 days free</strong> — <strong>$0 charged today</strong>. You enter your card on
+          Stripe's secure checkout so the app keeps running when the trial ends; billing starts on day 31.
+          Cancel anytime before then from Manage billing and you're never charged.
         </p>
       )}
 
