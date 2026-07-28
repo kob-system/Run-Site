@@ -458,11 +458,20 @@ async function runTool(tool, args, ctx) {
   if (tool === 'create_job') {
     const name = clean(args.name, 120)
     if (!name) return { error: 'A job name is required.' }
-    const contract = args.contract_price != null ? asNum(args.contract_price) : 0
+    const materials = args.materials_budget != null ? asNum(args.materials_budget) : 0
+    const labor = args.labor_budget != null ? asNum(args.labor_budget) : 0
+    if (!Number.isFinite(materials) || materials < 0 || materials > 10000000) return { error: 'Materials budget is out of range.' }
+    if (!Number.isFinite(labor) || labor < 0 || labor > 10000000) return { error: 'Labor budget is out of range.' }
+    // If they gave the split but no contract price, the contract IS the split.
+    const contract = args.contract_price != null ? asNum(args.contract_price) : rc(materials + labor)
     if (!Number.isFinite(contract) || contract < 0 || contract > 10000000) return { error: 'Contract price is out of range.' }
-    // Seed the budget buckets so the Edit Job form (which reads
-    // materials_budget/labor_budget/profit_target) can't recompute budget→$0
-    // when the owner edits an unrelated field. profit_target holds the contract.
+    if (materials + labor > contract + 0.005) {
+      return { error: `That split is more than the contract — ${money(materials)} materials + ${money(labor)} labor is over ${money(contract)}. What should the buckets be?` }
+    }
+    // The app's invariant everywhere else: budget = materials + labor + profit_target.
+    // Seeding all three keeps the Edit Job form (which recomputes budget from the
+    // buckets) from silently zeroing the contract, and gives the job card real
+    // "spent / budgeted" bars instead of $0.00 targets.
     const { ok, data } = await userReq(token, 'projects', 'POST', {
       owner_id: uid,
       name,
@@ -471,9 +480,9 @@ async function runTool(tool, args, ctx) {
       client_email: clean(args.client_email, 160) || null,
       client_address: clean(args.client_address, 240) || null,
       budget: rc(contract),
-      materials_budget: 0,
-      labor_budget: 0,
-      profit_target: rc(contract),
+      materials_budget: rc(materials),
+      labor_budget: rc(labor),
+      profit_target: rc(contract - materials - labor),
       stage: 'start',
     })
     if (!ok) return { error: 'Create was blocked (check your subscription is active).' }
@@ -499,20 +508,39 @@ async function runTool(tool, args, ctx) {
     if (args.client_phone != null) patch.client_phone = clean(args.client_phone, 40) || null
     if (args.client_email != null) patch.client_email = clean(args.client_email, 160) || null
     if (args.client_address != null) patch.client_address = clean(args.client_address, 240) || null
-    if (args.contract_price != null) {
-      const contract = asNum(args.contract_price)
-      if (!Number.isFinite(contract) || contract < 0 || contract > 10000000) return { error: 'Contract price is out of range.' }
+    if (args.contract_price != null || args.materials_budget != null || args.labor_budget != null) {
       // Keep the app's invariant: budget = materials + labor + profit_target.
-      // Buckets stay put; the profit target absorbs the contract change.
-      patch.budget = rc(contract)
-      patch.profit_target = rc(contract - (p.materials_budget || 0) - (p.labor_budget || 0))
+      // Whatever they didn't mention holds still; the profit target absorbs the
+      // difference, so the contract only moves when they actually say so.
+      const nums = [
+        ['Contract price', args.contract_price != null ? asNum(args.contract_price) : (p.budget || 0)],
+        ['Materials budget', args.materials_budget != null ? asNum(args.materials_budget) : (p.materials_budget || 0)],
+        ['Labor budget', args.labor_budget != null ? asNum(args.labor_budget) : (p.labor_budget || 0)],
+      ]
+      for (const [label, v] of nums) {
+        if (!Number.isFinite(v) || v < 0 || v > 10000000) return { error: `${label} is out of range.` }
+      }
+      const [, contract] = nums[0]
+      const [, materials] = nums[1]
+      const [, labor] = nums[2]
+      if (materials + labor > contract + 0.005) {
+        return { error: `That split is more than the contract — ${money(materials)} materials + ${money(labor)} labor is over ${money(contract)}. What should they be?` }
+      }
+      if (args.contract_price != null) patch.budget = rc(contract)
+      if (args.materials_budget != null) patch.materials_budget = rc(materials)
+      if (args.labor_budget != null) patch.labor_budget = rc(labor)
+      patch.profit_target = rc(contract - materials - labor)
     }
     if (Object.keys(patch).length === 0) return { error: 'Nothing to update — say what should change.' }
     const upd = await userReq(token, `projects?id=eq.${p.id}`, 'PATCH', patch)
     if (!upd.ok) return { error: BLOCKED }
+    const moneyBits = []
+    if (patch.budget != null) moneyBits.push(`contract ${money(patch.budget)}`)
+    if (patch.materials_budget != null) moneyBits.push(`materials ${money(patch.materials_budget)}`)
+    if (patch.labor_budget != null) moneyBits.push(`labor ${money(patch.labor_budget)}`)
     return {
       ok: true,
-      message: `Updated “${p.name}”${patch.name ? ` (now “${patch.name}”)` : ''}${patch.budget != null ? ` — contract ${money(patch.budget)}` : ''}.`,
+      message: `Updated “${p.name}”${patch.name ? ` (now “${patch.name}”)` : ''}${moneyBits.length ? ` — ${moneyBits.join(', ')}` : ''}.`,
       result: { id: p.id, changed: Object.keys(patch) },
     }
   }

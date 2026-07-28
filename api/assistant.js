@@ -629,6 +629,8 @@ const WRITE_TOOLS = [
         client_email: { type: 'string' },
         client_address: { type: 'string' },
         contract_price: { type: 'number', description: 'What the client pays, if known.' },
+        materials_budget: { type: 'number', description: 'How much of the contract is budgeted for materials.' },
+        labor_budget: { type: 'number', description: 'How much of the contract is budgeted for labor. Materials + labor must not exceed the contract price — the rest is the profit target.' },
       },
       required: ['name'],
       additionalProperties: false,
@@ -647,6 +649,8 @@ const WRITE_TOOLS = [
         client_email: { type: 'string' },
         client_address: { type: 'string' },
         contract_price: { type: 'number', description: 'New contract price (what the client pays).' },
+        materials_budget: { type: 'number', description: 'New materials budget for the job.' },
+        labor_budget: { type: 'number', description: 'New labor budget for the job. Materials + labor must not exceed the contract price — the rest is the profit target.' },
       },
       required: ['job_name'],
       additionalProperties: false,
@@ -1158,12 +1162,21 @@ function summarize(tool, a) {
       const on = /^\d{4}-\d{2}-\d{2}$/.test(String(a.purchase_date || '')) ? ` dated ${a.purchase_date}` : ''
       return `Add a ${money(total)}${cat} expense${a.store ? ` from ${a.store}` : ''}${on} to “${a.job_name}”.${tax}`
     }
-    case 'create_job':
-      return `Create a new job “${a.name}”${a.client_name ? ` for ${a.client_name}` : ''}${a.contract_price ? ` — contract ${money(a.contract_price)}` : ''}.`
+    case 'create_job': {
+      // Read the split back on the card too — it's the number the job's budget
+      // bars are drawn from, so a typo here is a wrong "over budget" all season.
+      const split = []
+      if (a.materials_budget != null) split.push(`${money(a.materials_budget)} materials`)
+      if (a.labor_budget != null) split.push(`${money(a.labor_budget)} labor`)
+      const budgeted = split.length ? ` Budget: ${split.join(', ')}.` : ''
+      return `Create a new job “${a.name}”${a.client_name ? ` for ${a.client_name}` : ''}${a.contract_price ? ` — contract ${money(a.contract_price)}` : ''}.${budgeted}`
+    }
     case 'update_job': {
       const parts = []
       if (a.new_name) parts.push(`rename it to “${a.new_name}”`)
       if (a.contract_price != null) parts.push(`set the contract price to ${money(a.contract_price)}`)
+      if (a.materials_budget != null) parts.push(`set the materials budget to ${money(a.materials_budget)}`)
+      if (a.labor_budget != null) parts.push(`set the labor budget to ${money(a.labor_budget)}`)
       if (a.client_name) parts.push(`set the client to ${a.client_name}`)
       if (a.client_phone) parts.push(`update the client phone`)
       if (a.client_email) parts.push(`update the client email`)
@@ -1372,7 +1385,9 @@ export default async function handler(req, res) {
     `- If they answered several fields in one breath, keep what you got and only ask for what's still missing.\n` +
     `- "skip", "not sure", "later" on an OPTIONAL field = drop it and move on. Never stall a setup over an optional field.\n` +
     `- The moment you have everything required, call the write tool. The confirm card the owner sees IS the read-back — don't repeat the details yourself first.\n` +
-    `- New job → name, then the contract price (what the client pays), then client name (optional, ask once) → create_job.\n` +
+    `- New job → name, then the contract price (what the client pays), then the budget split, then client name (optional, ask once) → create_job.\n` +
+    `    • The split question is ONE message: how much of that is materials and how much is labor. Owners think in that pair, so don't break it into two turns. "Skip"/"not sure" = leave both out and move on.\n` +
+    `    • Pass what they gave as materials_budget and labor_budget. Whatever's left of the contract becomes their profit target — say that in one clause when you ask, so they know the leftover isn't lost.\n` +
     `- Add a worker → first ask whether they're a brand-new hire or already on the crew.\n` +
     `    • Brand new → their name, then their hourly rate → invite_worker with hourly_rate. After it saves, tell them to text the link and that the rate is applied automatically when the worker signs up.\n` +
     `    • Already on the crew → their name, then the new hourly rate → set_worker_rate.\n` +
