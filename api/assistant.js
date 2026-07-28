@@ -611,6 +611,7 @@ const WRITE_TOOLS = [
         store: { type: 'string', description: 'Where it was bought (optional).' },
         category: { type: 'string', enum: ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other'], description: 'Defaults to materials.' },
         description: { type: 'string', description: 'What it was (optional).' },
+        purchase_date: { type: 'string', description: 'The date printed on the receipt, YYYY-MM-DD. Only pass it if a scan or the owner gave it — leave it out for today.' },
       },
       required: ['job_name', 'amount'],
       additionalProperties: false,
@@ -1127,6 +1128,7 @@ const WORKER_WRITE_TOOLS = [
         store: { type: 'string', description: 'Where it was bought (optional).' },
         category: { type: 'string', enum: ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other'], description: 'Defaults to materials.' },
         description: { type: 'string', description: 'What it was (optional).' },
+        purchase_date: { type: 'string', description: 'The date printed on the receipt, YYYY-MM-DD. Only pass it if a scan gave it — leave it out for today.' },
       },
       required: ['job_name', 'amount'],
       additionalProperties: false,
@@ -1147,7 +1149,10 @@ function summarize(tool, a) {
       const t = num(a.sales_tax)
       const tax = t > 0 && t < num(a.amount) ? ` (${money(a.amount)} + ${money(t)} tax)` : ''
       const total = t > 0 && t < num(a.amount) ? num(a.amount) + t : num(a.amount)
-      return `Add a ${money(total)}${cat} expense${a.store ? ` from ${a.store}` : ''} to “${a.job_name}”.${tax}`
+      // Date only shows when a scan actually read one off the receipt — a bare
+      // "dated today" on every card is noise, and the default is today anyway.
+      const on = /^\d{4}-\d{2}-\d{2}$/.test(String(a.purchase_date || '')) ? ` dated ${a.purchase_date}` : ''
+      return `Add a ${money(total)}${cat} expense${a.store ? ` from ${a.store}` : ''}${on} to “${a.job_name}”.${tax}`
     }
     case 'create_job':
       return `Create a new job “${a.name}”${a.client_name ? ` for ${a.client_name}` : ''}${a.contract_price ? ` — contract ${money(a.contract_price)}` : ''}.`
@@ -1367,7 +1372,7 @@ export default async function handler(req, res) {
     `- Add a worker → first ask whether they're a brand-new hire or already on the crew.\n` +
     `    • Brand new → their name, then their hourly rate → invite_worker with hourly_rate. After it saves, tell them to text the link and that the rate is applied automatically when the worker signs up.\n` +
     `    • Already on the crew → their name, then the new hourly rate → set_worker_rate.\n` +
-    `- Add a receipt → which job, then the total, then the store (optional) → add_expense. If a scanned receipt is already in the conversation you have the store, total, tax and date — then the ONLY thing to ask is which job.\n` +
+    `- Add a receipt → which job, then the total, then the store (optional) → add_expense. If a scanned receipt is already in the conversation you have the store, total, tax and date — then the ONLY thing to ask is which job, and pass the scanned date as purchase_date.\n` +
     `- Log crew hours → which worker, which job, which day, how many hours → add_time_entry.\n` +
     `- Send an invoice → which job, then the amount (offer what's left on the contract if you can look it up) → create_invoice.\n` +
     `- When they name a job loosely ("the Klein bathroom", "Dave's roof"), pass the job's REAL name from list_jobs if you've already looked it up — don't echo their words as the job name.\n` +
@@ -1390,7 +1395,7 @@ export default async function handler(req, res) {
     `GUIDED SETUPS (the tap-a-suggestion flows — they're on a phone, on a jobsite, hands dirty):\n` +
     `- ONE short question per message. Never list fields, never ask two things at once.\n` +
     `- Clock in → if they're on exactly one job, just propose clock_in for it; only ask which job when they're on more than one.\n` +
-    `- Add a receipt → which job, then the total → add_expense. If a scanned receipt is already in the conversation you have the store and total — the ONLY thing to ask is which job.\n` +
+    `- Add a receipt → which job, then the total → add_expense. If a scanned receipt is already in the conversation you have the store, total and date — the ONLY thing to ask is which job, and pass the scanned date as purchase_date.\n` +
     `- Time off → which day (or the first and last day), then the reason (optional, ask once, "skip" is fine) → request_time_off.\n` +
     `- The moment you have what's required, call the tool. The confirm card IS the read-back — don't repeat it back yourself first.\n` +
     `- When they name a job loosely, pass the REAL job name from my_jobs — don't echo their words as the job name.\n` +

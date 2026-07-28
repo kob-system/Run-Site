@@ -353,19 +353,35 @@ async function runTool(tool, args, ctx) {
     if (isWorker && !ownerId) return { error: 'You’re not linked to a boss yet.' }
     const resolved = isWorker ? await resolveMyJob(token, args.job_name) : await resolveJob(token, args.job_name)
     if (resolved.error) return { error: resolved.error }
-    const { ok, data } = await userReq(token, 'receipts', 'POST', {
+    // receipts.description is NOT NULL with no default, and it's the HEADLINE on
+    // the receipt card in the dashboard. Nobody dictating a receipt says "and the
+    // description is…", so fall back to the category label rather than sending
+    // null (which is a 23502 the caller sees as a mystery "save was blocked").
+    const description =
+      clean(args.description, 200) || category.charAt(0).toUpperCase() + category.slice(1)
+    // The date ON the receipt is what buckets it into a tax year, so honor it when
+    // a scan found one. Anything unparseable or more than a day in the future is
+    // dropped so Postgres falls back to its current_date default (FIX-DATABASE-25).
+    // Note the key must be OMITTED, not null — defaults only fire on an absent key.
+    const dateOnReceipt = isDateKey(args.purchase_date) && args.purchase_date <= addDaysKey(todayKey(ctx.tz || 0), 1)
+      ? args.purchase_date
+      : null
+    const { ok, status, data } = await userReq(token, 'receipts', 'POST', {
       project_id: resolved.project.id,
       owner_id: ownerId,
       amount,
       category,
       tax_amount: tax,
       store: clean(args.store, 120) || null,
-      description: clean(args.description, 200) || null,
-      // purchase_date is deliberately OMITTED so Postgres applies its
-      // current_date default (FIX-DATABASE-25). Sending null would throw —
-      // the column is NOT NULL, and defaults only fire on an omitted key.
+      description,
+      ...(dateOnReceipt ? { purchase_date: dateOnReceipt } : {}),
     })
-    if (!ok) return { error: BLOCKED }
+    // The caller gets the generic message, but the real Postgres error goes to the
+    // server log — otherwise every write failure looks like a billing problem.
+    if (!ok) {
+      console.error('assistant-execute: add_expense insert failed', status, data)
+      return { error: BLOCKED }
+    }
     const row = Array.isArray(data) ? data[0] : data
     return {
       ok: true,
