@@ -15,6 +15,68 @@ const ORANGE = '#E07B2A'
 const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
 const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
+// Tap-a-template starters. A chip does nothing clever — it just sends a plain
+// English opener, so the assistant runs its normal guided flow (GUIDED SETUPS
+// in api/assistant.js: one short question per message) and the usual Confirm
+// card is still the last thing before anything saves. Nobody has to know what
+// to type; the app tells them what it can do.
+const OWNER_TEMPLATES = [
+  { icon: '🧱', label: 'New job', hint: 'name + price', prompt: "I want to set up a new job. Ask me for what you need one question at a time." },
+  { icon: '👷', label: 'Add a worker', hint: 'name + pay rate', prompt: "I want to add a guy to my crew and set what I pay him. Ask me for what you need one question at a time." },
+  { icon: '🧾', label: 'Add a receipt', hint: 'snap a photo', action: 'receipt' },
+  { icon: '⏱', label: 'Log crew hours', hint: 'who, job, hours', prompt: "I want to log hours for one of my guys. Ask me for what you need one question at a time." },
+  { icon: '💵', label: 'Send an invoice', hint: 'job + amount', prompt: "I want to bill a client. Ask me for what you need one question at a time." },
+  { icon: '📊', label: 'Where do I stand?', hint: 'profit + owed', prompt: "Where do I stand right now — profit so far and what am I owed?" },
+]
+const CREW_TEMPLATES = [
+  { icon: '⏱', label: 'Clock in', hint: 'start the day', prompt: 'Clock me in.' },
+  { icon: '🛑', label: 'Clock out', hint: 'end the day', prompt: 'Clock me out.' },
+  { icon: '🧾', label: 'Add a receipt', hint: 'snap a photo', action: 'receipt' },
+  { icon: '📅', label: 'My hours', hint: 'this week', prompt: 'How many hours do I have this week?' },
+  { icon: '🌴', label: 'Time off', hint: 'ask the boss', prompt: "I want to request time off. Ask me for what you need one question at a time." },
+]
+
+// Two looks, one list: big tappable cards on the empty chat (nothing else to
+// look at), then a thin scrolling row above the keyboard once the conversation
+// has started (so it never pushes the messages off a phone screen).
+function Templates({ items, compact, disabled, onPick }) {
+  if (compact) {
+    return (
+      <div style={{ display: 'flex', gap: 8, padding: '8px 12px 0', overflowX: 'auto', background: 'white', WebkitOverflowScrolling: 'touch' }}>
+        {items.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => onPick(t)}
+            disabled={disabled}
+            style={{ flex: '0 0 auto', padding: '7px 12px', borderRadius: 999, border: '1px solid #d1d5db', background: 'white', color: NAVY, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', opacity: disabled ? 0.5 : 1 }}
+          >
+            <span style={{ marginRight: 6 }}>{t.icon}</span>{t.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: '#9ca3af', letterSpacing: 0.5, marginBottom: 8 }}>TAP ONE TO START</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {items.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => onPick(t)}
+            disabled={disabled}
+            style={{ textAlign: 'left', padding: '12px 12px 11px', borderRadius: 12, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', opacity: disabled ? 0.5 : 1 }}
+          >
+            <div style={{ fontSize: 20, lineHeight: 1.1, marginBottom: 5 }}>{t.icon}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: NAVY }}>{t.label}</div>
+            {t.hint && <div style={{ fontSize: 11.5, color: '#9ca3af', marginTop: 2 }}>{t.hint}</div>}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 async function authHeader() {
   const { data } = await supabase.auth.getSession()
   const tok = data && data.session && data.session.access_token
@@ -28,9 +90,12 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
   const [msgs, setMsgs] = useState([
     {
       role: 'assistant',
+      // Kept short on purpose — the template cards below it show what it can
+      // do far better than a paragraph does. Anything not on a card still
+      // works by typing or talking.
       text: isOwner
-        ? "Hey — I can do just about anything here for you: check profit and what you're owed, add expenses, hours, or mileage, create jobs, invoices, and estimates, manage the crew and schedule, permits, punch lists… just say it. I'll always show you a Confirm card before anything saves."
-        : "Hey — I can clock you in or out, check your hours and pay, show your schedule and jobs, or send your boss a time-off request. Just say it (or tap the mic). I'll show you a Confirm card before anything saves.",
+        ? "Hey — tap one of these, or just tell me what you need (jobs, money, crew, receipts, invoices, permits, punch lists…). Nothing saves until you hit Confirm."
+        : "Hey — tap one of these, or just say it (you can use the mic). Nothing saves until you hit Confirm.",
     },
   ])
   const [input, setInput] = useState('')
@@ -201,6 +266,14 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
     }
   }, [busy, scanning, send])
 
+  // A template chip is either "open the camera" or "say this for me".
+  const templates = isOwner ? OWNER_TEMPLATES : CREW_TEMPLATES
+  const pickTemplate = useCallback((t) => {
+    if (busy || scanning) return
+    if (t.action === 'receipt') { if (fileRef.current) fileRef.current.click(); return }
+    send(t.prompt)
+  }, [busy, scanning, send])
+
   const loadActivity = useCallback(async () => {
     const { data, error } = await supabase
       .from('assistant_actions')
@@ -278,6 +351,10 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
                   {m.text}
                 </div>
               ))}
+              {/* Nothing said yet → show the whole menu of what it can do. */}
+              {msgs.length <= 1 && !pending && (
+                <Templates items={templates} disabled={busy || scanning} onPick={pickTemplate} />
+              )}
               {pending && (
                 <div style={{ alignSelf: 'flex-start', maxWidth: '92%', background: '#FFF4ED', border: `1px solid ${ORANGE}`, borderRadius: 14, padding: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: ORANGE, marginBottom: 4, letterSpacing: 0.3 }}>ABOUT TO:</div>
@@ -290,7 +367,15 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
               )}
               {(busy || scanning) && <div style={{ alignSelf: 'flex-start', color: '#9ca3af', fontSize: 13, fontStyle: 'italic' }}>{scanning ? 'reading receipt…' : 'thinking…'}</div>}
             </div>
-            <div style={{ display: 'flex', gap: 8, padding: 12, paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: '1px solid #e5e7eb', background: 'white' }}>
+            {/* Mid-conversation the same list rides above the keyboard as a thin
+                scrolling row. Hidden while a Confirm card is up — one decision
+                on screen at a time. */}
+            {msgs.length > 1 && !pending && (
+              <div style={{ borderTop: '1px solid #e5e7eb' }}>
+                <Templates items={templates} compact disabled={busy || scanning} onPick={pickTemplate} />
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, padding: 12, paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: msgs.length > 1 && !pending ? 'none' : '1px solid #e5e7eb', background: 'white' }}>
               {/* Receipt scan — owner and crew both; a crew scan books to the boss server-side. */}
               <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
               <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>

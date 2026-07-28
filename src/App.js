@@ -135,6 +135,26 @@ export default function App() {
           // "signup completed", and it's tracked here rather than in the login
           // form so BOTH signup paths (instant and email-confirm) count.
           if (!insErr) track(EV.SIGNUP_COMPLETED, { role: md.role })
+          // Finish claiming the invite now that the profile row exists and we
+          // have a session. This is what applies the pay rate the owner set
+          // when he created the invite — read server-side off the invite row,
+          // never from this metadata (the worker can edit their own metadata).
+          // Awaited so the profile read below already carries the rate.
+          if (!insErr && md.invite_token) {
+            try {
+              const { data: sess } = await supabase.auth.getSession()
+              await fetch('/api/claim-invite', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(sess?.session?.access_token
+                    ? { Authorization: `Bearer ${sess.session.access_token}` }
+                    : {})
+                },
+                body: JSON.stringify({ token: md.invite_token })
+              })
+            } catch { /* best-effort — the owner can still set the rate by hand */ }
+          }
           const res = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
           if (res.error) throw res.error
           data = res.data

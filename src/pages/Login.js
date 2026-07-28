@@ -143,6 +143,11 @@ export default function Login() {
       company_name: role === 'owner' ? company : null,
       owner_id: ownerId
     }
+    // Carry the invite token so App.js can finish the claim on first sign-in
+    // (confirmation-ON flow). The token only identifies which invite to burn —
+    // the pay rate itself is read server-side off that invite row, never from
+    // metadata, which the worker could edit.
+    if (inviteToken) signupMeta.invite_token = inviteToken
     // First-touch marketing attribution rides in the metadata too, so the
     // email-confirmation flow (which may finish on ANOTHER device, where
     // localStorage is empty) can still record which post brought them in.
@@ -156,9 +161,11 @@ export default function Login() {
     })
     if (error) { setError(friendlyError(error.message)); setLoading(false); return }
 
-    // Burn the invite token so the link can't be reused (best-effort —
-    // the worker is already created + linked even if this call fails).
-    if (inviteToken) {
+    // Burn the invite token so the link can't be reused, and let the server
+    // stamp the owner's pay rate onto the profile (best-effort — the worker is
+    // already created + linked even if this call fails).
+    const claimInvite = () => {
+      if (!inviteToken) return
       fetch('/api/claim-invite', {
         method: 'POST',
         headers: {
@@ -176,6 +183,9 @@ export default function Login() {
     // No session => Supabase requires email confirmation. Don't try to insert
     // the profile (it would fail RLS and orphan the account). Tell the user.
     if (!data.session) {
+      // Still burn the link now; App.js calls claim again (with a session) on
+      // first sign-in, which is when the pay rate can finally be applied.
+      claimInvite()
       setNotice(`Account created! We sent a confirmation link to ${email}. Click it, then sign in.`)
       setIsSignup(false)
       setLoading(false)
@@ -199,6 +209,9 @@ export default function Login() {
       }
       // Best-effort: record which campaign/ref created this account.
       saveSignupAttribution(supabase, data.user.id, attribution)
+      // Claim AFTER the profile row exists so the server can stamp the pay
+      // rate the owner set on the invite onto it in the same call.
+      claimInvite()
     }
     setLoading(false)
   }

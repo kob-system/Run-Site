@@ -984,10 +984,13 @@ const WRITE_TOOLS = [
   },
   {
     name: 'invite_worker',
-    description: 'Create a one-time invite link for a new crew member (owner texts it to them). WRITE — confirmed.',
+    description: 'Create a one-time invite link for a new crew member (owner texts it to them). Pass hourly_rate when the owner says what he pays them — it lands on their profile the moment they sign up, so nobody has to set it twice. WRITE — confirmed.',
     input_schema: {
       type: 'object',
-      properties: { worker_name: { type: 'string' } },
+      properties: {
+        worker_name: { type: 'string' },
+        hourly_rate: { type: 'number', description: 'What the owner pays them per hour, if he said.' },
+      },
       required: ['worker_name'],
       additionalProperties: false,
     },
@@ -1191,7 +1194,7 @@ function summarize(tool, a) {
       return `Update settings: ${parts.join(', ') || 'no changes'}.`
     }
     case 'invite_worker':
-      return `Create an invite link for new crew member “${a.worker_name}” (you text it to them; they set a password and are linked to your company).`
+      return `Create an invite link for new crew member “${a.worker_name}”${a.hourly_rate != null ? ` at ${money(a.hourly_rate)}/hr` : ''} (you text it to them; they set a password and are linked to your company${a.hourly_rate != null ? ', and their rate is set automatically' : ''}).`
     case 'remove_worker':
       return `REMOVE ${a.worker_name} from your crew. They lose access to your jobs (their past hours stay on record). This can't be undone from the app.`
     case 'clock_in':
@@ -1322,7 +1325,19 @@ export default async function handler(req, res) {
     `- One change per message: if they ask for several changes at once, do the first and tell them to send the next after confirming.\n` +
     `- If a required detail is missing (amount, which job, which worker), ask ONE short question instead of guessing.\n` +
     `- If they ask how to do something in the app, offer to just do it for them right here.\n` +
-    `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.`
+    `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.\n\n` +
+    `GUIDED SETUPS (the tap-a-suggestion flows — the owner is on a phone, often in a truck):\n` +
+    `- Walk them through the fields below ONE short question per message. Never list the fields, never send a form, never ask two things at once.\n` +
+    `- If they answered several fields in one breath, keep what you got and only ask for what's still missing.\n` +
+    `- "skip", "not sure", "later" on an OPTIONAL field = drop it and move on. Never stall a setup over an optional field.\n` +
+    `- The moment you have everything required, call the write tool. The confirm card the owner sees IS the read-back — don't repeat the details yourself first.\n` +
+    `- New job → name, then the contract price (what the client pays), then client name (optional, ask once) → create_job.\n` +
+    `- Add a worker → first ask whether they're a brand-new hire or already on the crew.\n` +
+    `    • Brand new → their name, then their hourly rate → invite_worker with hourly_rate. After it saves, tell them to text the link and that the rate is applied automatically when the worker signs up.\n` +
+    `    • Already on the crew → their name, then the new hourly rate → set_worker_rate.\n` +
+    `- Add a receipt → which job, then the total, then the store (optional) → add_expense. If a scanned receipt is already in the conversation you have the store, total, tax and date — then the ONLY thing to ask is which job.\n` +
+    `- Log crew hours → which worker, which job, which day, how many hours → add_time_entry.\n` +
+    `- Send an invoice → which job, then the amount (offer what's left on the contract if you can look it up) → create_invoice.`
 
   const workerSystem =
     `You are the JobTally assistant for ${who}, a crew member${company}. ` +
@@ -1337,7 +1352,13 @@ export default async function handler(req, res) {
     `- One change per message: if they ask for several at once, do the first and tell them to send the next after confirming.\n` +
     `- Their pay = their clocked hours × their hourly rate. You cannot see or discuss the business's money, other crew members' pay, job profit, or anything owner-side — if asked, say that's owner-only and they should ask their boss.\n` +
     `- If a required detail is missing (which job, which dates), ask ONE short question instead of guessing.\n` +
-    `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.`
+    `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.\n\n` +
+    `GUIDED SETUPS (the tap-a-suggestion flows — they're on a phone, on a jobsite, hands dirty):\n` +
+    `- ONE short question per message. Never list fields, never ask two things at once.\n` +
+    `- Clock in → if they're on exactly one job, just propose clock_in for it; only ask which job when they're on more than one.\n` +
+    `- Add a receipt → which job, then the total → add_expense. If a scanned receipt is already in the conversation you have the store and total — the ONLY thing to ask is which job.\n` +
+    `- Time off → which day (or the first and last day), then the reason (optional, ask once, "skip" is fine) → request_time_off.\n` +
+    `- The moment you have what's required, call the tool. The confirm card IS the read-back — don't repeat it back yourself first.`
 
   const system = isOwner ? ownerSystem : workerSystem
   const tools = isOwner ? [...READ_TOOLS, ...WRITE_TOOLS] : [...WORKER_READ_TOOLS, ...WORKER_WRITE_TOOLS]

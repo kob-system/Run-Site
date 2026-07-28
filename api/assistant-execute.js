@@ -837,16 +837,26 @@ async function runTool(tool, args, ctx) {
   if (tool === 'invite_worker') {
     const workerName = clean(args.worker_name, 120)
     if (!workerName) return { error: 'Whose invite is this? Give a name.' }
+    // Optional pay rate captured during the guided "add a worker" flow. It
+    // rides on the invite row and is applied server-side at claim time
+    // (api/claim-invite.js) — the owner never has to set it a second time.
+    let rate = null
+    if (args.hourly_rate != null) {
+      rate = asNum(args.hourly_rate)
+      if (!Number.isFinite(rate) || rate < 0 || rate > 500) return { error: 'Hourly rate must be between $0 and $500.' }
+      rate = rc(rate)
+    }
     const inviteToken = crypto.randomUUID()
     const { ok } = await userReq(token, 'worker_invites', 'POST', {
-      owner_id: uid, token: inviteToken, worker_name: workerName,
+      owner_id: uid, token: inviteToken, worker_name: workerName, hourly_rate: rate,
     })
     if (!ok) return { error: BLOCKED }
     const link = `${appOrigin(ctx)}/?invite=${inviteToken}`
     return {
       ok: true,
-      message: `Invite for ${workerName} is ready — text them this link to join your crew:\n${link}`,
-      result: { worker_name: workerName, link },
+      message: `Invite for ${workerName}${rate != null ? ` (${money(rate)}/hr)` : ''} is ready — text them this link to join your crew:\n${link}` +
+        (rate != null ? `\n\nTheir rate is set the second they sign up — you don't have to do it again.` : ''),
+      result: { worker_name: workerName, link, hourly_rate: rate },
     }
   }
 
