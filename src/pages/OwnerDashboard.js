@@ -18,6 +18,14 @@ const CATEGORY_LABELS = {
 }
 const DEFAULT_MILEAGE_RATE = 0.70 // IRS standard business mileage rate — edit per trip to the current year's rate
 
+// Today as YYYY-MM-DD in the OWNER's timezone. new Date().toISOString() is UTC,
+// which after ~8pm Eastern stamps tomorrow's date on tonight's receipt — and on
+// Dec 31 that files a deduction in the wrong tax year.
+const localToday = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // Project detail sub-tabs (scrollable on narrow screens).
 const PROJECT_TABS = ['receipts', 'time', 'photos', 'documents', 'punch', 'materials', 'changes', 'permits', 'log', 'mileage', 'schedule', 'budget']
 const PROJECT_TAB_LABELS = {
@@ -258,7 +266,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [reportYear, setReportYear] = useState(new Date().getFullYear())
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
-  const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
+  const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '', purchase_date: '' })
+  // Did the owner actually accept a scan for THIS receipt? scanResult is cleared
+  // the moment he taps "Looks right", so it can't be used as the analytics flag.
+  const [scanUsed, setScanUsed] = useState(false)
   const [scheduleForm, setScheduleForm] = useState({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
   const [mileageEntries, setMileageEntries] = useState([])
   const [showNewMileage, setShowNewMileage] = useState(false)
@@ -1268,7 +1279,22 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   const confirmScan = () => {
     if (!scanResult) return
-    setReceiptForm(f => ({ ...f, store: scanResult.store, amount: scanResult.amount }))
+    // scan-receipt returns store, amount, tax and date. Tax is REAL MONEY —
+    // fetchSpend books cost = amount + tax_amount, so dropping it understates
+    // every scanned job's spend by the sales tax. Only overwrite tax when the
+    // scan actually found one (never blank out a number the owner typed).
+    setReceiptForm(f => ({
+      ...f,
+      store: scanResult.store || f.store,
+      amount: scanResult.amount || f.amount,
+      tax: (scanResult.tax != null && scanResult.tax !== '' && !/^none$/i.test(String(scanResult.tax)))
+        ? scanResult.tax
+        : f.tax,
+      purchase_date: (scanResult.date && /^\d{4}-\d{2}-\d{2}$/.test(scanResult.date))
+        ? scanResult.date
+        : f.purchase_date
+    }))
+    setScanUsed(true)
     setScanResult(null)
   }
 
@@ -1282,14 +1308,18 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         project_id: selectedProject.id, owner_id: profile.id,
         description: receiptForm.description, store: receiptForm.store,
         amount, tax_amount: parseFloat(receiptForm.tax || 0),
-        category: receiptForm.category, photo_url: receiptForm.photo_url || null
+        category: receiptForm.category, photo_url: receiptForm.photo_url || null,
+        // The day the money was actually spent — this, not created_at, is what
+        // buckets the receipt into a tax year. Blank = today in the OWNER's
+        // timezone (toISOString() would roll over to tomorrow after 8pm ET).
+        purchase_date: receiptForm.purchase_date || localToday()
       })
       if (error) throw error
       // Category is a fixed enum and scanned is a boolean — shape, not content.
-      track(EV.RECEIPT_ADDED, { category: receiptForm.category, scanned: !!scanResult })
+      track(EV.RECEIPT_ADDED, { category: receiptForm.category, scanned: scanUsed })
       setShowNewReceipt(false)
-      setReceiptForm({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '' })
-      setScanResult(null); setScanError('')
+      setReceiptForm({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '', purchase_date: '' })
+      setScanResult(null); setScanError(''); setScanUsed(false)
       await refetchDetail('receipts', setReceipts, 'created_at', false)
       await fetchProjects()
       showToast('Receipt saved ✓')
@@ -1535,7 +1565,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       // or shifts on a busy account exceeds it, and a silent undercount here would
       // understate deductions on the accountant-facing tax pack.
       const [rawRcpts, miles, times] = await Promise.all([
-        fetchAllRows((from, to) => supabase.from('receipts').select('category, amount, tax_amount, created_at, project_id').eq('owner_id', profile.id).gte('created_at', yStart).lte('created_at', yEndTs).range(from, to)),
+        // Bucket by purchase_date (the date ON the receipt), not created_at.
+        // A December receipt entered in January belongs to December's return.
+        // purchase_date is NOT NULL and backfilled from created_at, so no row
+        // can silently fall out of this range.
+        fetchAllRows((from, to) => supabase.from('receipts').select('category, amount, tax_amount, purchase_date, project_id').eq('owner_id', profile.id).gte('purchase_date', yStart).lte('purchase_date', yEndDate).range(from, to)),
         fetchAllRows((from, to) => supabase.from('mileage_entries').select('miles, rate, trip_date').eq('owner_id', profile.id).gte('trip_date', yStart).lte('trip_date', yEndDate).range(from, to)),
         projectIds.length
           ? fetchAllRows((from, to) => supabase.from('time_entries').select('labor_cost, clocked_in_at').in('project_id', projectIds).not('clocked_out_at', 'is', null).gte('clocked_in_at', yStart).lte('clocked_in_at', yEndTs).range(from, to))
@@ -1996,7 +2030,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                     <div>
                       <h3>{r.description}</h3>
                       <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ` · tax ${formatCurrency(r.tax_amount)}` : ''}</p>
-                      <p style={{ fontSize: '11px', color: '#717171' }}>{new Date(r.created_at).toLocaleDateString()}</p>
+                      {/* Show the date ON the receipt when we have it. '+T00:00:00'
+                          forces LOCAL midnight — a bare 'YYYY-MM-DD' parses as UTC
+                          and would display a day early everywhere west of London. */}
+                      <p style={{ fontSize: '11px', color: '#717171' }}>{r.purchase_date ? new Date(r.purchase_date + 'T00:00:00').toLocaleDateString() : new Date(r.created_at).toLocaleDateString()}</p>
                       {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
                     </div>
                     <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
@@ -2256,6 +2293,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', marginBottom: '8px' }}>📷 Scanned — confirm before saving</p>
                   <p style={{ fontSize: '15px', fontWeight: '600' }}>Store: {scanResult.store}</p>
                   <p style={{ fontSize: '15px', fontWeight: '600' }}>Amount: {formatCurrency(scanResult.amount)}</p>
+                  {scanResult.tax && !/^none$/i.test(String(scanResult.tax)) && (
+                    <p style={{ fontSize: '15px', fontWeight: '600' }}>Sales tax: {formatCurrency(scanResult.tax)}</p>
+                  )}
+                  {scanResult.date && /^\d{4}-\d{2}-\d{2}$/.test(scanResult.date) && (
+                    <p style={{ fontSize: '15px', fontWeight: '600' }}>Date: {scanResult.date}</p>
+                  )}
                   <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                     <button onClick={confirmScan} style={{ flex: 1, background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontWeight: '600', cursor: 'pointer' }}>Looks right ✓</button>
                     <button onClick={() => setScanResult(null)} style={{ flex: 1, background: 'transparent', color: '#16A34A', border: '2px solid #16A34A', borderRadius: '8px', padding: '10px', fontWeight: '600', cursor: 'pointer' }}>Edit manually</button>
@@ -2266,6 +2309,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="input-group"><label>Store</label><input value={receiptForm.store} onChange={e => setReceiptForm({ ...receiptForm, store: e.target.value })} placeholder="Home Depot" /></div>
               <div className="input-group"><label>Amount ($)</label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Sales Tax ($) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={receiptForm.tax} onChange={e => setReceiptForm({ ...receiptForm, tax: e.target.value })} placeholder="0.00" /></div>
+              <div className="input-group"><label>Date on the receipt <span style={{ color: '#888', fontWeight: '400' }}>— leave blank for today</span></label><input type="date" value={receiptForm.purchase_date} onChange={e => setReceiptForm({ ...receiptForm, purchase_date: e.target.value })} /></div>
               <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({ ...receiptForm, category: e.target.value })}>{RECEIPT_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select></div>
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addReceipt} disabled={loading || !receiptForm.amount}>{loading ? 'Saving…' : 'Save receipt'}</button>
