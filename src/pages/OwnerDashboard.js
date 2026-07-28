@@ -9,6 +9,10 @@ import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbook
 import { deleteSampleJob } from '../utils/sampleJob'
 import { track, EV } from '../utils/analytics'
 import { legacyFreeDaysLeft } from '../utils/trialWindow'
+import {
+  itemAmount, subtotal, taxableBase, taxAmount, estimateTotal,
+  normalizeTaxMode, TAX_MODES, DEFAULT_TAX_MODE
+} from '../utils/estimateMath'
 
 // Deduction categories an accountant wants broken out at tax time.
 const RECEIPT_CATEGORIES = ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other']
@@ -52,11 +56,12 @@ const PROJECT_QUICK = [
 const STAGE_LABELS = { start: 'Not started', mid: 'In progress', end: 'Done' }
 const stageLabel = (s) => STAGE_LABELS[s] || s
 
-// Estimate line-item math (pure; safe at module scope).
+// Estimate line-item math lives in utils/estimateMath.js so it can be tested —
+// it used to be three one-liners here, and one of them taxed labor. Short
+// aliases keep the call sites below reading the way they always have.
 const ESTIMATE_KINDS = [['materials', 'Materials'], ['labor', 'Labor'], ['other', 'Other']]
-const estItemAmount = (it) => (parseFloat(it && it.qty) || 0) * (parseFloat(it && it.unit_price) || 0)
-const estSubtotal = (items) => (Array.isArray(items) ? items : []).reduce((s, it) => s + estItemAmount(it), 0)
-const estTotal = (items, taxRate) => { const sub = estSubtotal(items); return sub + sub * (parseFloat(taxRate) || 0) / 100 }
+const estItemAmount = itemAmount
+const estSubtotal = subtotal
 const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px' })
 const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px' })
 const sectionLabel = { fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '18px 0 8px', padding: '0 4px' }
@@ -312,7 +317,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [estimates, setEstimates] = useState([])
   const [showNewEstimate, setShowNewEstimate] = useState(false)
   const [editingEstimateId, setEditingEstimateId] = useState(null)
-  const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
+  const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', tax_mode: DEFAULT_TAX_MODE, notes: '' })
   const [estimateItems, setEstimateItems] = useState([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
   const [upcomingSchedule, setUpcomingSchedule] = useState([])
   const [complianceItems, setComplianceItems] = useState([])
@@ -1017,7 +1022,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // ---- Estimates ----
   const openNewEstimate = () => {
     setEditingEstimateId(null)
-    setEstimateForm({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
+    setEstimateForm({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', tax_mode: DEFAULT_TAX_MODE, notes: '' })
     setEstimateItems([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
     setInlineError(''); setShowNewEstimate(true)
   }
@@ -1025,7 +1030,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     setEditingEstimateId(est.id)
     setEstimateForm({
       client_name: est.client_name || '', client_phone: est.client_phone || '', client_email: est.client_email || '',
-      title: est.title || '', tax_rate: est.tax_rate ? String(est.tax_rate) : '', notes: est.notes || ''
+      title: est.title || '', tax_rate: est.tax_rate ? String(est.tax_rate) : '',
+      // Rows written before FIX-DATABASE-28 have no tax_mode; normalize rescues them.
+      tax_mode: normalizeTaxMode(est.tax_mode), notes: est.notes || ''
     })
     const items = Array.isArray(est.items) ? est.items : []
     setEstimateItems(items.length
@@ -1047,11 +1054,21 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const payload = {
         owner_id: profile.id, client_name: estimateForm.client_name, client_phone: estimateForm.client_phone || null,
         client_email: estimateForm.client_email || null, title: estimateForm.title, items,
-        tax_rate: parseFloat(estimateForm.tax_rate || 0), notes: estimateForm.notes || null
+        tax_rate: parseFloat(estimateForm.tax_rate || 0), tax_mode: normalizeTaxMode(estimateForm.tax_mode),
+        notes: estimateForm.notes || null
       }
-      let error
-      if (editingEstimateId) ({ error } = await supabase.from('estimates').update(payload).eq('id', editingEstimateId))
-      else ({ error } = await supabase.from('estimates').insert({ ...payload, status: 'draft' }))
+      const write = (body) => editingEstimateId
+        ? supabase.from('estimates').update(body).eq('id', editingEstimateId)
+        : supabase.from('estimates').insert({ ...body, status: 'draft' })
+      let { error } = await write(payload)
+      // 42703 = column does not exist: this build is live but FIX-DATABASE-28
+      // hasn't been applied yet. Save the estimate anyway rather than losing the
+      // owner's typing; the total still computes correctly client-side and the
+      // mode starts persisting the moment the migration runs.
+      if (error && error.code === '42703') {
+        const { tax_mode, ...legacy } = payload
+        ;({ error } = await write(legacy))
+      }
       if (error) throw error
       setShowNewEstimate(false); setEditingEstimateId(null)
       await fetchEstimates(); showToast('Estimate saved ✓')
@@ -1165,9 +1182,15 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const emailEstimate = (est) => {
     const items = Array.isArray(est.items) ? est.items : []
     const lines = items.map(it => `• ${it.description}: ${it.qty} × $${(Number(it.unit_price) || 0).toFixed(2)} = $${estItemAmount(it).toFixed(2)}`).join('\n')
-    const total = estTotal(est.items, est.tax_rate)
+    const tax = taxAmount(items, est.tax_rate, est.tax_mode)
+    const total = estimateTotal(items, est.tax_rate, est.tax_mode)
+    // Only break out subtotal/tax when there IS tax — a capital-improvement job
+    // shows one clean number instead of a confusing "Tax: $0.00" line.
+    const totals = tax > 0
+      ? `Subtotal: $${estSubtotal(items).toFixed(2)}\nSales tax: $${tax.toFixed(2)}\nTotal: $${total.toFixed(2)}`
+      : `Total: $${total.toFixed(2)}`
     const subject = `Estimate${est.title ? ': ' + est.title : ''}`
-    const body = `Hi ${est.client_name || ''},\n\nHere's your estimate${est.title ? ' for ' + est.title : ''}:\n\n${lines}\n\nTotal: $${total.toFixed(2)}${est.notes ? '\n\n' + est.notes : ''}\n\nReply to approve and we'll get on the schedule.\n\nThanks,\n${profile.company_name || profile.full_name || ''}`
+    const body = `Hi ${est.client_name || ''},\n\nHere's your estimate${est.title ? ' for ' + est.title : ''}:\n\n${lines}\n\n${totals}${est.notes ? '\n\n' + est.notes : ''}\n\nReply to approve and we'll get on the schedule.\n\nThanks,\n${profile.company_name || profile.full_name || ''}`
     window.location.href = `mailto:${est.client_email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
   }
   const emailInvoice = (inv) => {
@@ -3099,7 +3122,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             </p>
             <button className="btn-primary" onClick={openNewEstimate}>+ New estimate</button>
             {estimates.map(est => {
-              const total = estTotal(est.items, est.tax_rate)
+              const total = estimateTotal(est.items, est.tax_rate, est.tax_mode)
               const statusColor = est.status === 'accepted' ? 'status-end' : est.status === 'sent' ? 'status-mid' : 'status-start'
               return (
                 <div key={est.id} className="card" style={est.status === 'accepted' ? { background: '#f9fafb' } : undefined}>
@@ -3363,12 +3386,33 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </div>
             ))}
             <button onClick={addEstimateRow} style={{ background: 'none', border: '1px dashed #E07B2A', color: '#E07B2A', borderRadius: '8px', padding: '10px', width: '100%', fontSize: '13px', fontWeight: '600', cursor: 'pointer', marginBottom: '12px' }}>+ Add line</button>
-            <div className="input-group"><label>Tax Rate (%) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={estimateForm.tax_rate} onChange={e => setEstimateForm({ ...estimateForm, tax_rate: e.target.value })} placeholder="8" /></div>
+            <div className="input-group">
+              <label>Sales tax on this job</label>
+              <select value={estimateForm.tax_mode} onChange={e => setEstimateForm({ ...estimateForm, tax_mode: e.target.value })}>
+                {TAX_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              <p style={{ fontSize: '12px', color: '#6B7280', margin: '6px 2px 0', lineHeight: 1.4 }}>
+                {(TAX_MODES.find(m => m.value === estimateForm.tax_mode) || TAX_MODES[0]).help}
+                {' '}<span style={{ color: '#9CA3AF' }}>Rules vary by state — check yours with your accountant once, then it's set.</span>
+              </p>
+            </div>
+            {estimateForm.tax_mode !== 'capital' && (
+              <div className="input-group"><label>Tax Rate (%) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={estimateForm.tax_rate} onChange={e => setEstimateForm({ ...estimateForm, tax_rate: e.target.value })} placeholder="8" /></div>
+            )}
             <div className="input-group"><label>Notes (optional)</label><input value={estimateForm.notes} onChange={e => setEstimateForm({ ...estimateForm, notes: e.target.value })} placeholder="50% deposit to start, balance on completion" /></div>
             <div style={{ background: '#1C2B3A', color: 'white', borderRadius: '12px', padding: '14px', marginBottom: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)' }}><span>Subtotal</span><span>{formatCurrency(estSubtotal(estimateItems))}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}><span>Tax ({parseFloat(estimateForm.tax_rate) || 0}%)</span><span>{formatCurrency(estSubtotal(estimateItems) * (parseFloat(estimateForm.tax_rate) || 0) / 100)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}><span>Total</span><span>{formatCurrency(estTotal(estimateItems, estimateForm.tax_rate))}</span></div>
+              {estimateForm.tax_mode === 'capital'
+                ? <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '6px' }}>No sales tax charged — capital improvement.</div>
+                : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>
+                    {/* Says out loud WHAT is being taxed, so an owner who picks the wrong
+                        mode sees it here instead of on a customer's phone. */}
+                    <span>Tax ({parseFloat(estimateForm.tax_rate) || 0}% of {formatCurrency(taxableBase(estimateItems, estimateForm.tax_mode))}{estimateForm.tax_mode === 'materials' ? ' materials' : ''})</span>
+                    <span>{formatCurrency(taxAmount(estimateItems, estimateForm.tax_rate, estimateForm.tax_mode))}</span>
+                  </div>
+                )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}><span>Total</span><span>{formatCurrency(estimateTotal(estimateItems, estimateForm.tax_rate, estimateForm.tax_mode))}</span></div>
             </div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={saveEstimate} disabled={loading}>{loading ? 'Saving…' : 'Save estimate'}</button>
