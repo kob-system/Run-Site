@@ -20,6 +20,7 @@ const Billing = React.lazy(() => import('./pages/Billing'))
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
 const Landing = React.lazy(() => import('./pages/Landing'))
 const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
+const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
 
 // Single Suspense fallback for every code-split screen, so each return site can
 // just wrap its element in <Screen>…</Screen> instead of repeating the boilerplate.
@@ -36,6 +37,12 @@ export default function App() {
   const [sub, setSub] = useState(undefined)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
+  // Read once at mount, then owned by state — dismissing the handoff strips it
+  // from the URL, and re-reading the querystring on every render would keep
+  // resurrecting a token the visitor already declined.
+  const [inviteToken, setInviteToken] = useState(
+    () => new URLSearchParams(window.location.search).get('invite')
+  )
 
   useEffect(() => {
     // onAuthStateChange fires INITIAL_SESSION immediately with the stored session
@@ -219,6 +226,29 @@ export default function App() {
       return <Screen><Landing /></Screen>
     }
     return <Screen><Login /></Screen>
+  }
+  // Signed in, and the URL still carries a worker invite. The branch above only
+  // runs when logged OUT, so before this the token was silently discarded and
+  // the visitor landed on whatever dashboard the existing session owned — the
+  // "I opened the invite link on my phone and it took me to the page I was
+  // already logged into" bug. Ahead of the role and billing branches, because
+  // the whole point is that it must beat "wherever this session normally goes".
+  if (inviteToken) {
+    return (
+      <Screen>
+        <InviteHandoff
+          token={inviteToken}
+          session={session}
+          onDismiss={() => {
+            // Drop the param so a refresh (or the next render) doesn't ask again.
+            const url = new URL(window.location.href)
+            url.searchParams.delete('invite')
+            window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+            setInviteToken(null)
+          }}
+        />
+      </Screen>
+    )
   }
   // Founder readout at /?metrics=1. Placed ahead of the role and billing
   // branches so it's reachable from any signed-in account — the real gate is
