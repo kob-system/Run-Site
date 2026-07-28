@@ -30,31 +30,30 @@ const localToday = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// Project detail sub-tabs (scrollable on narrow screens).
-const PROJECT_TABS = ['receipts', 'time', 'photos', 'documents', 'punch', 'materials', 'changes', 'permits', 'log', 'mileage', 'schedule', 'budget']
-const PROJECT_TAB_LABELS = {
-  receipts: 'Receipts', time: 'Time', photos: 'Photos', documents: 'Documents',
-  punch: 'Fix-it list', materials: 'Shopping List', changes: 'Extras & add-ons',
-  permits: 'Permits', log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
-}
-// Job sub-tabs grouped by LIFECYCLE (not data-type) so a busy crew scans a few
-// buckets instead of 12 tabs. The 3 daily actions are also promoted above as
-// always-visible quick buttons (Clock/Photo/Log are never more than one tap).
-const PROJECT_BUCKETS = [
-  { key: 'today', label: "Today's Work", tabs: ['time', 'photos', 'log', 'receipts', 'mileage'] },
-  { key: 'plan', label: 'Plan & Lists', tabs: ['schedule', 'materials', 'punch'] },
-  { key: 'money', label: 'Money', tabs: ['budget', 'changes'] },
-  { key: 'docs', label: 'Docs', tabs: ['documents', 'permits'] },
-]
-const PROJECT_QUICK = [
-  { tab: 'time', label: '⏱ Clock' },
-  { tab: 'photos', label: '📷 Photo' },
-  { tab: 'log', label: '📋 Log' },
+// The job screen used to stack THREE rows of navigation before any content: 3
+// quick buttons, then 4 lifecycle buckets, then the tabs inside the open
+// bucket — 12 destinations, one small panel at a time. Crowded at the top,
+// empty at the bottom, and whatever you wanted was two taps behind a bucket
+// name you had to guess.
+//
+// Now it's ONE row of four tabs, and each tab stacks its sections down the page
+// (collapsible, each with a count) — the pattern Square, Notion, and iOS
+// Settings all landed on: one axis of navigation, then scroll.
+const PROJECT_TABS = [
+  { key: 'work', label: 'Work' },
+  { key: 'plan', label: 'Plan' },
+  { key: 'money', label: 'Money' },
+  { key: 'docs', label: 'Docs' },
 ]
 // Plain-English names for the DB stage values (start/mid/end). The raw values
 // mean nothing to a contractor — always render through this map.
 const STAGE_LABELS = { start: 'Not started', mid: 'In progress', end: 'Done' }
 const stageLabel = (s) => STAGE_LABELS[s] || s
+// What tapping the stage control actually DOES, spelled out. This used to be a
+// bare "Not started ↻" pill in the top-right corner of the job header, and the
+// owner's own words on seeing it were "a not started button on the top right
+// hand corner which I don't know what that is."
+const STAGE_ACTION = { start: 'Start work →', mid: 'Mark done ✓', end: '↩ Reopen job' }
 
 // Estimate line-item math lives in utils/estimateMath.js so it can be tested —
 // it used to be three one-liners here, and one of them taxed labor. Short
@@ -85,11 +84,39 @@ const BackBtn = ({ label, onClick }) => (
   <button onClick={onClick} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ {label}</button>
 )
 
+// One collapsible block inside a job tab. The count in the header is the whole
+// point: you can tell whether a section is worth opening WITHOUT opening it,
+// which is what the old tab rows could never do — every tab looked identical
+// whether it held 40 receipts or nothing.
+const JobSection = ({ title, count, open, onToggle, children }) => (
+  <div style={{ marginBottom: '6px' }}>
+    <button type="button" onClick={onToggle} aria-expanded={open}
+      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', borderBottom: '1px solid #EEE', padding: '10px 4px', cursor: 'pointer', textAlign: 'left', minHeight: 'var(--tap)' }}>
+      <span style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>{title}</span>
+      {count > 0 && <span style={{ fontSize: '11px', fontWeight: '700', color: '#E07B2A', background: '#FFF7ED', borderRadius: '999px', padding: '2px 8px' }}>{count}</span>}
+      <span style={{ flex: 1 }} />
+      <span style={{ color: '#9CA3AF', fontSize: '13px' }}>{open ? '▾' : '▸'}</span>
+    </button>
+    {open && <div style={{ paddingTop: '10px' }}>{children}</div>}
+  </div>
+)
+
 // Sunday-start week key (YYYY-MM-DD), used to group pay into weekly paychecks.
 const dateKey = (d) => {
   const x = new Date(d)
   const pad = (n) => String(n).padStart(2, '0')
   return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`
+}
+// Photos and written log entries, merged into one newest-first feed of days.
+// They were two separate tabs, but on a real job they are the same act: "here
+// is what happened today." Logs carry a plain 'YYYY-MM-DD' log_date; photos
+// carry a created_at timestamp, so both get reduced to the same day key.
+const buildDayFeed = (logs, photos) => {
+  const days = {}
+  const day = (k) => (days[k] = days[k] || { key: k, logs: [], photos: [] })
+  ;(logs || []).forEach((l) => day(String(l.log_date).slice(0, 10)).logs.push(l))
+  ;(photos || []).forEach((p) => day(dateKey(p.created_at)).photos.push(p))
+  return Object.values(days).sort((a, b) => (a.key < b.key ? 1 : -1))
 }
 const weekStartKey = (dateLike) => {
   const d = new Date(dateLike)
@@ -249,7 +276,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [spendError, setSpendError] = useState(false) // true when the live spend fetch failed (don't render a silent $0)
   const [selectedProject, setSelectedProject] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false) // job detail tables in flight (show loading, not a false empty-state)
-  const [projectTab, setProjectTab] = useState('receipts')
+  const [projectTab, setProjectTab] = useState('work')
+  // Sections are OPEN by default (this is a scrolling page, not an accordion) —
+  // this only remembers the ones you deliberately folded away.
+  const [closedSections, setClosedSections] = useState({})
+  const isOpen = (k) => !closedSections[k]
+  const toggleSection = (k) => setClosedSections(s => ({ ...s, [k]: !s[k] }))
   const [receipts, setReceipts] = useState([])
   const [timeEntries, setTimeEntries] = useState([])
   const [scheduleEntries, setScheduleEntries] = useState([])
@@ -1941,42 +1973,33 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         <div className="topbar">
           <button aria-label="Back" onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
-          <span className={'status-pill status-' + selectedProject.stage} role="button" tabIndex={0} aria-label={`Job status: ${stageLabel(selectedProject.stage)}. ${selectedProject.stage === 'end' ? 'Activate to reopen.' : 'Activate to advance.'}`} style={{ cursor: 'pointer' }} onClick={() => cycleStage(selectedProject)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleStage(selectedProject) } }}>{stageLabel(selectedProject.stage)} ↻</span>
+          <span className={'status-pill status-' + selectedProject.stage} aria-label={`Job status: ${stageLabel(selectedProject.stage)}`}>{stageLabel(selectedProject.stage)}</span>
         </div>
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
-        {(() => {
-          const activeBucket = PROJECT_BUCKETS.find(b => b.tabs.includes(projectTab)) || PROJECT_BUCKETS[0]
-          return (
-            <div style={{ margin: '16px 16px 0' }}>
-              {/* Daily actions — always one tap, never buried in a bucket */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                {PROJECT_QUICK.map(q => (
-                  <button key={q.tab} onClick={() => setProjectTab(q.tab)} style={{ flex: 1, minHeight: '48px', padding: '10px 4px', borderRadius: '10px', border: projectTab === q.tab ? '2px solid #E07B2A' : '1px solid #ddd', background: projectTab === q.tab ? '#FFF7ED' : 'white', fontSize: '13px', fontWeight: '700', color: '#1C2B3A', cursor: 'pointer' }}>{q.label}</button>
-                ))}
-              </div>
-              {/* Lifecycle buckets — pick one to reveal its tabs */}
-              <div className="tabs tabs-scroll">
-                {PROJECT_BUCKETS.map(b => (
-                  <button key={b.key} className={'tab ' + (activeBucket.key === b.key ? 'active' : '')} onClick={() => setProjectTab(b.tabs[0])}>{b.label}</button>
-                ))}
-              </div>
-              {/* Tabs inside the active bucket */}
-              <div className="tabs tabs-scroll" style={{ marginTop: '4px' }}>
-                {activeBucket.tabs.map(t => (
-                  <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)} style={{ fontSize: '12px' }}>{PROJECT_TAB_LABELS[t]}</button>
-                ))}
-              </div>
-            </div>
-          )
-        })()}
+        {/* The pill in the header now only REPORTS the stage; the control that
+            changes it says out loud what it will do. It used to be a "Not
+            started ↻" pill in the corner — plus a second, identical stage button
+            buried at the bottom of the Budget tab. One job, one control. */}
+        <div style={{ display: 'flex', gap: '8px', margin: '12px 16px 0' }}>
+          <button className="btn-primary" style={{ flex: 2, marginTop: 0 }} onClick={() => cycleStage(selectedProject)}>
+            {STAGE_ACTION[selectedProject.stage] || STAGE_ACTION.start}
+          </button>
+          <button className="btn-secondary" style={{ flex: 1, marginTop: 0 }} onClick={openEditJob}>✎ Edit</button>
+        </div>
+        <div className="tabs" style={{ margin: '12px 16px 0' }}>
+          {PROJECT_TABS.map(t => (
+            <button key={t.key} className={'tab ' + (projectTab === t.key ? 'active' : '')} onClick={() => setProjectTab(t.key)}>{t.label}</button>
+          ))}
+        </div>
         <div className="page">
           {detailLoading ? (
             <div className="empty-state"><p>Loading…</p></div>
           ) : (
           <>
-          {projectTab === 'budget' && (
+          {projectTab === 'money' && (
             <div>
+              <JobSection title="Budget & profit" open={isOpen('budget')} onToggle={() => toggleSection('budget')}>
               {/* Profit hero — the one number that matters, surfaced at the top
                   instead of buried as the last of six cards. If no budget was
                   set yet, don't show a scary $0/over-budget — prompt to add one. */}
@@ -2062,53 +2085,44 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>Non-materials receipts (gas, permits, tools, subs)</p>
                 </div>
               )}
-              <div className="card">
-                <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>PROFIT TARGET</p>
-                <p style={{ fontWeight: '700', fontSize: '22px', color: '#16A34A' }}>{formatCurrency(selectedProject.profit_target)}</p>
-              </div>
-              <div className="card">
-                <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>PROJECTED PROFIT</p>
-                <p style={{ fontWeight: '700', fontSize: '22px', color: projProfit >= 0 ? '#16A34A' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
-                {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px' }}>⚠️ Projected to go over budget</p>}
-              </div>
-              {selectedProject.stage !== 'end' && (
-                <button className="btn-primary" onClick={() => advanceStage(selectedProject)}>
-                  {selectedProject.stage === 'start' ? 'Start work →' : 'Mark as complete ✓'}
-                </button>
-              )}
-              <button className="btn-secondary" onClick={openEditJob}>✎ Edit job details</button>
-              {selectedProject.stage === 'end' && (
-                <button className="btn-secondary" onClick={() => reopenJob(selectedProject)}>↩ Reopen job</button>
-              )}
-            </div>
-          )}
-
-          {projectTab === 'receipts' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add receipt</button>
-              {receipts.map(r => (
-                <div key={r.id} className="card" role="button" tabIndex={0} onClick={() => setPhotoViewer(r)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPhotoViewer(r) } }} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <h3>{r.description}</h3>
-                      <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ` · tax ${formatCurrency(r.tax_amount)}` : ''}</p>
-                      {/* Show the date ON the receipt when we have it. '+T00:00:00'
-                          forces LOCAL midnight — a bare 'YYYY-MM-DD' parses as UTC
-                          and would display a day early everywhere west of London. */}
-                      <p style={{ fontSize: '11px', color: '#717171' }}>{r.purchase_date ? new Date(r.purchase_date + 'T00:00:00').toLocaleDateString() : new Date(r.created_at).toLocaleDateString()}</p>
-                      {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
-                    </div>
-                    <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
+              {/* The two cards that used to sit here (PROFIT TARGET and a second
+                  PROJECTED PROFIT) said the same thing as the hero at the top of
+                  this section, and the stage/edit buttons under them duplicated
+                  the ones now in the job header. Deleted, not moved. */}
+              </JobSection>
+              {/* Extras were a separate tab two rows away from the budget they
+                  change — but an approved extra IS budget: it raises the adjusted
+                  contract in the card above. Same tab, right underneath. */}
+              <JobSection title="Extras & add-ons" count={changeOrders.length} open={isOpen('extras')} onToggle={() => toggleSection('extras')}>
+                <button className="btn-primary" onClick={() => { setShowNewChange(true); setInlineError('') }} style={{ marginTop: 0 }}>+ Add extra / add-on</button>
+                {changeOrders.some(c => c.status === 'approved') && (
+                  <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Approved extras</p>
+                    <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>+{formatCurrency(changeOrders.filter(c => c.status === 'approved').reduce((s, c) => s + (c.amount || 0), 0))}</p>
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>added to what the client owes</p>
                   </div>
-                </div>
-              ))}
-              {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store and amount for you and adds it to this job's costs.</p></div>}
+                )}
+                {changeOrders.map(c => (
+                  <div key={c.id} className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, paddingRight: '10px' }}>
+                        <h3>{c.description}</h3>
+                        <span className={'status-pill ' + (c.status === 'approved' ? 'status-end' : c.status === 'declined' ? 'status-start' : 'status-mid')} style={{ marginTop: '4px' }}>{c.status}</span>
+                      </div>
+                      <p style={{ fontWeight: '700', color: c.status === 'approved' ? '#16A34A' : '#888', fontSize: '16px' }}>{formatCurrency(c.amount)}</p>
+                    </div>
+                    <button onClick={() => deleteChangeOrder(c)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
+                  </div>
+                ))}
+                {changeOrders.length === 0 && <div className="empty-state"><p>No extras yet. Log extra work the client approves so you get paid for it.</p></div>}
+              </JobSection>
             </div>
           )}
 
-          {projectTab === 'time' && (
+          {projectTab === 'work' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add time</button>
+              <JobSection title="Time" count={timeEntries.length} open={isOpen('time')} onToggle={() => toggleSection('time')}>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -2142,12 +2156,82 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               ))}
               {timeEntries.length === 0 && <div className="empty-state"><p>No hours logged yet. Crew hours show up here when they clock in — or tap below to add time yourself.</p></div>}
-            </div>
-          )}
+              </JobSection>
 
-          {projectTab === 'mileage' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
+              {/* Photos and the daily log used to be two separate tabs. On site
+                  they're one act — "here's what happened today" — so they're one
+                  feed now, grouped by day, newest first. Add a photo, add a
+                  note, or both; they land on the same day card. */}
+              <JobSection title="Daily notes" count={dailyLogs.length + jobPhotos.length} open={isOpen('daily')} onToggle={() => toggleSection('daily')}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <label className="btn-primary" style={{ flex: 1, marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
+                    {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
+                    {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
+                    <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
+                  </label>
+                  <button className="btn-secondary" style={{ flex: 1, marginTop: 0 }} onClick={() => { setShowNewLog(true); setInlineError('') }}>📝 Add note</button>
+                </div>
+                <input
+                  type="text"
+                  value={photoNote}
+                  onChange={(e) => setPhotoNote(e.target.value)}
+                  placeholder="Optional caption for the next photo you add"
+                  maxLength={140}
+                  style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0 0', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
+                />
+                {buildDayFeed(dailyLogs, jobPhotos).map(day => (
+                  <div key={day.key} className="card">
+                    {/* 'T00:00:00' forces LOCAL midnight — a bare 'YYYY-MM-DD'
+                        parses as UTC and shows a day early west of London. */}
+                    <p className="schedule-day">{new Date(day.key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                    {day.logs.map(l => (
+                      <div key={l.id} style={{ marginTop: '8px' }}>
+                        {l.weather && <p style={{ fontSize: '12px', color: '#E07B2A' }}>{l.weather}</p>}
+                        <p style={{ marginTop: '2px', whiteSpace: 'pre-wrap' }}>{l.note}</p>
+                        <button onClick={() => deleteLog(l)} style={{ marginTop: '8px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px' }}>Delete note</button>
+                      </div>
+                    ))}
+                    {day.photos.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '10px' }}>
+                        {day.photos.map(ph => (
+                          <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ cursor: 'pointer' }}>
+                            <JobPhoto path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption}
+                              style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px' }} />
+                            {ph.uploaded_by_name && ph.uploaded_by_name !== 'You' && (
+                              <p style={{ fontSize: '10px', color: '#717171', margin: '3px 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👷 {ph.uploaded_by_name}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {dailyLogs.length === 0 && jobPhotos.length === 0 && <div className="empty-state"><p>Nothing logged yet. Snap before/after shots and jot down what happened on site — great for clients, and it settles arguments later.</p></div>}
+              </JobSection>
+
+              <JobSection title="Receipts" count={receipts.length} open={isOpen('receipts')} onToggle={() => toggleSection('receipts')}>
+                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add receipt</button>
+                {receipts.map(r => (
+                  <div key={r.id} className="card" role="button" tabIndex={0} onClick={() => setPhotoViewer(r)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPhotoViewer(r) } }} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <h3>{r.description}</h3>
+                        <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ` · tax ${formatCurrency(r.tax_amount)}` : ''}</p>
+                        {/* Show the date ON the receipt when we have it. '+T00:00:00'
+                            forces LOCAL midnight — a bare 'YYYY-MM-DD' parses as UTC
+                            and would display a day early everywhere west of London. */}
+                        <p style={{ fontSize: '11px', color: '#717171' }}>{r.purchase_date ? new Date(r.purchase_date + 'T00:00:00').toLocaleDateString() : new Date(r.created_at).toLocaleDateString()}</p>
+                        {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
+                      </div>
+                      <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
+                    </div>
+                  </div>
+                ))}
+                {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store and amount for you and adds it to this job's costs.</p></div>}
+              </JobSection>
+
+              <JobSection title="Mileage" count={mileageEntries.length} open={isOpen('mileage')} onToggle={() => toggleSection('mileage')}>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
               {mileageEntries.length > 0 && (
                 <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
                   <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Mileage Deduction</p>
@@ -2170,42 +2254,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               ))}
               {mileageEntries.length === 0 && <div className="empty-state"><p>No mileage logged yet. Track miles driven for this job — it's a deduction.</p></div>}
+              </JobSection>
             </div>
           )}
 
-          {projectTab === 'photos' && (
+          {projectTab === 'docs' && (
             <div>
-              <input
-                type="text"
-                value={photoNote}
-                onChange={(e) => setPhotoNote(e.target.value)}
-                placeholder="Optional note for the next photo you add"
-                maxLength={140}
-                style={{ width: '100%', boxSizing: 'border-box', marginBottom: '8px', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
-              />
-              <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
-                {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
-                {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
-                <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
-                {jobPhotos.map(ph => (
-                  <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ cursor: 'pointer' }}>
-                    <JobPhoto path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption}
-                      style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px' }} />
-                    {ph.uploaded_by_name && ph.uploaded_by_name !== 'You' && (
-                      <p style={{ fontSize: '10px', color: '#717171', margin: '3px 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👷 {ph.uploaded_by_name}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {jobPhotos.length === 0 && <div className="empty-state"><p>No photos yet. Snap before/after shots — great for clients and your portfolio.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'documents' && (
-            <div>
-              <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
+              <JobSection title="Documents" count={jobDocuments.length} open={isOpen('documents')} onToggle={() => toggleSection('documents')}>
+              <label className="btn-primary" style={{ display: 'block', marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
                 {uploadingDoc ? 'Uploading…' : '📎 Add document'}
                 <input type="file" onChange={addDocument} disabled={uploadingDoc} style={{ display: 'none' }} />
               </label>
@@ -2219,73 +2275,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               ))}
               {jobDocuments.length === 0 && <div className="empty-state"><p>No documents yet. Add the contract, permit, or plans for this job.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'punch' && (
-            <div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
-              </div>
-              {punchItems.map(it => (
-                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
-                  <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
-                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
-                  <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
-                </div>
-              ))}
-              {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'materials' && (
-            <div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
-              </div>
-              {materialItems.map(it => (
-                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
-                  <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
-                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
-                  <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
-                </div>
-              ))}
-              {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'changes' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewChange(true); setInlineError('') }}>+ Add extra / add-on</button>
-              {changeOrders.some(c => c.status === 'approved') && (
-                <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
-                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Approved extras</p>
-                  <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>+{formatCurrency(changeOrders.filter(c => c.status === 'approved').reduce((s, c) => s + (c.amount || 0), 0))}</p>
-                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>added to what the client owes</p>
-                </div>
-              )}
-              {changeOrders.map(c => (
-                <div key={c.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, paddingRight: '10px' }}>
-                      <h3>{c.description}</h3>
-                      <span className={'status-pill ' + (c.status === 'approved' ? 'status-end' : c.status === 'declined' ? 'status-start' : 'status-mid')} style={{ marginTop: '4px' }}>{c.status}</span>
-                    </div>
-                    <p style={{ fontWeight: '700', color: c.status === 'approved' ? '#16A34A' : '#888', fontSize: '16px' }}>{formatCurrency(c.amount)}</p>
-                  </div>
-                  <button onClick={() => deleteChangeOrder(c)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
-                </div>
-              ))}
-              {changeOrders.length === 0 && <div className="empty-state"><p>No extras yet. Log extra work the client approves so you get paid for it.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'permits' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add permit</button>
+              </JobSection>
+              {/* A permit IS a document — it was a whole separate tab because the
+                  old nav had room for twelve of them. Same page, one scroll down. */}
+              <JobSection title="Permits & inspections" count={permits.length} open={isOpen('permits')} onToggle={() => toggleSection('permits')}>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add permit</button>
               {permits.map(p => {
                 const sc = (p.status === 'passed' || p.status === 'approved') ? 'status-end' : p.status === 'failed' ? 'status-start' : 'status-mid'
                 return (
@@ -2302,38 +2296,58 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 )
               })}
               {permits.length === 0 && <div className="empty-state"><p>Track permits and inspections for this job. Tap a status to advance it.</p></div>}
+              </JobSection>
             </div>
           )}
 
-          {projectTab === 'log' && (
+          {/* Plan = everything that hasn't happened yet: who's coming, what to
+              buy, what's left to fix. Three lists that used to be three tabs
+              in two different rows of navigation. */}
+          {projectTab === 'plan' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewLog(true); setInlineError('') }}>+ Add log entry</button>
-              {dailyLogs.map(l => (
-                <div key={l.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <p className="schedule-day" style={{ margin: 0 }}>{l.log_date ? new Date(l.log_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}</p>
-                    {l.weather && <span style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600' }}>{l.weather}</span>}
+              <JobSection title="Schedule" count={scheduleEntries.length} open={isOpen('schedule')} onToggle={() => toggleSection('schedule')}>
+                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule worker</button>
+                {scheduleEntries.map(s => (
+                  <div key={s.id} className="card">
+                    <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
+                    <h3>{s.profiles ? s.profiles.full_name : 'Worker'}</h3>
+                    <p>{s.task_description}</p>
+                    {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
                   </div>
-                  <p style={{ marginTop: '6px', whiteSpace: 'pre-wrap' }}>{l.note}</p>
-                  <button onClick={() => deleteLog(l)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
-                </div>
-              ))}
-              {dailyLogs.length === 0 && <div className="empty-state"><p>No log entries yet. Jot down what happened on site — handy for memory and disputes.</p></div>}
-            </div>
-          )}
+                ))}
+                {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job. They see their own days on their phone.</p></div>}
+              </JobSection>
 
-          {projectTab === 'schedule' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule worker</button>
-              {scheduleEntries.map(s => (
-                <div key={s.id} className="card">
-                  <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                  <h3>{s.profiles ? s.profiles.full_name : 'Worker'}</h3>
-                  <p>{s.task_description}</p>
-                  {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
+              <JobSection title="Shopping list" count={materialItems.filter(it => !it.bought).length} open={isOpen('materials')} onToggle={() => toggleSection('materials')}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
                 </div>
-              ))}
-              {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job.</p></div>}
+                {materialItems.map(it => (
+                  <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                    <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                    <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
+                    <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                  </div>
+                ))}
+                {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them. The crew on this job sees it too.</p></div>}
+              </JobSection>
+
+              <JobSection title="Fix-it list" count={punchItems.filter(it => !it.done).length} open={isOpen('punch')} onToggle={() => toggleSection('punch')}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
+                </div>
+                {punchItems.map(it => (
+                  <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                    <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                    <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
+                    <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                  </div>
+                ))}
+                {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done — the crew sees these too.</p></div>}
+              </JobSection>
             </div>
           )}
           </>
