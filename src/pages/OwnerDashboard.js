@@ -239,6 +239,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [testimonialSaving, setTestimonialSaving] = useState(false)
   const [workers, setWorkers] = useState([])
   const [workerStats, setWorkerStats] = useState({}) // keyed by worker id
+  // Open shifts — time entries with no clocked_out_at. Every OTHER time query in
+  // this file filters those OUT (they have no total_minutes or labor_cost yet, so
+  // they'd poison hours and payroll), which meant the owner had no way to see who
+  // is actually working right now. This is the one query that wants them.
+  const [onTheClock, setOnTheClock] = useState([])
   const [workersError, setWorkersError] = useState(false) // true when worker stats / assignments / time-off failed to load
   const [spendByProject, setSpendByProject] = useState({}) // keyed by project id: { materials, labor, other }
   const [spendError, setSpendError] = useState(false) // true when the live spend fetch failed (don't render a silent $0)
@@ -451,6 +456,28 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     }
   }, [])
 
+  // Who is on the clock this second. Small, cheap, and deliberately not paged —
+  // if a crew somehow has 1000 simultaneously open shifts, the count on the home
+  // screen being capped is the least of anyone's problems.
+  const fetchOnTheClock = useCallback(async (workerList) => {
+    const workerIds = (workerList || []).map(w => w.id)
+    if (!workerIds.length) { setOnTheClock([]); return }
+    try {
+      const { data, error } = await supabase
+        .from('time_entries')
+        .select('id, worker_id, project_id, clocked_in_at')
+        .in('worker_id', workerIds)
+        .is('clocked_out_at', null)
+        .order('clocked_in_at', { ascending: true })
+      if (error) throw error
+      setOnTheClock(data || [])
+    } catch (e) {
+      // Non-fatal: the card just doesn't render. Never show a false "0 working".
+      console.error('On-the-clock fetch failed:', e)
+      setOnTheClock([])
+    }
+  }, [])
+
   // Build weekly pay rows (one per worker per week) from clocked-out time, and
   // load any paychecks already recorded so each week shows paid vs. owed.
   const fetchPayroll = useCallback(async () => {
@@ -597,6 +624,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   useEffect(() => {
     if (workers.length) fetchWorkerStats(workers)
   }, [workers, fetchWorkerStats])
+
+  // Re-read open shifts every time the owner lands on Home or Crew. "Who's
+  // working right now" is worthless if it's a snapshot from whenever the app was
+  // opened, and a poll would run all day for a number nobody is looking at.
+  useEffect(() => {
+    if (activeTab === 'home' || activeTab === 'workers') fetchOnTheClock(workers)
+  }, [activeTab, workers, fetchOnTheClock])
 
   useEffect(() => {
     fetchSpend(projects)
@@ -1757,9 +1791,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const activeProjects = realProjects.filter(p => p.stage !== 'end')
   const completedProjects = realProjects.filter(p => p.stage === 'end')
   const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
-  // Grand total = the contract value of all active jobs (materials + labor +
-  // profit). Shown on the at-a-glance summaries; unlike projected profit it
-  // doesn't move as costs are logged, so the "Grand total" label stays honest.
+  // Active job value = the contract value of all active jobs (materials + labor
+  // + profit). Shown on the at-a-glance summaries; unlike projected profit it
+  // doesn't move as costs are logged. Labelled "Grand total" until JP pointed
+  // out that a bare "grand total" on a dashboard reads as money SPENT.
   const grandTotal = activeProjects.reduce((sum, p) => sum + contractOf(p), 0)
 
   // ---- Home / Clients / Calendar derived data ----
@@ -2659,7 +2694,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   <div className="budget-bar"><div className="budget-bar-fill" style={{ width: (arTotal ? (b.total / arTotal * 100) : 0) + '%', background: b.color }} /></div>
                 </div>
               ))}
-              {arTotal === 0 && <p style={{ fontSize: '13px', color: '#888' }}>Nothing outstanding — you're all collected up.</p>}
+              {arTotal === 0 && <p style={{ fontSize: '13px', color: '#888' }}>No unpaid invoices.</p>}
             </div>
             <div className="card">
               <p style={sectionLabel}>Collected — last 6 months</p>
@@ -2729,31 +2764,39 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               )
             })()}
             {!initialLoading && (() => {
+              // ONE next thing, not a five-item chore list.
+              //
+              // This used to render all five steps at once with a "2 of 5 done"
+              // counter — which reads as homework to a contractor who opened the
+              // app to look at a job, and puts four things they aren't doing
+              // right now above the numbers they came for. The steps still exist
+              // as the state machine; only the first unfinished one is shown.
+              //
+              // The old 'compliance' step (insurance & license docs) is gone from
+              // onboarding entirely. Nobody sets up their COI on the day they
+              // sign up, so it sat permanently unchecked and kept the card on
+              // screen forever. The Compliance tab is still there for whoever
+              // wants it.
               const steps = [
-                { key: 'job', label: 'Create your first job', done: realProjects.length > 0, cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') } },
-                { key: 'crew', label: 'Add your crew', done: workers.length > 0, cta: () => setActiveTab('workers') },
-                { key: 'estimate', label: 'Send your first estimate', done: estimates.length > 0, cta: () => setActiveTab('estimates') },
-                { key: 'invoice', label: 'Create your first invoice', done: invoices.length > 0, cta: () => setActiveTab('invoices') },
-                { key: 'compliance', label: 'Add your insurance & license info', done: complianceItems.length > 0, cta: () => setActiveTab('compliance') },
+                { key: 'job', label: 'Create your first job', hint: 'Everything else hangs off a job — start here.', action: 'Create job', cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') }, done: realProjects.length > 0 },
+                { key: 'crew', label: 'Add your crew', hint: 'Text them a link — they clock in from their own phone.', action: 'Invite', cta: () => setActiveTab('workers'), done: workers.length > 0 },
+                { key: 'estimate', label: 'Send your first estimate', hint: 'Price a job and send it out.', action: 'New estimate', cta: () => setActiveTab('estimates'), done: estimates.length > 0 },
+                { key: 'invoice', label: 'Bill your first job', hint: 'Turn finished work into money owed to you.', action: 'New invoice', cta: () => setActiveTab('invoices'), done: invoices.length > 0 },
               ]
+              const next = steps.find(s => !s.done)
+              if (!next) return null
               const doneCount = steps.filter(s => s.done).length
-              if (doneCount === steps.length) return null
               return (
-                <div className="card" style={{ border: '2px solid #E07B2A', marginBottom: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#1C2B3A' }}>👋 Get set up</h2>
-                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#E07B2A' }}>{doneCount} of {steps.length} done</span>
+                <div className="card" role="button" tabIndex={0} onClick={next.cta} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); next.cta() } }}
+                  style={{ border: '2px solid #E07B2A', marginBottom: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '11px', fontWeight: '700', color: '#E07B2A', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      {doneCount > 0 ? 'Next' : 'Start here'}
+                    </p>
+                    <p style={{ fontSize: '17px', fontWeight: '800', color: '#1C2B3A', marginTop: '2px' }}>{next.label}</p>
+                    <p style={{ fontSize: '13px', color: '#717171', marginTop: '2px', lineHeight: '1.4' }}>{next.hint}</p>
                   </div>
-                  <p style={{ fontSize: '13px', color: '#717171', marginBottom: '14px', lineHeight: '1.5' }}>A few quick steps to get the most out of JobTally — they check off automatically as you go.</p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {steps.map((s, i) => (
-                      <div key={s.key} role={s.done ? undefined : 'button'} tabIndex={s.done ? undefined : 0} onClick={s.done ? undefined : s.cta} onKeyDown={s.done ? undefined : (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.cta() } })} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '10px', border: '1px solid #eee', background: s.done ? '#F0FDF4' : 'white', cursor: s.done ? 'default' : 'pointer' }}>
-                        <span style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '700', background: s.done ? '#16A34A' : '#1C2B3A', color: 'white' }}>{s.done ? '✓' : i + 1}</span>
-                        <span style={{ flex: 1, fontSize: '14px', fontWeight: '600', color: s.done ? '#9CA3AF' : '#1C2B3A', textDecoration: s.done ? 'line-through' : 'none' }}>{s.label}</span>
-                        {!s.done && <span style={{ color: '#E07B2A', fontSize: '18px' }}>›</span>}
-                      </div>
-                    ))}
-                  </div>
+                  <span style={{ background: '#E07B2A', color: 'white', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', fontWeight: '700', whiteSpace: 'nowrap', flexShrink: 0 }}>{next.action} ›</span>
                 </div>
               )
             })()}
@@ -2767,15 +2810,51 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               )
             })()}
+            {/* Who is working, right now. The first thing an owner standing in a
+                driveway at 7am actually wants off this screen. Only renders when
+                somebody is clocked in — an empty "0 on the clock" card every
+                evening is noise. */}
+            {onTheClock.length > 0 && (
+              <div className="card" role="button" tabIndex={0} onClick={() => setActiveTab('workers')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab('workers') } }}
+                style={{ border: '2px solid #16A34A', background: '#F0FDF4', cursor: 'pointer' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                  <p style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>
+                    🟢 {onTheClock.length} on the clock right now
+                  </p>
+                  <span style={{ color: '#16A34A', fontSize: '18px' }}>›</span>
+                </div>
+                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {onTheClock.slice(0, 4).map(t => {
+                    const w = workers.find(x => x.id === t.worker_id)
+                    const job = projects.find(p => p.id === t.project_id)
+                    return (
+                      <p key={t.id} style={{ fontSize: '13px', color: '#1C2B3A' }}>
+                        <strong>{w ? w.full_name : 'Worker'}</strong>
+                        {job ? ` · ${job.name}` : ''}
+                        <span style={{ color: '#717171' }}> · since {new Date(t.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                      </p>
+                    )
+                  })}
+                  {onTheClock.length > 4 && <p style={{ fontSize: '13px', color: '#717171' }}>+{onTheClock.length - 4} more</p>}
+                </div>
+              </div>
+            )}
             <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
               <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
-              {owedTotal > 0
-                ? <p style={{ fontSize: '44px', fontWeight: '800', color: '#F59E0B', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
-                : <p style={{ fontSize: '22px', fontWeight: '700', color: 'rgba(255,255,255,0.85)', lineHeight: '1.2', marginTop: '6px' }}>Nothing outstanding — you're all paid up 👍</p>}
-              <div style={{ display: 'flex', gap: '24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+              {/* Always a number in the same place. The old copy swapped the
+                  figure out for "Nothing outstanding — you're all paid up 👍",
+                  which reads as a greeting card and moves the layout around. */}
+              <p style={{ fontSize: '44px', fontWeight: '800', color: owedTotal > 0 ? '#F59E0B' : 'rgba(255,255,255,0.9)', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
+              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: '2px' }}>
+                {owedTotal > 0 ? 'Invoices sent and not paid yet' : 'No unpaid invoices'}
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{activeProjects.length}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>On the clock</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{onTheClock.length}</p></div>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open estimates</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{openEstimateCount}</p></div>
-                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Grand total</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(grandTotal)}</p></div>
+                {/* Was "Grand total", which told the owner nothing about WHICH
+                    total. It's the contract value of every job still open. */}
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active job value</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(grandTotal)}</p></div>
               </div>
             </div>
             {budgetAlerts.length > 0 && (
@@ -2789,7 +2868,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </>
             )}
             <p style={sectionLabel}>This week</p>
-            {thisWeekSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled this week.</p></div>}
+            {thisWeekSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled this week. Open a job and use its Plan tab to put crew on days — what you schedule shows up here and on their phones.</p></div>}
             {thisWeekSchedule.map(s => (
               <div key={s.id} className="card" style={{ padding: '12px 16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -2860,7 +2939,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <div className="stat-card"><div className="stat-value">{activeProjects.length}</div><div className="stat-label">Active Jobs</div></div>
               <div className="stat-card"><div className="stat-value">{completedProjects.length}</div><div className="stat-label">Completed</div></div>
-              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Grand total</div></div>
+              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Active job value</div></div>
             </div>
             <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New job</button>
 
