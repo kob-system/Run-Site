@@ -95,7 +95,10 @@ const asNum = (v) => (typeof v === 'number' ? v : parseFloat(v))
 const clean = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 // Mirrors src/utils/money.js roundCents — money must round the same everywhere.
 const rc = (x) => Math.round(((x || 0) + Number.EPSILON) * 100) / 100
-const money = (n) => `$${Number(n || 0).toFixed(2)}`
+// Grouped the same way the confirm card in assistant.js groups it, so the
+// "done" message reads as the same number the owner just approved.
+const money = (n) =>
+  `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const isDateKey = (s) =>
   typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime())
 const normTime = (s) => {
@@ -357,8 +360,10 @@ async function runTool(tool, args, ctx) {
     // the receipt card in the dashboard. Nobody dictating a receipt says "and the
     // description is…", so fall back to the category label rather than sending
     // null (which is a 23502 the caller sees as a mystery "save was blocked").
-    const description =
-      clean(args.description, 200) || category.charAt(0).toUpperCase() + category.slice(1)
+    // Plain "Receipt", not the category — the card already prints the category on
+    // the line underneath, so a category fallback renders as "Materials / … ·
+    // Materials". "Receipt" reads like a headline and never duplicates.
+    const description = clean(args.description, 200) || 'Receipt'
     // The date ON the receipt is what buckets it into a tax year, so honor it when
     // a scan found one. Anything unparseable or more than a day in the future is
     // dropped so Postgres falls back to its current_date default (FIX-DATABASE-25).

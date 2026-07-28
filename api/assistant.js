@@ -1140,7 +1140,11 @@ const WORKER_WRITE_NAMES = new Set(WORKER_WRITE_TOOLS.map((t) => t.name))
 
 // Plain-English confirm text, derived server-side (not trusted from the model).
 function summarize(tool, a) {
-  const money = (n) => '$' + Number(num(n)).toFixed(2)
+  // Group the thousands. A confirm card is the last thing an owner reads before
+  // money moves, and "$14500.00" is genuinely harder to sanity-check at a glance
+  // than "$14,500.00" — one missed digit is a mis-sent invoice.
+  const money = (n) =>
+    '$' + Number(num(n)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   switch (tool) {
     case 'add_expense': {
       const cat = a.category && a.category !== 'materials' ? ` ${a.category}` : ''
