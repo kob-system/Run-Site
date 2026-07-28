@@ -232,8 +232,11 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
 
   // Receipt photo (owner or crew): photo → /api/scan-receipt (Haiku vision) →
   // auto-send the store/amount/date so the normal add_expense confirm flow takes
-  // over. amount is the receipt TOTAL (tax already included), so the cost booked
-  // to the job counts the tax. A crew scan books to the boss's records server-side.
+  // over. `amount` is the PRE-TAX subtotal and `tax` is the sales tax, which is
+  // exactly what add_expense wants (it books cost = amount + sales_tax). The
+  // sentence below has to say so in words, because the model — not this code —
+  // is what fills in the tool call. A crew scan books to the boss's records
+  // server-side.
   const onReceiptPick = useCallback(async (e) => {
     const file = e.target.files && e.target.files[0]
     e.target.value = ''
@@ -266,11 +269,20 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
         return
       }
       setScanning(false)
-      // amount is the TOTAL (tax included), so it's the right figure for the job cost.
+      // Spelled out as subtotal + tax, never as a single "total". add_expense
+      // takes the pre-tax figure in `amount` and the tax separately; a sentence
+      // that says "$108 total (includes $8 tax)" invites the model to put 108
+      // in amount and 8 in sales_tax, which bills the job $116.
       await send(
-        `I scanned a receipt${store ? ` from ${store}` : ''}${amount ? ` for $${amount} total` : ''}` +
-        `${tax ? ` (includes $${tax} sales tax)` : ''}${date ? ` dated ${date}` : ''} — ` +
-        `add it as an expense. Ask me which job if you need to.`
+        `I scanned a receipt${store ? ` from ${store}` : ''}` +
+        (amount
+          ? (tax
+            ? ` — $${amount} before tax plus $${tax} sales tax`
+            : ` for $${amount} (no sales tax on it)`)
+          : '') +
+        `${date ? `, dated ${date}` : ''}. ` +
+        `Add it as an expense: amount $${amount}${tax ? `, sales tax $${tax}` : ''}. ` +
+        `Ask me which job if you need to.`
       )
     } catch {
       pushMsg({ role: 'assistant', text: 'Couldn’t read that receipt. Tell me the store and amount instead.' })

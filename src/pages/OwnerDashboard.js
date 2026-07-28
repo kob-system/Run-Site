@@ -1302,10 +1302,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   const confirmScan = () => {
     if (!scanResult) return
-    // scan-receipt returns store, amount, tax and date. Tax is REAL MONEY —
-    // fetchSpend books cost = amount + tax_amount, so dropping it understates
-    // every scanned job's spend by the sales tax. Only overwrite tax when the
-    // scan actually found one (never blank out a number the owner typed).
+    // scan-receipt returns store, amount, tax, total and date. `amount` is the
+    // PRE-TAX subtotal and `tax` is the sales tax — the endpoint reconciles the
+    // two so amount + tax always equals the total the card was charged. That
+    // matters because fetchSpend books cost = amount + tax_amount: copying a
+    // grand total in here alongside the tax charges the job its sales tax twice.
+    // `total` is display-only and is deliberately not written to the form.
+    // Only overwrite tax when the scan actually found one (never blank out a
+    // number the owner typed).
     setReceiptForm(f => ({
       ...f,
       store: scanResult.store || f.store,
@@ -2315,9 +2319,15 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
                   <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', marginBottom: '8px' }}>📷 Scanned — confirm before saving</p>
                   <p style={{ fontSize: '15px', fontWeight: '600' }}>Store: {scanResult.store}</p>
-                  <p style={{ fontSize: '15px', fontWeight: '600' }}>Amount: {formatCurrency(scanResult.amount)}</p>
+                  {/* Subtotal + tax + total, in the order they're printed on the
+                      paper, so the owner can check the scan against the receipt
+                      in their hand. Only the first two get saved. */}
+                  <p style={{ fontSize: '15px', fontWeight: '600' }}>Subtotal: {formatCurrency(scanResult.amount)}</p>
                   {scanResult.tax && !/^none$/i.test(String(scanResult.tax)) && (
                     <p style={{ fontSize: '15px', fontWeight: '600' }}>Sales tax: {formatCurrency(scanResult.tax)}</p>
+                  )}
+                  {scanResult.total && (
+                    <p style={{ fontSize: '15px', fontWeight: '700', color: '#166534' }}>Total: {formatCurrency(scanResult.total)}</p>
                   )}
                   {scanResult.date && /^\d{4}-\d{2}-\d{2}$/.test(scanResult.date) && (
                     <p style={{ fontSize: '15px', fontWeight: '600' }}>Date: {scanResult.date}</p>
@@ -2330,7 +2340,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               )}
               <div className="input-group"><label>Description</label><input value={receiptForm.description} onChange={e => setReceiptForm({ ...receiptForm, description: e.target.value })} placeholder="Concrete mix" /></div>
               <div className="input-group"><label>Store</label><input value={receiptForm.store} onChange={e => setReceiptForm({ ...receiptForm, store: e.target.value })} placeholder="Home Depot" /></div>
-              <div className="input-group"><label>Amount ($)</label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
+              {/* Labelled "before tax" because the tax goes in its own field
+                  below and the job's cost is the two added together. An owner
+                  who types the grand total here AND the tax pays the tax twice. */}
+              <div className="input-group"><label>Amount ($) <span style={{ color: '#888', fontWeight: '400' }}>— before tax</span></label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Sales Tax ($) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={receiptForm.tax} onChange={e => setReceiptForm({ ...receiptForm, tax: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Date on the receipt <span style={{ color: '#888', fontWeight: '400' }}>— leave blank for today</span></label><input type="date" value={receiptForm.purchase_date} onChange={e => setReceiptForm({ ...receiptForm, purchase_date: e.target.value })} /></div>
               <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({ ...receiptForm, category: e.target.value })}>{RECEIPT_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select></div>
