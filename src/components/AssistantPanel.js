@@ -139,6 +139,10 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       if (!r.ok) { pushMsg({ role: 'assistant', text: data.error || 'Something went wrong.' }); return }
       if (data.type === 'confirm') {
         setPending({ tool: data.tool, args: data.args, summary: data.summary })
+        // The confirm card is its own UI, not a bubble — but the model still
+        // has to SEE that it already proposed this, or the next turn re-asks
+        // for fields it just collected (or re-proposes a cancelled write).
+        pushMsg({ role: 'assistant', text: `[proposed for confirmation] ${data.summary}`, hidden: true })
       } else {
         pushMsg({ role: 'assistant', text: data.reply })
       }
@@ -148,6 +152,15 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       setBusy(false)
     }
   }, [input, busy, msgs])
+
+  // Cancel has to leave a trace in the history, otherwise the model only sees
+  // an unfinished setup and proposes the exact same write again on the next
+  // message — which is what happens the moment someone taps a new template.
+  const cancelAction = useCallback(() => {
+    if (busy) return
+    setPending(null)
+    pushMsg({ role: 'user', text: '[cancelled that — do not do it. Move on to what I say next.]', hidden: true })
+  }, [busy])
 
   const confirmAction = useCallback(async () => {
     if (!pending || busy) return
@@ -346,7 +359,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
         {tab === 'chat' ? (
           <>
             <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {msgs.map((m, i) => (
+              {msgs.map((m, i) => m.hidden ? null : (
                 <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', background: m.role === 'user' ? ORANGE : 'white', color: m.role === 'user' ? 'white' : NAVY, padding: '10px 12px', borderRadius: 14, fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   {m.text}
                 </div>
@@ -361,7 +374,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
                   <div style={{ fontSize: 14, color: NAVY, marginBottom: 10 }}>{pending.summary}</div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={confirmAction} disabled={busy} style={{ flex: 1, padding: '9px', border: 'none', borderRadius: 9, background: ORANGE, color: 'white', fontWeight: 700, cursor: 'pointer' }}>Confirm</button>
-                    <button onClick={() => setPending(null)} disabled={busy} style={{ flex: 1, padding: '9px', border: '1px solid #d1d5db', borderRadius: 9, background: 'white', color: NAVY, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                    <button onClick={cancelAction} disabled={busy} style={{ flex: 1, padding: '9px', border: '1px solid #d1d5db', borderRadius: 9, background: 'white', color: NAVY, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
                   </div>
                 </div>
               )}

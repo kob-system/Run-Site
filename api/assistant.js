@@ -1337,7 +1337,8 @@ export default async function handler(req, res) {
     `    • Already on the crew → their name, then the new hourly rate → set_worker_rate.\n` +
     `- Add a receipt → which job, then the total, then the store (optional) → add_expense. If a scanned receipt is already in the conversation you have the store, total, tax and date — then the ONLY thing to ask is which job.\n` +
     `- Log crew hours → which worker, which job, which day, how many hours → add_time_entry.\n` +
-    `- Send an invoice → which job, then the amount (offer what's left on the contract if you can look it up) → create_invoice.`
+    `- Send an invoice → which job, then the amount (offer what's left on the contract if you can look it up) → create_invoice.\n` +
+    `- A "[proposed for confirmation] …" line means you already put that on the confirm card — don't propose it a second time. A "[cancelled that…]" line means they said no: drop it entirely and do whatever they ask next.`
 
   const workerSystem =
     `You are the JobTally assistant for ${who}, a crew member${company}. ` +
@@ -1358,7 +1359,8 @@ export default async function handler(req, res) {
     `- Clock in → if they're on exactly one job, just propose clock_in for it; only ask which job when they're on more than one.\n` +
     `- Add a receipt → which job, then the total → add_expense. If a scanned receipt is already in the conversation you have the store and total — the ONLY thing to ask is which job.\n` +
     `- Time off → which day (or the first and last day), then the reason (optional, ask once, "skip" is fine) → request_time_off.\n` +
-    `- The moment you have what's required, call the tool. The confirm card IS the read-back — don't repeat it back yourself first.`
+    `- The moment you have what's required, call the tool. The confirm card IS the read-back — don't repeat it back yourself first.\n` +
+    `- A "[proposed for confirmation] …" line means you already put that on the confirm card — don't propose it again. A "[cancelled that…]" line means they said no: drop it and move on.`
 
   const system = isOwner ? ownerSystem : workerSystem
   const tools = isOwner ? [...READ_TOOLS, ...WRITE_TOOLS] : [...WORKER_READ_TOOLS, ...WORKER_WRITE_TOOLS]
