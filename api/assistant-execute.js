@@ -138,6 +138,32 @@ function wordFilter(field, needle) {
   return `and=(${words.map((w) => `${field}.ilike.*${ilikeSafe(w)}*`).join(',')})`
 }
 
+// Last-resort fuzzy match, scored in JS because SQL substring matching can't see
+// that a human saying "the Klein bathroom" means "Master Bath Reno – Klein
+// Residence" — "bathroom" is not a substring of "Bath". Words count as a hit
+// when either side is a prefix of the other (bath↔bathroom, reno↔renovation).
+// Only a CLEAR winner is returned: ties come back as several rows so the caller
+// asks which one instead of writing to the wrong job.
+const STOP = new Set(['the', 'a', 'an', 'my', 'our', 'job', 'jobs', 'project', 'site', 'at', 'on', 'for', 'of', 'and'])
+const tokenize = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w))
+const wordHit = (a, b) => a === b || (a.length >= 3 && b.startsWith(a)) || (b.length >= 3 && a.startsWith(b))
+
+function fuzzyPick(rows, field, needle) {
+  const want = tokenize(needle)
+  if (!want.length || !Array.isArray(rows) || !rows.length) return []
+  const scored = rows
+    .map((r) => {
+      const have = tokenize(r[field])
+      return { r, score: want.filter((w) => have.some((h) => wordHit(w, h))).length }
+    })
+    .filter((s) => s.score > 0)
+  if (!scored.length) return []
+  const best = Math.max(...scored.map((s) => s.score))
+  // One word out of several is a coincidence, not a match.
+  if (best < Math.min(2, want.length)) return []
+  return scored.filter((s) => s.score === best).map((s) => s.r)
+}
+
 // Resolve a job name to exactly one of the caller's projects.
 async function resolveJob(userToken, jobName) {
   if (!jobName || typeof jobName !== 'string' || !jobName.trim()) return { error: 'Missing job name.' }
@@ -155,10 +181,17 @@ async function resolveJob(userToken, jobName) {
       if (retry.ok && Array.isArray(retry.data)) data = retry.data
     }
   }
+  if (data.length === 0) {
+    // Still nothing — score the caller's own job list by word overlap.
+    const all = await userReq(userToken, `${select}&order=created_at.desc&limit=200`, 'GET')
+    if (all.ok && Array.isArray(all.data)) data = fuzzyPick(all.data, 'name', jobName)
+  }
   if (data.length === 0) return { error: `No job found matching “${jobName}”.` }
   if (data.length > 1) {
     const exact = data.filter((p) => (p.name || '').trim().toLowerCase() === jobName.trim().toLowerCase())
     if (exact.length === 1) return { project: exact[0] }
+    const narrowed = fuzzyPick(data, 'name', jobName)
+    if (narrowed.length === 1) return { project: narrowed[0] }
     return { error: `More than one job matches “${jobName}” (${data.slice(0, 5).map((p) => p.name).join(', ')}). Be more specific.` }
   }
   return { project: data[0] }
@@ -181,10 +214,16 @@ async function resolveWorker(userToken, uid, workerName) {
       if (retry.ok && Array.isArray(retry.data)) data = retry.data
     }
   }
+  if (data.length === 0) {
+    const all = await userReq(userToken, `${select}&limit=200`, 'GET')
+    if (all.ok && Array.isArray(all.data)) data = fuzzyPick(all.data, 'full_name', workerName)
+  }
   if (data.length === 0) return { error: `No crew member found matching “${workerName}”.` }
   if (data.length > 1) {
     const exact = data.filter((w) => (w.full_name || '').trim().toLowerCase() === workerName.trim().toLowerCase())
     if (exact.length === 1) return { worker: exact[0] }
+    const narrowed = fuzzyPick(data, 'full_name', workerName)
+    if (narrowed.length === 1) return { worker: narrowed[0] }
     return { error: `More than one crew member matches “${workerName}” (${data.map((w) => w.full_name).join(', ')}). Use the full name.` }
   }
   return { worker: data[0] }

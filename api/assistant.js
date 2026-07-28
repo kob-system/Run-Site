@@ -103,12 +103,40 @@ function wordFilter(field, needle) {
   return `and=(${words.map((w) => `${field}.ilike.*${ilikeSafe(w)}*`).join(',')})`
 }
 
+// Last-resort fuzzy match, scored in JS because SQL substring matching can't see
+// that a human saying "the Klein bathroom" means "Master Bath Reno – Klein
+// Residence" — "bathroom" is not a substring of "Bath". Words count as a hit
+// when either side is a prefix of the other (bath↔bathroom, reno↔renovation).
+// Ties come back as several rows so the model asks which one.
+const STOP = new Set(['the', 'a', 'an', 'my', 'our', 'job', 'jobs', 'project', 'site', 'at', 'on', 'for', 'of', 'and'])
+const tokenize = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w))
+const wordHit = (a, b) => a === b || (a.length >= 3 && b.startsWith(a)) || (b.length >= 3 && a.startsWith(b))
+
+function fuzzyPick(rows, field, needle) {
+  const want = tokenize(needle)
+  if (!want.length || !Array.isArray(rows) || !rows.length) return []
+  const scored = rows
+    .map((r) => {
+      const have = tokenize(r[field])
+      return { r, score: want.filter((w) => have.some((h) => wordHit(w, h))).length }
+    })
+    .filter((s) => s.score > 0)
+  if (!scored.length) return []
+  const best = Math.max(...scored.map((s) => s.score))
+  // One word out of several is a coincidence, not a match.
+  if (best < Math.min(2, want.length)) return []
+  return scored.filter((s) => s.score === best).map((s) => s.r)
+}
+
 async function findProjects(userToken, jobName) {
   if (!jobName) return userGet(userToken, `projects?select=*&order=created_at.desc&limit=25`)
   const rows = await userGet(userToken, `projects?select=*&name=ilike.*${ilikeSafe(jobName)}*&order=created_at.desc`)
   if (rows && rows.length) return rows
   const wf = wordFilter('name', jobName)
-  return wf ? userGet(userToken, `projects?select=*&${wf}&order=created_at.desc`) : rows
+  const second = wf ? await userGet(userToken, `projects?select=*&${wf}&order=created_at.desc`) : rows
+  if (second && second.length) return second
+  const all = await userGet(userToken, `projects?select=*&order=created_at.desc&limit=200`)
+  return fuzzyPick(all, 'name', jobName)
 }
 
 // Resolve a job name to one project or an ambiguity/miss object.
@@ -127,7 +155,9 @@ async function findWorkers(userToken, uid, workerName) {
   const rows = await userGet(userToken, `${base}&full_name=ilike.*${ilikeSafe(workerName)}*`)
   if (rows && rows.length) return rows
   const wf = wordFilter('full_name', workerName)
-  return wf ? userGet(userToken, `${base}&${wf}`) : rows
+  const second = wf ? await userGet(userToken, `${base}&${wf}`) : rows
+  if (second && second.length) return second
+  return fuzzyPick(await userGet(userToken, base), 'full_name', workerName)
 }
 
 // Worker-side job lookup. Workers have NO read on the base projects table
@@ -139,7 +169,9 @@ async function findMyProjects(userToken, jobName) {
   const rows = await userGet(userToken, `${base}&name=ilike.*${ilikeSafe(jobName)}*`)
   if (rows && rows.length) return rows
   const wf = wordFilter('name', jobName)
-  return wf ? userGet(userToken, `${base}&${wf}`) : rows
+  const second = wf ? await userGet(userToken, `${base}&${wf}`) : rows
+  if (second && second.length) return second
+  return fuzzyPick(await userGet(userToken, base), 'name', jobName)
 }
 
 async function jobProfit(userToken, p) {
@@ -1338,6 +1370,7 @@ export default async function handler(req, res) {
     `- Add a receipt → which job, then the total, then the store (optional) → add_expense. If a scanned receipt is already in the conversation you have the store, total, tax and date — then the ONLY thing to ask is which job.\n` +
     `- Log crew hours → which worker, which job, which day, how many hours → add_time_entry.\n` +
     `- Send an invoice → which job, then the amount (offer what's left on the contract if you can look it up) → create_invoice.\n` +
+    `- When they name a job loosely ("the Klein bathroom", "Dave's roof"), pass the job's REAL name from list_jobs if you've already looked it up — don't echo their words as the job name.\n` +
     `- A "[proposed for confirmation] …" line means you already put that on the confirm card — don't propose it a second time. A "[cancelled that…]" line means they said no: drop it entirely and do whatever they ask next.`
 
   const workerSystem =
@@ -1360,6 +1393,7 @@ export default async function handler(req, res) {
     `- Add a receipt → which job, then the total → add_expense. If a scanned receipt is already in the conversation you have the store and total — the ONLY thing to ask is which job.\n` +
     `- Time off → which day (or the first and last day), then the reason (optional, ask once, "skip" is fine) → request_time_off.\n` +
     `- The moment you have what's required, call the tool. The confirm card IS the read-back — don't repeat it back yourself first.\n` +
+    `- When they name a job loosely, pass the REAL job name from my_jobs — don't echo their words as the job name.\n` +
     `- A "[proposed for confirmation] …" line means you already put that on the confirm card — don't propose it again. A "[cancelled that…]" line means they said no: drop it and move on.`
 
   const system = isOwner ? ownerSystem : workerSystem
@@ -1386,6 +1420,39 @@ export default async function handler(req, res) {
         const writes = toolUses.filter((b) => writeNames.has(b.name))
         const write = writes[0]
         if (write) {
+          // The confirm card has to name a REAL job. The model echoes whatever
+          // the owner said ("the Klein bathroom"), which used to sail onto the
+          // card and only fail AFTER they tapped Confirm — the worst possible
+          // moment. Resolve it here instead: one match gets rewritten to the
+          // job's actual name, a miss or a tie becomes a question, not a card.
+          const wantedJob = write.input && typeof write.input.job_name === 'string'
+            ? write.input.job_name.trim()
+            : ''
+          if (wantedJob) {
+            const finder = isOwner ? findProjects : findMyProjects
+            const matches = (await finder(user.token, wantedJob)) || []
+            const exact = matches.find(
+              (p) => String(p.name || '').trim().toLowerCase() === wantedJob.toLowerCase()
+            )
+            if (matches.length === 0) {
+              const all = (await finder(user.token, '')) || []
+              const names = all.map((p) => p.name).filter(Boolean).slice(0, 8)
+              return res.json({
+                type: 'reply',
+                reply: names.length
+                  ? `I don't see a job called “${wantedJob}”. ${names.length === 1 ? 'The only one on your list is' : 'Yours are'}: ${names.join(', ')}. Which one?`
+                  : `I don't see a job called “${wantedJob}” — there are no jobs on your account yet.`,
+              })
+            }
+            if (matches.length > 1 && !exact) {
+              return res.json({
+                type: 'reply',
+                reply: `More than one job matches “${wantedJob}”: ${matches.slice(0, 6).map((p) => p.name).join(', ')}. Which one?`,
+              })
+            }
+            write.input.job_name = (exact || matches[0]).name
+          }
+
           const base = summarize(write.name, write.input || {})
           // One write per turn — if the model queued more, tell the
           // owner so the extras aren't silently dropped.
