@@ -71,7 +71,7 @@ const NAV_BUCKET = {
   home: 'home',
   jobs: 'jobs', calendar: 'jobs',
   money: 'money', estimates: 'money', invoices: 'money', clients: 'money', insights: 'money', reports: 'money',
-  crew: 'crew', workers: 'crew', payroll: 'crew',
+  crew: 'crew', workers: 'crew', payroll: 'crew', crewweek: 'crew',
   more: 'more', compliance: 'more', warranties: 'more', settings: 'more',
 }
 const HubCard = ({ icon, title, sub, onClick }) => (
@@ -312,7 +312,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Did the owner actually accept a scan for THIS receipt? scanResult is cleared
   // the moment he taps "Looks right", so it can't be used as the analytics flag.
   const [scanUsed, setScanUsed] = useState(false)
-  const [scheduleForm, setScheduleForm] = useState({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
+  const [scheduleForm, setScheduleForm] = useState({ worker_id: '', project_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
   const [mileageEntries, setMileageEntries] = useState([])
   const [showNewMileage, setShowNewMileage] = useState(false)
   const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
@@ -357,6 +357,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', tax_mode: DEFAULT_TAX_MODE, notes: '' })
   const [estimateItems, setEstimateItems] = useState([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
   const [upcomingSchedule, setUpcomingSchedule] = useState([])
+  // The crew week grid. Sunday-start on purpose: it's the same week boundary
+  // Crew Pay uses, so the shifts you see in a week are the shifts in that
+  // paycheck. A Monday-start calendar next to a Sunday-start paycheck is how
+  // you end up arguing with a worker about which week Saturday belonged to.
+  const [crewWeekStart, setCrewWeekStart] = useState(() => weekStartKey(new Date()))
+  const [crewWeek, setCrewWeek] = useState([])
+  const [crewWeekLoading, setCrewWeekLoading] = useState(false)
   const [complianceItems, setComplianceItems] = useState([])
   const [warranties, setWarranties] = useState([])
   const [permits, setPermits] = useState([])
@@ -633,6 +640,24 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     } catch (e) { console.error('Upcoming schedule fetch failed:', e); showToast('Could not load the schedule. Check your connection and try again.', 'error') }
   }, [profile.id])
 
+  // One week of shifts across every job. Deliberately NOT filtered from
+  // upcomingSchedule (which starts at today) — the owner needs to page back to
+  // last week to answer "what did I have him down for on Tuesday."
+  const fetchCrewWeek = useCallback(async (startKey) => {
+    setCrewWeekLoading(true)
+    try {
+      const { data, error } = await supabase.from('schedule_entries')
+        .select('*, projects(name), profiles!schedule_entries_worker_id_fkey(full_name)')
+        .eq('owner_id', profile.id)
+        .gte('scheduled_date', startKey)
+        .lte('scheduled_date', addDaysKey(startKey, 6))
+        .order('start_time', { ascending: true, nullsFirst: false })
+      if (error) throw error
+      setCrewWeek(data || [])
+    } catch (e) { console.error('Crew week fetch failed:', e); showToast('Could not load the week. Check your connection and try again.', 'error') }
+    finally { setCrewWeekLoading(false) }
+  }, [profile.id])
+
   const fetchCompliance = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('compliance_items').select('*').eq('owner_id', profile.id).order('expires_on', { ascending: true })
@@ -671,6 +696,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   useEffect(() => {
     if (activeTab === 'payroll' && workers.length) fetchPayroll()
   }, [activeTab, workers, fetchPayroll])
+
+  // Refetch on every visit AND on every arrow — the week you're looking at is
+  // the query, so paging weeks is a fetch, not a filter.
+  useEffect(() => {
+    if (activeTab === 'crewweek') fetchCrewWeek(crewWeekStart)
+  }, [activeTab, crewWeekStart, fetchCrewWeek])
 
   // Invoices/estimates are fetched once, then reused across tabs — the
   // *Loaded flags stop every tab visit from refiring the query (T2.4). Mutations
@@ -1422,25 +1453,54 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     setLoading(false)
   }
 
+  // Called from two places now: inside a job (the job is implied) and from the
+  // crew week grid (the job has to be picked). A shift with no job can't exist
+  // — the crew's phone shows them WHERE to be, not just when.
   const addSchedule = async () => {
+    const projectId = selectedProject ? selectedProject.id : scheduleForm.project_id
     if (!scheduleForm.worker_id || !scheduleForm.scheduled_date) return setInlineError('Worker and date are required')
+    if (!projectId) return setInlineError('Pick which job this shift is on')
     setLoading(true)
     setInlineError('')
     try {
       const { error } = await supabase.from('schedule_entries').insert({
         owner_id: profile.id, worker_id: scheduleForm.worker_id,
-        project_id: selectedProject.id, task_description: scheduleForm.task_description,
+        project_id: projectId, task_description: scheduleForm.task_description,
         scheduled_date: scheduleForm.scheduled_date, start_time: scheduleForm.start_time, end_time: scheduleForm.end_time
       })
       if (error) throw error
       setShowNewSchedule(false)
-      setScheduleForm({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
-      await refetchDetail('schedule_entries', setScheduleEntries, 'scheduled_date', true, '*, profiles!schedule_entries_worker_id_fkey(full_name)')
+      setScheduleForm({ worker_id: '', project_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
+      if (selectedProject) {
+        await refetchDetail('schedule_entries', setScheduleEntries, 'scheduled_date', true, '*, profiles!schedule_entries_worker_id_fkey(full_name)')
+      } else {
+        // Jump the grid to the week the shift landed in, so a shift scheduled
+        // for next Tuesday doesn't vanish the moment you save it.
+        const wk = weekStartKey(scheduleForm.scheduled_date + 'T00:00:00')
+        if (wk !== crewWeekStart) setCrewWeekStart(wk)
+        else await fetchCrewWeek(crewWeekStart)
+        fetchUpcomingSchedule()
+      }
       showToast('Scheduled ✓')
     } catch (e) {
       setInlineError('Failed to save schedule. Try again.')
     }
     setLoading(false)
+  }
+
+  const deleteSchedule = async (entry) => {
+    if (!window.confirm('Remove this shift from the schedule?')) return
+    try {
+      const { error } = await supabase.from('schedule_entries').delete().eq('id', entry.id)
+      if (error) throw error
+      setCrewWeek(list => list.filter(s => s.id !== entry.id))
+      setScheduleEntries(list => list.filter(s => s.id !== entry.id))
+      fetchUpcomingSchedule()
+      showToast('Shift removed')
+    } catch (e) {
+      console.error('Delete schedule failed:', e)
+      showToast('Could not remove that shift. Try again.', 'error')
+    }
   }
 
   const assignWorkerToProject = async (workerId) => {
@@ -1961,6 +2021,30 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     </div>
   )
 
+  // Scheduling is reachable from two screens now — inside a job, and from the
+  // crew week grid — and those live on opposite sides of the early return
+  // below. One definition rendered in both places, rather than two copies that
+  // drift apart the first time somebody adds a field.
+  const scheduleModal = showNewSchedule && (
+    <div className="modal-overlay" onClick={() => setShowNewSchedule(false)}>
+      <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+        <h2>Schedule Worker</h2>
+        <div className="input-group"><label>Worker</label><select value={scheduleForm.worker_id} onChange={e => setScheduleForm({ ...scheduleForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
+        {/* Only when the job isn't already implied by the screen you came from. */}
+        {!selectedProject && (
+          <div className="input-group"><label>Job</label><select value={scheduleForm.project_id} onChange={e => setScheduleForm({ ...scheduleForm, project_id: e.target.value })}><option value="">Select job</option>{activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        )}
+        <div className="input-group"><label>Task</label><input value={scheduleForm.task_description} onChange={e => setScheduleForm({ ...scheduleForm, task_description: e.target.value })} placeholder="Pour foundation" /></div>
+        <div className="input-group"><label>Date</label><input type="date" value={scheduleForm.scheduled_date} onChange={e => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })} /></div>
+        <div className="input-group"><label>Start Time</label><input type="time" value={scheduleForm.start_time} onChange={e => setScheduleForm({ ...scheduleForm, start_time: e.target.value })} /></div>
+        <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} /></div>
+        {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+        <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving…' : 'Schedule'}</button>
+        <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError('') }}>Cancel</button>
+      </div>
+    </div>
+  )
+
   // PROJECT DETAIL VIEW
   if (selectedProject) {
     const sp = spendOf(selectedProject.id)
@@ -2403,21 +2487,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           </div>
         )}
 
-        {showNewSchedule && (
-          <div className="modal-overlay" onClick={() => setShowNewSchedule(false)}>
-            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-              <h2>Schedule Worker</h2>
-              <div className="input-group"><label>Worker</label><select value={scheduleForm.worker_id} onChange={e => setScheduleForm({ ...scheduleForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
-              <div className="input-group"><label>Task</label><input value={scheduleForm.task_description} onChange={e => setScheduleForm({ ...scheduleForm, task_description: e.target.value })} placeholder="Pour foundation" /></div>
-              <div className="input-group"><label>Date</label><input type="date" value={scheduleForm.scheduled_date} onChange={e => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })} /></div>
-              <div className="input-group"><label>Start Time</label><input type="time" value={scheduleForm.start_time} onChange={e => setScheduleForm({ ...scheduleForm, start_time: e.target.value })} /></div>
-              <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} /></div>
-              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving…' : 'Schedule'}</button>
-              <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError('') }}>Cancel</button>
-            </div>
-          </div>
-        )}
+        {scheduleModal}
 
         {showNewMileage && (
           <div className="modal-overlay" onClick={() => { setShowNewMileage(false); setInlineError('') }}>
@@ -2599,11 +2669,89 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
         {activeTab === 'crew' && (
           <div>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers and their pay.</p>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers, their week, and their pay.</p>
+            <HubCard icon="📅" title="This week" sub="Who's working which day, and where" onClick={() => setActiveTab('crewweek')} />
             <HubCard icon="👷" title="Workers" sub="Add crew, set rates, time-off requests" onClick={() => setActiveTab('workers')} />
             <HubCard icon="💰" title="Crew Pay" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
           </div>
         )}
+
+        {activeTab === 'crewweek' && (() => {
+          const todayWeek = weekStartKey(new Date())
+          const todayKey = dateKey(new Date())
+          const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDaysKey(crewWeekStart, i))
+          const endKey = days[6]
+          const scheduledIds = new Set(crewWeek.map(s => s.worker_id))
+          const unscheduled = workers.filter(w => !scheduledIds.has(w.id))
+          // Approved time off only. A pending request isn't a promise, and
+          // showing it as "out" would have the owner planning around a day the
+          // worker is still expected to show up for.
+          const offOn = (key) => timeOff.filter(r => r.status === 'approved' && r.start_date <= key && r.end_date >= key)
+          const openAdd = (key) => {
+            setScheduleForm({ worker_id: '', project_id: '', task_description: '', scheduled_date: key, start_time: '', end_time: '' })
+            setInlineError('')
+            setShowNewSchedule(true)
+          }
+          return (
+            <div>
+              <BackBtn label="Crew" onClick={() => setActiveTab('crew')} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+                <button aria-label="Previous week" onClick={() => setCrewWeekStart(addDaysKey(crewWeekStart, -7))} style={{ minHeight: '44px', minWidth: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '18px', fontWeight: '700', cursor: 'pointer' }}>‹</button>
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatDateRange(crewWeekStart, endKey)}</p>
+                  <p style={{ fontSize: '12px', color: '#888' }}>{crewWeekStart === todayWeek ? 'This week' : (crewWeekStart < todayWeek ? 'Past week' : 'Upcoming')}{crewWeekLoading ? ' · loading…' : ` · ${crewWeek.length} shift${crewWeek.length === 1 ? '' : 's'}`}</p>
+                </div>
+                <button aria-label="Next week" onClick={() => setCrewWeekStart(addDaysKey(crewWeekStart, 7))} style={{ minHeight: '44px', minWidth: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '18px', fontWeight: '700', cursor: 'pointer' }}>›</button>
+              </div>
+              {crewWeekStart !== todayWeek && (
+                <button onClick={() => setCrewWeekStart(todayWeek)} style={{ width: '100%', minHeight: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: '700', cursor: 'pointer', marginBottom: '12px' }}>Back to this week</button>
+              )}
+
+              {days.map(key => {
+                const shifts = crewWeek.filter(s => s.scheduled_date === key)
+                const out = offOn(key)
+                const isToday = key === todayKey
+                const d = new Date(key + 'T00:00:00')
+                return (
+                  <div key={key} className="card" style={{ padding: '12px 14px', marginBottom: '8px', border: isToday ? '2px solid #1C2B3A' : undefined }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
+                      <p style={{ fontWeight: '700', fontSize: '14px', color: '#1C2B3A' }}>
+                        {d.toLocaleDateString('en-US', { weekday: 'long' })} <span style={{ color: '#888', fontWeight: '500' }}>{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                        {isToday && <span style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 800, letterSpacing: '1px', color: '#1D4ED8', background: '#DBEAFE', borderRadius: '6px', padding: '2px 6px' }}>TODAY</span>}
+                      </p>
+                      <button onClick={() => openAdd(key)} style={{ background: 'none', border: 'none', color: '#1C2B3A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', minHeight: '44px', padding: '0 2px' }}>+ Add</button>
+                    </div>
+                    {shifts.length === 0 && out.length === 0 && <p style={{ fontSize: '13px', color: '#aaa', marginTop: '2px' }}>Nobody scheduled</p>}
+                    {shifts.map(s => (
+                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid #f0f0f0' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ fontWeight: '600', fontSize: '14px' }}>{s.profiles ? s.profiles.full_name : 'Worker'}{s.start_time ? ` · ${(s.start_time || '').slice(0, 5)}${s.end_time ? '–' + (s.end_time || '').slice(0, 5) : ''}` : ' · time not set'}</p>
+                          <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : 'No job'}{s.task_description ? ' · ' + s.task_description : ''}</p>
+                        </div>
+                        <button aria-label="Remove shift" onClick={() => deleteSchedule(s)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px', flexShrink: 0 }}>Remove</button>
+                      </div>
+                    ))}
+                    {out.map(r => {
+                      const wk = workers.find(x => x.id === r.worker_id)
+                      return <p key={r.id} style={{ fontSize: '13px', color: '#B45309', marginTop: '6px' }}>🌴 {wk ? wk.full_name : 'A worker'} is off{r.reason ? ` — ${r.reason}` : ''}</p>
+                    })}
+                  </div>
+                )
+              })}
+
+              {/* Not a nag — it's the answer to "who am I forgetting to put to work." */}
+              {unscheduled.length > 0 && (
+                <div className="card" style={{ marginTop: '12px', background: '#FAFAFA' }}>
+                  <p style={sectionLabel}>Not on the schedule this week</p>
+                  <p style={{ fontSize: '13px', color: '#555' }}>{unscheduled.map(w => w.full_name).join(', ')}</p>
+                </div>
+              )}
+              {workers.length === 0 && (
+                <div className="empty-state"><p>No crew yet. Add workers first, then put them on the calendar.</p><button className="btn-primary" onClick={() => setActiveTab('workers')}>Add a worker</button></div>
+              )}
+            </div>
+          )
+        })()}
 
         {activeTab === 'more' && (
           <div>
@@ -3544,6 +3692,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           </div>
         </div>
       )}
+
+      {scheduleModal}
 
       {testimonialModal}
 
