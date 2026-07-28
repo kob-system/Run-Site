@@ -294,7 +294,18 @@ async function runTool(tool, args, ctx) {
   if (tool === 'add_expense') {
     const amount = asNum(args.amount)
     if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) return { error: 'Amount must be between $0 and $100,000.' }
-    const category = ['materials', 'labor', 'other'].includes(args.category) ? args.category : 'materials'
+    // Must match RECEIPT_CATEGORIES in OwnerDashboard.js. Anything else lands in
+    // a bucket the dashboard has no label for and the Tax Pack can't line up.
+    // 'labor' used to be accepted here and is NOT a real receipt category — the
+    // dashboard silently swept it into "other", so map it there on purpose.
+    const CATEGORIES = ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other']
+    const raw = typeof args.category === 'string' ? args.category.toLowerCase().trim() : ''
+    const category = CATEGORIES.includes(raw) ? raw : (raw === 'labor' ? 'other' : 'materials')
+    // Sales tax is optional. When it's given, `amount` is the PRE-tax subtotal —
+    // the dashboard books cost = amount + tax_amount, so a tax that's larger than
+    // the subtotal means the model split it wrong; drop it rather than inflate spend.
+    const taxIn = asNum(args.sales_tax)
+    const tax = Number.isFinite(taxIn) && taxIn > 0 && taxIn < amount ? Math.round(taxIn * 100) / 100 : 0
     // A crew member can log a scanned receipt, but it always books to the BOSS's
     // tenant: owner_id = their owner, and the job must be one they're assigned to
     // (worker_projects view; the receipts INSERT RLS re-checks project_workers).
@@ -308,15 +319,19 @@ async function runTool(tool, args, ctx) {
       owner_id: ownerId,
       amount,
       category,
+      tax_amount: tax,
       store: clean(args.store, 120) || null,
       description: clean(args.description, 200) || null,
+      // purchase_date is deliberately OMITTED so Postgres applies its
+      // current_date default (FIX-DATABASE-25). Sending null would throw —
+      // the column is NOT NULL, and defaults only fire on an omitted key.
     })
     if (!ok) return { error: BLOCKED }
     const row = Array.isArray(data) ? data[0] : data
     return {
       ok: true,
-      message: `Added a ${money(amount)} ${category} expense to “${resolved.project.name}.”`,
-      result: { id: row && row.id, project: resolved.project.name, amount, category },
+      message: `Added a ${money(amount + tax)} ${category} expense to “${resolved.project.name}.”`,
+      result: { id: row && row.id, project: resolved.project.name, amount, tax, category },
     }
   }
 

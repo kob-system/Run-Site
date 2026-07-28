@@ -574,9 +574,10 @@ const WRITE_TOOLS = [
       type: 'object',
       properties: {
         ...JOB_ARG,
-        amount: { type: 'number', description: 'Dollar amount, e.g. 42.50' },
+        amount: { type: 'number', description: 'Dollar amount BEFORE sales tax if sales_tax is given, otherwise the total. e.g. 42.50' },
+        sales_tax: { type: 'number', description: 'Sales tax in dollars, only if they say it. Must be less than amount.' },
         store: { type: 'string', description: 'Where it was bought (optional).' },
-        category: { type: 'string', enum: ['materials', 'labor', 'other'], description: 'Defaults to materials.' },
+        category: { type: 'string', enum: ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other'], description: 'Defaults to materials.' },
         description: { type: 'string', description: 'What it was (optional).' },
       },
       required: ['job_name', 'amount'],
@@ -1089,7 +1090,7 @@ const WORKER_WRITE_TOOLS = [
         ...JOB_ARG,
         amount: { type: 'number', description: 'Dollar TOTAL of the receipt, tax included, e.g. 42.50' },
         store: { type: 'string', description: 'Where it was bought (optional).' },
-        category: { type: 'string', enum: ['materials', 'labor', 'other'], description: 'Defaults to materials.' },
+        category: { type: 'string', enum: ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other'], description: 'Defaults to materials.' },
         description: { type: 'string', description: 'What it was (optional).' },
       },
       required: ['job_name', 'amount'],
@@ -1106,7 +1107,12 @@ function summarize(tool, a) {
   switch (tool) {
     case 'add_expense': {
       const cat = a.category && a.category !== 'materials' ? ` ${a.category}` : ''
-      return `Add a ${money(a.amount)}${cat} expense${a.store ? ` from ${a.store}` : ''} to “${a.job_name}”.`
+      // Show the tax on the confirm card — the owner is approving the TOTAL that
+      // will hit the job's spend, not the pre-tax subtotal.
+      const t = num(a.sales_tax)
+      const tax = t > 0 && t < num(a.amount) ? ` (${money(a.amount)} + ${money(t)} tax)` : ''
+      const total = t > 0 && t < num(a.amount) ? num(a.amount) + t : num(a.amount)
+      return `Add a ${money(total)}${cat} expense${a.store ? ` from ${a.store}` : ''} to “${a.job_name}”.${tax}`
     }
     case 'create_job':
       return `Create a new job “${a.name}”${a.client_name ? ` for ${a.client_name}` : ''}${a.contract_price ? ` — contract ${money(a.contract_price)}` : ''}.`
