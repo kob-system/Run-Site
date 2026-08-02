@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import './Landing.css'
 import { supabase } from '../supabaseClient'
 import { track, trackOnce, EV } from '../utils/analytics'
+import VideoBlock from '../components/VideoBlock'
 
 // Public landing page at / — what a stranger sees before they have an
 // account. Rendered before the Login screen (App.js) for logged-out
@@ -121,6 +122,7 @@ export default function Landing() {
       <header className="ld-top">
         <a className="ld-logo" href="/">JobTally</a>
         <nav>
+          <a className="ld-signin" href="/how-it-works">How it works</a>
           <a className="ld-signin" href="/login">Sign in</a>
           <a className="ld-cta-sm" href={SIGNUP_URL} onClick={cta('topbar')}>Start free</a>
         </nav>
@@ -153,24 +155,18 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Watch-it-run video — click-to-play, nothing loads until they hit play */}
-      <section className="ld-video">
-        <div className="ld-inner">
-          <h2>See it run — 3-minute walkthrough</h2>
-          <p className="ld-kicker">Watch a real job go from clock-in to profit. No sign-up needed.</p>
-          <div className="ld-video-frame">
-            <video
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/pitch-poster.jpg"
-              src="/landing/JobTally-Pitch.mp4"
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-        </div>
-      </section>
+      {/* Founder intro — hidden until the file exists (see videoConfig.js). */}
+      <VideoBlock
+        name="intro"
+        onPlay={() => track(EV.LANDING_CTA, { where: 'intro-video-play' })}
+      />
+
+      {/* The walkthrough. Click-to-play — nothing downloads until they press it. */}
+      <VideoBlock
+        name="howTo"
+        footer={<>Want it written out? <a href="/how-it-works">Read the full walkthrough →</a></>}
+        onPlay={() => track(EV.LANDING_CTA, { where: 'howto-video-play' })}
+      />
 
       {/* Why this exists — origin story / trust band */}
       <section className="ld-story">
@@ -350,7 +346,7 @@ export default function Landing() {
       </section>
 
       <footer className="ld-footer">
-        <a href="/login">Sign in</a>·<a href="/remodelers">For remodelers</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
+        <a href="/login">Sign in</a>·<a href="/how-it-works">How it works</a>·<a href="/remodelers">For remodelers</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
         <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
       </footer>
     </div>
