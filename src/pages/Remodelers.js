@@ -38,13 +38,13 @@ const FEATURES = [
     icon: 'pin',
     title: 'Crew clock-in with GPS',
     body:
-      "Your guys tap one button on their phone and they're on the clock — with a GPS stamp showing they were at the job when they hit it. You get an email the moment anyone clocks in or out. No more \"I was there at 7.\"",
+      "Your guys tap one button on their phone and they're on the clock — and that tap stamps where they were standing when they made it. You get an email the moment anyone clocks in or out. No more \"I was there at 7.\" One stamp at the start, not an all-day tracker.",
   },
   {
     icon: 'receipt',
     title: 'Snap a receipt, done',
     body:
-      'Take a photo at the register. JobTally reads the store and the amount and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing.',
+      'Take a photo at the register. JobTally reads the store, the total, the sales tax and the date, and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing.',
   },
   {
     icon: 'money',

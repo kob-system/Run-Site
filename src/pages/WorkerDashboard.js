@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatTime } from '../utils/formatTime'
+import { todayLocal } from '../utils/todayLocal'
 import AssistantPanel from '../components/AssistantPanel'
 import ConfirmSheet from '../components/ConfirmSheet'
 
@@ -395,7 +396,9 @@ export default function WorkerDashboard({ profile }) {
   const fetchSchedule = async () => {
     setScheduleError('')
     try {
-      const { data, error } = await supabase.from('worker_schedule').select('*').gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date', { ascending: true })
+      // todayLocal, not toISOString — in Eastern time the UTC date flips to
+      // tomorrow at 8pm, which used to make tonight's crew lose today's row.
+      const { data, error } = await supabase.from('worker_schedule').select('*').gte('scheduled_date', todayLocal()).order('scheduled_date', { ascending: true })
       if (error) throw error
       setSchedule(data || [])
     } catch (e) {
@@ -862,7 +865,7 @@ export default function WorkerDashboard({ profile }) {
                 </button>
               )}
               <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '14px', lineHeight: '1.5', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
-                🔒 Your location only stamps your start and stop so your hours can never be disputed. GPS is off when you're clocked out.
+                🔒 Your location is stamped once, when you clock in, so your hours can never be disputed. Nothing is tracked after that, and nothing while you're clocked out.
               </p>
             </div>
 
