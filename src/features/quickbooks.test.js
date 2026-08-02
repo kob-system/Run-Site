@@ -29,9 +29,24 @@ describe('buildQboInvoicesCsv', () => {
     ])
   })
 
-  test('numbers invoices sequentially from RS-1001', () => {
+  test('falls back to sequential RS-1001 numbering when rows have no id', () => {
     const rows = buildQboInvoicesCsv([{ amount: 1 }, { amount: 2 }, { amount: 3 }])
     expect(rows.slice(1).map(r => r[0])).toEqual(['RS-1001', 'RS-1002', 'RS-1003'])
+  })
+
+  test('an invoice keeps the same number no matter where it sits in the export', () => {
+    // The bug: numbering by array position meant a May export and a June
+    // export gave the SAME invoice two different numbers, and gave two
+    // different invoices the same number. QBO matches on this field.
+    const a = { id: '3f2a91cd-1111-4aaa-8bbb-000000000001', amount: 100 }
+    const b = { id: '77bc04ef-2222-4ccc-9ddd-000000000002', amount: 200 }
+
+    const firstExport = buildQboInvoicesCsv([a])
+    const laterExport = buildQboInvoicesCsv([b, a])
+
+    expect(firstExport[1][0]).toBe('RS-3F2A91CD')
+    expect(laterExport[2][0]).toBe('RS-3F2A91CD') // same invoice, same number
+    expect(laterExport[1][0]).toBe('RS-77BC04EF') // and no collision
   })
 
   test('falls back gracefully when project, customer, label, and dates are missing', () => {

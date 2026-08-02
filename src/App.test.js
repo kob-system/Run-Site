@@ -43,17 +43,24 @@ jest.mock('./supabaseClient', () => ({
 // jsdom's location can't be assigned, but history.pushState moves it fine.
 const goTo = (path) => window.history.pushState({}, '', path)
 
+// Every route in App.js is React.lazy, so each of these tests has to wait for a
+// dynamic import to resolve behind Suspense. The default findBy timeout is 1s,
+// which is plenty on an idle machine and NOT plenty when Jest is running every
+// suite in parallel on a loaded laptop — that flaked as soon as the suite count
+// grew. The assertions are unchanged; they're just allowed to take longer.
+const ROUTE_LOAD = { timeout: 15000 }
+
 beforeEach(() => goTo('/'))
 
 test('a logged-out visitor at the root gets the public landing page', async () => {
   render(<App />)
-  expect(await screen.findByText(/Know what every job really makes/i)).toBeInTheDocument()
+  expect(await screen.findByText(/Know what every job really makes/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
 
 test('a logged-out visitor at /login gets the login screen', async () => {
   goTo('/login')
   render(<App />)
-  expect(await screen.findByText(/Contractor job tracking/i)).toBeInTheDocument()
+  expect(await screen.findByText(/Contractor job tracking/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
 
 test('a worker invite link reaches the login screen, not the landing page', async () => {
@@ -61,5 +68,5 @@ test('a worker invite link reaches the login screen, not the landing page', asyn
   // on marketing copy instead of the signup form the text message promised.
   goTo('/?invite=abc123')
   render(<App />)
-  expect(await screen.findByText(/Contractor job tracking/i)).toBeInTheDocument()
+  expect(await screen.findByText(/Contractor job tracking/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })

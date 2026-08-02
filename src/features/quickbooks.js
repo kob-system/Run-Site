@@ -13,6 +13,25 @@ function fmtDate(d) {
 
 const money = n => (Number(n) || 0).toFixed(2)
 
+// An invoice number has to mean the same invoice forever, because QBO matches
+// on it: import the same number twice and QBO either rejects the row or
+// overwrites the earlier invoice.
+//
+// This used to be `RS-${1001 + i}` — the row's position in *this* export. So
+// exporting 3 invoices in May produced RS-1001..1003, and exporting all 8 in
+// June produced RS-1001..1008 for a DIFFERENT set of invoices. The May ones
+// silently changed number, and three June invoices collided with them.
+//
+// The invoice's own id is the only thing that never moves, so the number is
+// derived from it. Not sequential, but stable and unique, which is what QBO
+// actually needs. Rows with no id (only reachable from tests and hand-built
+// arrays) keep the old positional number so nothing crashes.
+function invoiceNo(inv, i) {
+  const id = String((inv && inv.id) || '')
+  if (!id) return `RS-${1001 + i}`
+  return `RS-${id.replace(/-/g, '').slice(0, 8).toUpperCase()}`
+}
+
 // invoices: rows from `invoices` selected with `projects(name, client_name)`.
 // One row per invoice (Run-Site invoices are single-amount, not line-itemed).
 export function buildQboInvoicesCsv(invoices) {
@@ -23,7 +42,7 @@ export function buildQboInvoicesCsv(invoices) {
     const job = (inv.projects && inv.projects.name) || ''
     const desc = [inv.label, job].filter(Boolean).join(' - ')
     rows.push([
-      `RS-${1001 + i}`,
+      invoiceNo(inv, i),
       customer,
       fmtDate(inv.issued_date || inv.created_at),
       fmtDate(inv.due_date),

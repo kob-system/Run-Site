@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
+import { todayLocal } from '../utils/todayLocal'
 import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
 import { downloadCsv } from '../utils/csv'
 import AssistantPanel from '../components/AssistantPanel'
@@ -629,7 +630,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   const fetchUpcomingSchedule = useCallback(async () => {
     try {
-      const today = new Date().toISOString().split('T')[0]
+      const today = todayLocal()
       const { data, error } = await supabase.from('schedule_entries')
         .select('*, projects(name), profiles!schedule_entries_worker_id_fkey(full_name)')
         .eq('owner_id', profile.id)
@@ -933,7 +934,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('mileage_entries').insert({
         owner_id: profile.id, project_id: selectedProject.id,
-        trip_date: mileageForm.trip_date || new Date().toISOString().split('T')[0],
+        trip_date: mileageForm.trip_date || todayLocal(),
         miles: parseFloat(mileageForm.miles || 0),
         rate: parseFloat(mileageForm.rate || DEFAULT_MILEAGE_RATE),
         notes: mileageForm.notes
@@ -968,7 +969,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { error } = await supabase.from('daily_logs').insert({
         owner_id: profile.id, project_id: selectedProject.id,
-        log_date: logForm.log_date || new Date().toISOString().split('T')[0],
+        log_date: logForm.log_date || todayLocal(),
         weather: logForm.weather || null, note: logForm.note
       })
       if (error) throw error
@@ -1305,7 +1306,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const { error } = await supabase.from('invoices').insert({
         owner_id: profile.id, project_id: invoiceForm.project_id,
         label: invoiceForm.label || 'Invoice', amount: parseFloat(invoiceForm.amount || 0),
-        issued_date: invoiceForm.issued_date || new Date().toISOString().split('T')[0],
+        issued_date: invoiceForm.issued_date || todayLocal(),
         due_date: invoiceForm.due_date || null, notes: invoiceForm.notes || null, payment_link: invoiceForm.payment_link || null, status: 'unpaid'
       })
       if (error) throw error
@@ -2206,7 +2207,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           {projectTab === 'work' && (
             <div>
               <JobSection title="Time" count={timeEntries.length} open={isOpen('time')} onToggle={() => toggleSection('time')}>
-              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add time</button>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: todayLocal(), start_time: '', end_time: '' }) }}>+ Add time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -2311,7 +2312,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                     </div>
                   </div>
                 ))}
-                {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store and amount for you and adds it to this job's costs.</p></div>}
+                {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store, total, sales tax and date for you and adds it to this job's costs.</p></div>}
               </JobSection>
 
               <JobSection title="Mileage" count={mileageEntries.length} open={isOpen('mileage')} onToggle={() => toggleSection('mileage')}>

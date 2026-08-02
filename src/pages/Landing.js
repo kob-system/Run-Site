@@ -8,8 +8,10 @@ import { track, trackOnce, EV } from '../utils/analytics'
 // visitors; logged-in users never hit it. Screenshots in /landing/* are
 // REAL app screens from the demo company (Summit Remodeling) — nothing
 // mocked up. CTAs point at the real signup: /login?signup=1 opens the
-// Create Account form. New owners get the existing 30-day no-card free
-// window — no invented trials, no invented pricing.
+// Create Account form. New owners get a 30-day free trial that DOES take a
+// card up front (Stripe trial_period_days=30, see api/create-checkout-session
+// — the old app-side no-card window is retired). Never write "no card
+// required" here: no invented trials, no invented pricing.
 const SIGNUP_URL = '/login?signup=1'
 
 const FEATURES = [
@@ -19,15 +21,15 @@ const FEATURES = [
     kicker: 'Crew hours',
     title: 'Your crew clocks in with one tap — GPS-stamped',
     body:
-      "Your guys tap one button on their phone and they're on the clock, with a GPS stamp showing they were at the job when they hit it. You get an email the moment anyone clocks in or out. No more \"I was there at 7.\"",
+      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. You get an email the moment anyone clocks in or out. No more \"I was there at 7.\" It's one stamp at the start, not a tracker — nothing follows your crew around all day, which is why they'll actually use it.",
   },
   {
     img: '/landing/receipts-list.png',
     alt: 'JobTally receipts list booked to a job',
     kicker: 'Receipts',
-    title: 'Snap a receipt — the store and total fill themselves in',
+    title: 'Snap a receipt — store, total, tax and date fill themselves in',
     body:
-      'Take a photo at the register and JobTally reads the store and the amount and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing, and tax time stops being a nightmare weekend.',
+      'Take a photo at the register and JobTally reads the store, the total, the sales tax and the date off it, and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing, and because the tax and the real purchase date are already on there, tax time stops being a nightmare weekend.',
   },
   {
     img: '/landing/job-profit.png',
