@@ -72,6 +72,14 @@ export default function WorkerDashboard({ profile }) {
   const [timeOffForm, setTimeOffForm] = useState({ start_date: '', end_date: '', reason: '' })
   const [timeOffError, setTimeOffError] = useState('')
   const [timeOffSubmitting, setTimeOffSubmitting] = useState(false)
+  // The owner's shopping list + fix-it list for the jobs this worker is on.
+  // Read through the worker_material_items / worker_punch_items views and
+  // checked off through the two RPCs (FIX-DATABASE-27) — never written direct.
+  const [materialItems, setMaterialItems] = useState([])
+  const [punchItems, setPunchItems] = useState([])
+  const [listsError, setListsError] = useState('')
+  // Item id currently mid-write, so only that row shows as busy.
+  const [togglingItem, setTogglingItem] = useState(null)
   // Styled replacement for native confirm(): { message, confirmLabel, onConfirm }.
   const [confirmSheet, setConfirmSheet] = useState(null)
 
@@ -117,6 +125,7 @@ export default function WorkerDashboard({ profile }) {
     fetchHistory()   // populate the "This week" summary up front
     fetchTimeOff()
     fetchJobPhotos()
+    fetchLists()
   }, [])
 
   // One assigned job? Always pin selection to it so a reassignment is reflected.
@@ -143,6 +152,7 @@ export default function WorkerDashboard({ profile }) {
       fetchSchedule()
       fetchHistory()
       fetchJobPhotos()
+      fetchLists()
     }
   }, [isOnline])
 
@@ -391,6 +401,55 @@ export default function WorkerDashboard({ profile }) {
     } catch (e) {
       setScheduleError("Couldn't load your schedule. Check your connection.")
     }
+  }
+
+  // Shopping list + fix-it list for every job this worker is assigned to.
+  // Both views are SECURITY DEFINER and scoped by auth.uid() through
+  // project_workers, so "select *" can only ever return this worker's jobs.
+  const fetchLists = async () => {
+    setListsError('')
+    try {
+      const [mats, punch] = await Promise.all([
+        supabase.from('worker_material_items').select('*').order('created_at', { ascending: true }),
+        supabase.from('worker_punch_items').select('*').order('created_at', { ascending: true })
+      ])
+      if (mats.error) throw mats.error
+      if (punch.error) throw punch.error
+      setMaterialItems(mats.data || [])
+      setPunchItems(punch.data || [])
+    } catch (e) {
+      // 42P01 = the views aren't applied yet. Show nothing rather than an error
+      // the worker can't act on; every other failure is worth telling them about.
+      if (e && e.code === '42P01') {
+        setMaterialItems([])
+        setPunchItems([])
+      } else {
+        setListsError("Couldn't load your job lists. Check your connection.")
+      }
+    }
+  }
+
+  // Check an item off. Optimistic so the tap feels instant on a bad jobsite
+  // connection; reverted with a toast if the write is refused.
+  const toggleListItem = async (kind, item) => {
+    if (togglingItem) return
+    if (!navigator.onLine) { showToast('📶 Offline — connect to check items off'); return }
+    const isMaterial = kind === 'material'
+    const field = isMaterial ? 'bought' : 'done'
+    const next = !item[field]
+    const setList = isMaterial ? setMaterialItems : setPunchItems
+    setTogglingItem(item.id)
+    setList(prev => prev.map(r => (r.id === item.id ? { ...r, [field]: next } : r)))
+    try {
+      const { error } = isMaterial
+        ? await supabase.rpc('worker_set_material_bought', { p_item_id: item.id, p_bought: next })
+        : await supabase.rpc('worker_set_punch_done', { p_item_id: item.id, p_done: next })
+      if (error) throw error
+    } catch (e) {
+      setList(prev => prev.map(r => (r.id === item.id ? { ...r, [field]: item[field] } : r)))
+      showToast("Couldn't save that — try again")
+    }
+    setTogglingItem(null)
   }
 
   const fetchTimeOff = async () => {
@@ -676,6 +735,31 @@ export default function WorkerDashboard({ profile }) {
 
   const isOfflineMode = !!offlineEntry && !activeEntry
 
+  // Both lists grouped under the job they belong to, so the crew reads them the
+  // way they work — one job at a time — instead of as two flat piles. Jobs with
+  // nothing on either list are dropped. Open items drive the tab badge.
+  const listsByJob = (() => {
+    const byId = {}
+    const put = (row, key) => {
+      const g = (byId[row.project_id] ||= {
+        id: row.project_id,
+        name: row.project_name || 'Job',
+        materials: [],
+        punch: []
+      })
+      g[key].push(row)
+    }
+    materialItems.forEach(r => put(r, 'materials'))
+    punchItems.forEach(r => put(r, 'punch'))
+    // Assigned-job order first (matches the Clock tab), then anything else.
+    const rank = new Map(projects.map((p, i) => [p.id, i]))
+    return Object.values(byId).sort((a, b) =>
+      (rank.has(a.id) ? rank.get(a.id) : 999) - (rank.has(b.id) ? rank.get(b.id) : 999)
+    )
+  })()
+  const openListCount =
+    materialItems.filter(m => !m.bought).length + punchItems.filter(p => !p.done).length
+
   return (
     <div>
       <div className="topbar">
@@ -696,8 +780,13 @@ export default function WorkerDashboard({ profile }) {
       </div>
 
       <div className="tabs" style={{ margin: '16px 16px 0' }}>
-        <button className={'tab ' + (activeTab === 'clock' ? 'active' : '')} onClick={() => setActiveTab('clock')}>Clock In/Out</button>
-        <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>My Schedule</button>
+        {/* Labels are short on purpose: five tabs share the width on a phone,
+            and "Clock" over a full-screen timer needs no more words. */}
+        <button className={'tab ' + (activeTab === 'clock' ? 'active' : '')} onClick={() => setActiveTab('clock')}>Clock</button>
+        <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>Schedule</button>
+        <button className={'tab ' + (activeTab === 'lists' ? 'active' : '')} onClick={() => setActiveTab('lists')}>
+          Lists{openListCount > 0 && <span style={{ marginLeft: '4px', background: '#E07B2A', color: 'white', borderRadius: '999px', padding: '1px 6px', fontSize: '11px', fontWeight: '700' }}>{openListCount}</span>}
+        </button>
         <button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => setActiveTab('history')}>History</button>
         <button className={'tab ' + (activeTab === 'timeoff' ? 'active' : '')} onClick={() => setActiveTab('timeoff')}>Time Off</button>
       </div>
@@ -848,6 +937,74 @@ export default function WorkerDashboard({ profile }) {
           </div>
         )}
 
+        {activeTab === 'lists' && (
+          <div>
+            {listsError && <div className="alert-danger" style={{ marginBottom: '12px' }}>{listsError}</div>}
+            {listsByJob.length === 0 && !listsError
+              ? <div className="empty-state"><p>Nothing on your lists yet. When your boss adds what to pick up or what needs fixing on your jobs, it shows up here.</p></div>
+              : listsByJob.map(job => {
+                  const rows = [
+                    { key: 'material', title: '🛒 Pick up', items: job.materials, doneField: 'bought', doneLabel: 'Got it' },
+                    { key: 'punch',    title: '🔧 Fix it',  items: job.punch,     doneField: 'done',   doneLabel: 'Done' }
+                  ].filter(r => r.items.length > 0)
+                  return (
+                    <div key={job.id} className="card" style={{ marginBottom: '12px' }}>
+                      <h3 style={{ marginBottom: '10px' }}>{job.name}</h3>
+                      {rows.map(row => {
+                        const open = row.items.filter(i => !i[row.doneField]).length
+                        return (
+                          <div key={row.key} style={{ marginBottom: '14px' }}>
+                            <p style={{ fontSize: '13px', fontWeight: '700', color: '#5B6470', marginBottom: '6px' }}>
+                              {row.title} <span style={{ fontWeight: '500' }}>· {open} left of {row.items.length}</span>
+                            </p>
+                            {row.items.map(item => {
+                              const checked = !!item[row.doneField]
+                              const label = row.key === 'material'
+                                ? [item.qty, item.name].filter(Boolean).join(' × ')
+                                : (item.description || '')
+                              return (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  onClick={() => toggleListItem(row.key, item)}
+                                  disabled={togglingItem === item.id}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: '10px', width: '100%',
+                                    textAlign: 'left', minHeight: '44px', padding: '10px 12px',
+                                    marginBottom: '6px', borderRadius: '8px', cursor: 'pointer',
+                                    background: checked ? '#F3F4F6' : 'white',
+                                    border: `1px solid ${checked ? '#D1D5DB' : '#E5E7EB'}`
+                                  }}
+                                >
+                                  <span style={{
+                                    flex: '0 0 auto', width: '22px', height: '22px', borderRadius: '6px',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '14px', fontWeight: '700', lineHeight: 1,
+                                    background: checked ? '#16A34A' : 'white',
+                                    border: `2px solid ${checked ? '#16A34A' : '#9CA3AF'}`,
+                                    color: 'white'
+                                  }}>{checked ? '✓' : ''}</span>
+                                  <span style={{
+                                    flex: 1, fontSize: '15px',
+                                    color: checked ? '#9CA3AF' : '#1C2B3A',
+                                    textDecoration: checked ? 'line-through' : 'none'
+                                  }}>{label}</span>
+                                  <span style={{ flex: '0 0 auto', fontSize: '12px', fontWeight: '600', color: '#9CA3AF' }}>
+                                    {togglingItem === item.id ? '…' : (checked ? row.doneLabel : '')}
+                                  </span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })
+            }
+          </div>
+        )}
+
         {activeTab === 'timeoff' && (
           <div>
             <form onSubmit={submitTimeOff} className="card" style={{ marginBottom: '12px' }}>
@@ -993,7 +1150,7 @@ export default function WorkerDashboard({ profile }) {
         onCancel={() => setConfirmSheet(null)}
       />
 
-      <AssistantPanel role="worker" onDataChanged={() => { checkActiveEntry(); fetchHistory(); fetchSchedule(); fetchTimeOff() }} />
+      <AssistantPanel role="worker" onDataChanged={() => { checkActiveEntry(); fetchHistory(); fetchSchedule(); fetchTimeOff(); fetchLists() }} />
     </div>
   )
 }

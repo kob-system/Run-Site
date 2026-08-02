@@ -254,9 +254,31 @@ async function listJobProfits(userToken) {
   }
 }
 
-// Estimate totals, mirroring the dashboard's estItemAmount/estSubtotal/estTotal.
+// Estimate totals. SOURCE OF TRUTH IS src/utils/estimateMath.js — this is a
+// hand-port because a Vercel function can't import out of the React bundle. If
+// you change the rule there, change it here too, or the assistant will quote a
+// different number than the screen the owner is looking at.
+//
+// tax_mode: 'materials' = tax materials lines only (labor exempt — the usual
+// multi-state rule and the default), 'repair' = tax the whole charge including
+// labor (NY repair/maintenance), 'capital' = no sales tax at all (NY capital
+// improvement, Form ST-124). See FIX-DATABASE-28.
+const TAX_MODES = ['materials', 'repair', 'capital']
+const normalizeTaxMode = (m) => (TAX_MODES.includes(m) ? m : 'materials')
 const estItemAmount = (it) => (num(it.qty)) * (num(it.unit_price))
 const estSubtotal = (items) => (items || []).reduce((s, it) => s + estItemAmount(it), 0)
+const estTaxableBase = (items, mode) => {
+  const m = normalizeTaxMode(mode)
+  if (m === 'capital') return 0
+  if (m === 'repair') return estSubtotal(items)
+  return (items || [])
+    .filter((it) => (it && it.kind ? it.kind : 'materials') === 'materials')
+    .reduce((s, it) => s + estItemAmount(it), 0)
+}
+const estTaxAmount = (items, taxRate, mode) =>
+  Math.round(estTaxableBase(items, mode) * (num(taxRate) / 100) * 100) / 100
+const estTotal = (items, taxRate, mode) =>
+  Math.round((Math.round(estSubtotal(items) * 100) / 100 + estTaxAmount(items, taxRate, mode)) * 100) / 100
 
 async function execRead(name, args, ctx) {
   const { token: userToken, uid, tz } = ctx
@@ -361,13 +383,25 @@ async function execRead(name, args, ctx) {
       }))
     }
     case 'list_estimates': {
-      const rows = await userGet(userToken, `estimates?select=title,client_name,status,items,tax_rate,created_at&order=created_at.desc&limit=25`)
+      // tax_mode may not exist yet if FIX-DATABASE-28 hasn't been applied —
+      // PostgREST 400s on an unknown column, so fall back to the old select
+      // and let normalizeTaxMode default every row to 'materials'.
+      const cols = 'title,client_name,status,items,tax_rate,created_at'
+      let rows
+      try {
+        rows = await userGet(userToken, `estimates?select=${cols},tax_mode&order=created_at.desc&limit=25`)
+      } catch (e) {
+        rows = await userGet(userToken, `estimates?select=${cols}&order=created_at.desc&limit=25`)
+      }
       return (rows || []).map((e) => {
-        const sub = estSubtotal(Array.isArray(e.items) ? e.items : [])
+        const items = Array.isArray(e.items) ? e.items : []
+        const mode = normalizeTaxMode(e.tax_mode)
         return {
           title: e.title || '(untitled)', client: e.client_name || null, status: e.status,
-          subtotal: Math.round(sub * 100) / 100,
-          total_with_tax: Math.round((sub + (sub * num(e.tax_rate)) / 100) * 100) / 100,
+          subtotal: Math.round(estSubtotal(items) * 100) / 100,
+          tax_mode: mode,
+          sales_tax: estTaxAmount(items, e.tax_rate, mode),
+          total_with_tax: estTotal(items, e.tax_rate, mode),
         }
       })
     }
@@ -838,6 +872,11 @@ const WRITE_TOOLS = [
           },
         },
         tax_rate: { type: 'number', description: 'Percent, e.g. 8 for 8%.' },
+        tax_mode: {
+          type: 'string',
+          enum: ['materials', 'repair', 'capital'],
+          description: 'What sales tax applies to. "materials" (default) = tax materials lines only, labor exempt. "repair" = fixing or maintaining something that already exists, so the whole charge including labor is taxable. "capital" = building something new and permanent (capital improvement), so charge no sales tax at all. If the user did not say, leave this out.',
+        },
         notes: { type: 'string' },
       },
       required: ['title', 'items'],
@@ -1215,7 +1254,16 @@ function summarize(tool, a) {
     }
     case 'create_estimate': {
       const sub = estSubtotal(a.items || [])
-      return `Create a draft estimate “${a.title}”${a.client_name ? ` for ${a.client_name}` : ''} — ${(a.items || []).length} line item(s), subtotal ${money(sub)}${a.tax_rate ? ` + ${num(a.tax_rate)}% tax` : ''}.`
+      const mode = normalizeTaxMode(a.tax_mode)
+      // Spell out WHAT is being taxed, not just the rate. The owner confirming
+      // this card is the last human who can catch a wrong tax rule before it
+      // reaches a customer's phone.
+      const taxBit = mode === 'capital'
+        ? ' + no sales tax (capital improvement)'
+        : a.tax_rate
+          ? ` + ${num(a.tax_rate)}% tax on ${mode === 'repair' ? 'the whole job incl. labor' : 'materials only'} = ${money(estTaxAmount(a.items || [], a.tax_rate, mode))}`
+          : ''
+      return `Create a draft estimate “${a.title}”${a.client_name ? ` for ${a.client_name}` : ''} — ${(a.items || []).length} line item(s), subtotal ${money(sub)}${taxBit}.`
     }
     case 'set_estimate_status':
       return `Mark the estimate matching “${a.title}” as ${a.status.toUpperCase()}.`

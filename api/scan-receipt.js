@@ -1,8 +1,49 @@
 // Receipt OCR via the Claude API. Requires an authenticated Supabase user so
 // this paid endpoint can't be hit anonymously to burn the API budget.
+//
+// Extraction is a forced TOOL CALL, not a text reply parsed with regexes. The
+// old version asked for "STORE: ... AMOUNT: ..." and scraped it; a store name
+// containing the word "amount", a model that added a friendly preamble, or a
+// total printed as "1,204.55" each silently produced a blank or wrong number on
+// a screen the owner then hit Save on. A tool schema makes the API validate the
+// shape before we ever see it.
+//
+// It also asks for the subtotal, the tax AND the total, then reconciles them in
+// _receiptParse.js — because `amount` in this app means the PRE-TAX subtotal.
+import { buildScanResponse } from './_receiptParse'
+
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ALLOWED_MEDIA = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
+// The whole extraction contract. Descriptions matter as much as the types here
+// — "subtotal" and "total" are the difference between booking a job's cost
+// right and booking it with the sales tax counted twice.
+const RECEIPT_TOOL = {
+  name: 'record_receipt',
+  description: 'Record what is printed on the receipt in the photo.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      readable: {
+        type: 'boolean',
+        description: 'True if this is a receipt you can read numbers off of. False if it is blurry, cut off, or not a receipt — in that case leave every other field out.',
+      },
+      store: { type: 'string', description: 'The store or vendor name as printed at the top. Leave out if not shown.' },
+      subtotal: { type: 'number', description: 'The pre-tax subtotal as printed. Leave out if the receipt does not print one.' },
+      sales_tax: { type: 'number', description: 'The sales tax line as printed. Leave out if the receipt does not show tax.' },
+      total: { type: 'number', description: 'The grand total actually charged — the biggest number at the bottom, tax included.' },
+      purchase_date: { type: 'string', description: 'The date printed on the receipt as YYYY-MM-DD. Leave out if not shown. Never use today\'s date as a guess.' },
+    },
+    required: ['readable'],
+    additionalProperties: false,
+  },
+}
+
+// UTC is close enough for the "is this date from the future" guard — the worst
+// case is accepting a receipt dated one calendar day ahead, which is exactly
+// what the +1 day of slack in normalizeDate() is already allowing for.
+const todayKeyUTC = () => new Date().toISOString().slice(0, 10)
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -103,12 +144,16 @@ export default async function handler(req, res) {
           },
           body: JSON.stringify({
             model: 'claude-haiku-4-5-20251001',
-            max_tokens: 200,
+            max_tokens: 400,
+            tools: [RECEIPT_TOOL],
+            // Forced: the only thing this call is allowed to produce is one
+            // record_receipt call with the schema above. No prose to parse.
+            tool_choice: { type: 'tool', name: RECEIPT_TOOL.name },
             messages: [{
               role: 'user',
               content: [
                 { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-                { type: 'text', text: 'Look at this receipt. Extract: 1) store name, 2) total amount, 3) date, 4) sales tax. Reply ONLY in this format: STORE: [name] AMOUNT: [number only, no $ sign] DATE: [YYYY-MM-DD, or NONE if not shown] TAX: [number only, no $ sign, or NONE if not shown]' }
+                { type: 'text', text: 'Read this receipt and record exactly what is printed on it. Leave a field out rather than guessing at it.' }
               ]
             }]
           })
@@ -129,20 +174,14 @@ export default async function handler(req, res) {
       throw e;
     }
 
-    const text = data && data.content && data.content[0] && data.content[0].text
-    if (!text) return res.json({ store: '', amount: '', date: null, tax: null })
-
-    const storeMatch = text.match(/STORE:\s*(.+?)(?:\s+AMOUNT|$)/i)
-    const amountMatch = text.match(/AMOUNT:\s*([\d.]+)/i)
-    const dateMatch = text.match(/DATE:\s*(.+?)(?:\s+TAX|$)/i)
-    const taxMatch = text.match(/TAX:\s*([\d.]+)/i)
-    const dateVal = dateMatch ? dateMatch[1].trim() : ''
-    res.json({
-      store: storeMatch ? storeMatch[1].trim() : '',
-      amount: amountMatch ? amountMatch[1] : '',
-      date: dateVal && !/^none$/i.test(dateVal) ? dateVal : null,
-      tax: taxMatch ? taxMatch[1] : null
-    })
+    const blocks = (data && Array.isArray(data.content)) ? data.content : []
+    const call = blocks.find((b) => b && b.type === 'tool_use' && b.name === RECEIPT_TOOL.name)
+    // Empty rather than an error: the caller's copy already says "try a clearer
+    // photo, or just type it," and the manual fields are sitting right there.
+    if (!call || !call.input || call.input.readable === false) {
+      return res.json({ store: '', amount: '', tax: null, total: null, date: null })
+    }
+    res.json(buildScanResponse(call.input, todayKeyUTC()))
   } catch (err) {
     console.error('scan-receipt failed:', err)
     res.status(500).json({ error: 'Scan failed' })

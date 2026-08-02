@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { getAttribution, saveSignupAttribution } from '../utils/attribution'
 import buildInfo from '../buildInfo.json'
@@ -161,17 +161,16 @@ export default function Login() {
     })
     if (error) { setError(friendlyError(error.message)); setLoading(false); return }
 
-    // Burn the invite token so the link can't be reused, and let the server
-    // stamp the owner's pay rate onto the profile (best-effort — the worker is
-    // already created + linked even if this call fails).
+    // Burn the invite token so the link can't be reused (best-effort — the
+    // worker is already created + linked even if this call fails). Sending the
+    // session token when we have one lets the server record used_by from a
+    // verified JWT, not a client value.
     const claimInvite = () => {
       if (!inviteToken) return
       fetch('/api/claim-invite', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Send the session token when we have one (confirmation-off flow) so
-          // the server records used_by from a verified JWT, not a client value.
           ...(data.session?.access_token
             ? { Authorization: `Bearer ${data.session.access_token}` }
             : {})
@@ -216,6 +215,71 @@ export default function Login() {
     setLoading(false)
   }
 
+  // ---- Step-by-step flow: show ONE field at a time, advance on "Next" ----
+  const [step, setStep] = useState(0)
+  const activeRef = useRef(null)
+
+  // Ordered list of fields for the current mode. Recomputed each render, so
+  // switching Sign In/Create Account or owner/worker reshapes the remaining
+  // steps automatically.
+  const steps = (() => {
+    if (!isSignup) return ['email', 'password']
+    if (inviteToken) return ['name', 'email', 'password']
+    return ['role', 'name', role === 'owner' ? 'company' : 'ownerEmail', 'email', 'password']
+  })()
+  const stepKey = steps[Math.min(step, steps.length - 1)]
+  const isLastStep = step >= steps.length - 1
+
+  // Jump back to the first field whenever we switch between Sign In / Sign Up.
+  useEffect(() => { setStep(0) }, [isSignup])
+
+  // Auto-focus the field on screen each time the step changes, so they can
+  // just start typing and hit Enter/Next without tapping into the box.
+  useEffect(() => {
+    const t = setTimeout(() => activeRef.current && activeRef.current.focus(), 40)
+    return () => clearTimeout(t)
+  }, [step, isSignup, stepKey])
+
+  const emailOk = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim())
+
+  // Validate just the field currently on screen before moving on.
+  const validateStep = () => {
+    switch (stepKey) {
+      case 'name': if (!name.trim()) return 'Please enter your name.'; break
+      case 'company': if (!company.trim()) return 'Please enter your company name.'; break
+      case 'ownerEmail': if (!emailOk(ownerEmail)) return "Enter your boss's email address."; break
+      case 'email': if (!emailOk(email)) return 'Enter a valid email address.'; break
+      case 'password':
+        if (!password) return 'Please enter your password.'
+        if (isSignup && password.length < 6) return 'Password must be at least 6 characters.'
+        break
+      default: break
+    }
+    return ''
+  }
+
+  // One submit handler for the form: Enter or the button advances a step —
+  // or on the final step, actually signs in / creates the account.
+  const handleNext = (e) => {
+    e.preventDefault()
+    const msg = validateStep()
+    if (msg) { setError(msg); return }
+    setError('')
+    if (!isLastStep) { setStep((s) => s + 1); return }
+    if (isSignup) handleSignup(e); else handleLogin(e)
+  }
+
+  const goBack = () => { setError(''); setStep((s) => Math.max(0, s - 1)) }
+
+  const roleBtn = (val, label) => (
+    <button
+      type="button"
+      aria-pressed={role === val}
+      onClick={() => setRole(val)}
+      style={{ flex: 1, minHeight: '48px', padding: '12px 10px', borderRadius: '8px', border: '2px solid ' + (role === val ? '#E07B2A' : '#ddd'), background: role === val ? '#FFF4ED' : 'white', color: role === val ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}
+    >{label}</button>
+  )
+
   return (
     <div style={{ minHeight: '100vh', background: '#1C2B3A', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
       <div style={{ marginBottom: '32px', textAlign: 'center' }}>
@@ -225,50 +289,73 @@ export default function Login() {
         <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', marginTop: '6px' }}>Contractor job tracking — from your phone</p>
       </div>
       <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '20px', color: '#1C2B3A' }}>{isSignup ? 'Create Account' : 'Sign In'}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1C2B3A', margin: 0 }}>{isSignup ? 'Create Account' : 'Sign In'}</h2>
+          <span style={{ marginLeft: 'auto', fontSize: '12px', fontWeight: '600', color: '#9CA3AF' }}>Step {step + 1} of {steps.length}</span>
+        </div>
+        {/* Progress: one segment per field, filled up to the current step */}
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '18px' }} aria-hidden="true">
+          {steps.map((_, i) => (
+            <div key={i} style={{ height: '4px', borderRadius: '2px', flex: 1, background: i <= step ? '#E07B2A' : '#E5E7EB', transition: 'background .2s ease' }} />
+          ))}
+        </div>
         {error && <div className="alert-danger">{error}</div>}
         {notice && <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', color: '#15803d', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', fontWeight: '600', marginBottom: '12px' }}>{notice}</div>}
-        <form onSubmit={isSignup ? handleSignup : handleLogin}>
-          {isSignup && (
-            <>
-              {inviteToken && (
-                <div style={{ background: '#FFF4ED', border: '1px solid #E07B2A', borderRadius: '8px', padding: '12px', fontSize: '14px', color: '#1C2B3A', marginBottom: '16px', fontWeight: '600' }}>
-                  🎉 <strong>{inviteCompany}</strong> invited you to join the crew. Just set your password below to get started.
-                </div>
-              )}
-              {!inviteToken && (
-                <div className="input-group">
-                  <label>I am a...</label>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                    <button type="button" aria-pressed={role === 'owner'} onClick={() => setRole('owner')} style={{ flex: 1, minHeight: '48px', padding: '12px 10px', borderRadius: '8px', border: '2px solid ' + (role === 'owner' ? '#E07B2A' : '#ddd'), background: role === 'owner' ? '#FFF4ED' : 'white', color: role === 'owner' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Contractor / Owner</button>
-                    <button type="button" aria-pressed={role === 'worker'} onClick={() => setRole('worker')} style={{ flex: 1, minHeight: '48px', padding: '12px 10px', borderRadius: '8px', border: '2px solid ' + (role === 'worker' ? '#E07B2A' : '#ddd'), background: role === 'worker' ? '#FFF4ED' : 'white', color: role === 'worker' ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}>Worker</button>
-                  </div>
-                </div>
-              )}
-              <div className="input-group"><label htmlFor="su-name">Full Name</label><input id="su-name" type="text" autoComplete="name" autoFocus={isSignup && !inviteToken} value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
-              {role === 'owner' && (
-                <div className="input-group"><label htmlFor="su-company">Company Name</label><input id="su-company" type="text" autoComplete="organization" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
-              )}
-              {role === 'worker' && !inviteToken && (
-                <div className="input-group"><label htmlFor="su-owner">Your Boss's Email</label><input id="su-owner" type="email" inputMode="email" autoComplete="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
-              )}
-            </>
-          )}
-          <div className="input-group"><label htmlFor="li-email">Your Email</label><input id="li-email" type="email" inputMode="email" autoComplete="email" autoFocus={!isSignup} value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
-          <div className="input-group">
-            <label htmlFor="li-password">Password</label>
-            <div className="pw-wrap">
-              <input id="li-password" type={showPw ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} autoFocus={isSignup && !!inviteToken} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required minLength={isSignup ? 6 : undefined} />
-              <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
+        <form onSubmit={handleNext}>
+          {isSignup && inviteToken && step === 0 && (
+            <div style={{ background: '#FFF4ED', border: '1px solid #E07B2A', borderRadius: '8px', padding: '12px', fontSize: '14px', color: '#1C2B3A', marginBottom: '16px', fontWeight: '600' }}>
+              🎉 <strong>{inviteCompany}</strong> invited you to join the crew. Set your name, then a password, to get started.
             </div>
-            {isSignup && <p style={{ fontSize: '12px', color: '#6B7280', margin: '6px 2px 0' }}>At least 6 characters.</p>}
-            {!isSignup && (
-              <p style={{ textAlign: 'right', margin: '8px 2px 0' }}>
-                <button type="button" onClick={handleForgotPassword} disabled={loading} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', fontSize: '13px', cursor: 'pointer', padding: 0 }}>Forgot password?</button>
-              </p>
+          )}
+
+          {stepKey === 'role' && (
+            <div className="input-group">
+              <label>I am a...</label>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                {roleBtn('owner', 'Contractor / Owner')}
+                {roleBtn('worker', 'Worker')}
+              </div>
+            </div>
+          )}
+
+          {stepKey === 'name' && (
+            <div className="input-group"><label htmlFor="su-name">Full Name</label><input ref={activeRef} id="su-name" type="text" autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
+          )}
+
+          {stepKey === 'company' && (
+            <div className="input-group"><label htmlFor="su-company">Company Name</label><input ref={activeRef} id="su-company" type="text" autoComplete="organization" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
+          )}
+
+          {stepKey === 'ownerEmail' && (
+            <div className="input-group"><label htmlFor="su-owner">Your Boss's Email</label><input ref={activeRef} id="su-owner" type="email" inputMode="email" autoComplete="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" required /></div>
+          )}
+
+          {stepKey === 'email' && (
+            <div className="input-group"><label htmlFor="li-email">Your Email</label><input ref={activeRef} id="li-email" type="email" inputMode="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required /></div>
+          )}
+
+          {stepKey === 'password' && (
+            <div className="input-group">
+              <label htmlFor="li-password">Password</label>
+              <div className="pw-wrap">
+                <input ref={activeRef} id="li-password" type={showPw ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required minLength={isSignup ? 6 : undefined} />
+                <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
+              </div>
+              {isSignup && <p style={{ fontSize: '12px', color: '#6B7280', margin: '6px 2px 0' }}>At least 6 characters.</p>}
+              {!isSignup && (
+                <p style={{ textAlign: 'right', margin: '8px 2px 0' }}>
+                  <button type="button" onClick={handleForgotPassword} disabled={loading} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', fontSize: '13px', cursor: 'pointer', padding: 0 }}>Forgot password?</button>
+                </p>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+            {step > 0 && (
+              <button type="button" onClick={goBack} disabled={loading} style={{ flex: '0 0 auto', minWidth: '88px', minHeight: '48px', padding: '12px 16px', borderRadius: '8px', border: '2px solid #ddd', background: 'white', color: '#666', fontWeight: '700', cursor: 'pointer' }}>Back</button>
             )}
+            <button type="submit" className="btn-primary" disabled={loading} style={{ flex: 1, width: 'auto', marginTop: 0 }}>{loading ? <><span className="spinner" />Working…</> : isLastStep ? (isSignup ? 'Create Account' : 'Sign In') : 'Next'}</button>
           </div>
-          <button type="submit" className="btn-primary" disabled={loading}>{loading ? <><span className="spinner" />Working…</> : isSignup ? 'Create Account' : 'Sign In'}</button>
         </form>
         <p style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px', color: '#666' }}>
           {isSignup ? 'Already have an account?' : "Don't have an account?"}

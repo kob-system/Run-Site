@@ -9,6 +9,10 @@ import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbook
 import { deleteSampleJob } from '../utils/sampleJob'
 import { track, EV } from '../utils/analytics'
 import { legacyFreeDaysLeft } from '../utils/trialWindow'
+import {
+  itemAmount, subtotal, taxableBase, taxAmount, estimateTotal,
+  normalizeTaxMode, TAX_MODES, DEFAULT_TAX_MODE
+} from '../utils/estimateMath'
 
 // Deduction categories an accountant wants broken out at tax time.
 const RECEIPT_CATEGORIES = ['materials', 'fuel', 'tools', 'permits', 'subcontractor', 'supplies', 'insurance', 'meals', 'other']
@@ -26,37 +30,37 @@ const localToday = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// Project detail sub-tabs (scrollable on narrow screens).
-const PROJECT_TABS = ['receipts', 'time', 'photos', 'documents', 'punch', 'materials', 'changes', 'permits', 'log', 'mileage', 'schedule', 'budget']
-const PROJECT_TAB_LABELS = {
-  receipts: 'Receipts', time: 'Time', photos: 'Photos', documents: 'Documents',
-  punch: 'Fix-it list', materials: 'Shopping List', changes: 'Extras & add-ons',
-  permits: 'Permits', log: 'Daily Log', mileage: 'Mileage', schedule: 'Schedule', budget: 'Budget'
-}
-// Job sub-tabs grouped by LIFECYCLE (not data-type) so a busy crew scans a few
-// buckets instead of 12 tabs. The 3 daily actions are also promoted above as
-// always-visible quick buttons (Clock/Photo/Log are never more than one tap).
-const PROJECT_BUCKETS = [
-  { key: 'today', label: "Today's Work", tabs: ['time', 'photos', 'log', 'receipts', 'mileage'] },
-  { key: 'plan', label: 'Plan & Lists', tabs: ['schedule', 'materials', 'punch'] },
-  { key: 'money', label: 'Money', tabs: ['budget', 'changes'] },
-  { key: 'docs', label: 'Docs', tabs: ['documents', 'permits'] },
-]
-const PROJECT_QUICK = [
-  { tab: 'time', label: '⏱ Clock' },
-  { tab: 'photos', label: '📷 Photo' },
-  { tab: 'log', label: '📋 Log' },
+// The job screen used to stack THREE rows of navigation before any content: 3
+// quick buttons, then 4 lifecycle buckets, then the tabs inside the open
+// bucket — 12 destinations, one small panel at a time. Crowded at the top,
+// empty at the bottom, and whatever you wanted was two taps behind a bucket
+// name you had to guess.
+//
+// Now it's ONE row of four tabs, and each tab stacks its sections down the page
+// (collapsible, each with a count) — the pattern Square, Notion, and iOS
+// Settings all landed on: one axis of navigation, then scroll.
+const PROJECT_TABS = [
+  { key: 'work', label: 'Work' },
+  { key: 'plan', label: 'Plan' },
+  { key: 'money', label: 'Money' },
+  { key: 'docs', label: 'Docs' },
 ]
 // Plain-English names for the DB stage values (start/mid/end). The raw values
 // mean nothing to a contractor — always render through this map.
 const STAGE_LABELS = { start: 'Not started', mid: 'In progress', end: 'Done' }
 const stageLabel = (s) => STAGE_LABELS[s] || s
+// What tapping the stage control actually DOES, spelled out. This used to be a
+// bare "Not started ↻" pill in the top-right corner of the job header, and the
+// owner's own words on seeing it were "a not started button on the top right
+// hand corner which I don't know what that is."
+const STAGE_ACTION = { start: 'Start work →', mid: 'Mark done ✓', end: '↩ Reopen job' }
 
-// Estimate line-item math (pure; safe at module scope).
+// Estimate line-item math lives in utils/estimateMath.js so it can be tested —
+// it used to be three one-liners here, and one of them taxed labor. Short
+// aliases keep the call sites below reading the way they always have.
 const ESTIMATE_KINDS = [['materials', 'Materials'], ['labor', 'Labor'], ['other', 'Other']]
-const estItemAmount = (it) => (parseFloat(it && it.qty) || 0) * (parseFloat(it && it.unit_price) || 0)
-const estSubtotal = (items) => (Array.isArray(items) ? items : []).reduce((s, it) => s + estItemAmount(it), 0)
-const estTotal = (items, taxRate) => { const sub = estSubtotal(items); return sub + sub * (parseFloat(taxRate) || 0) / 100 }
+const estItemAmount = itemAmount
+const estSubtotal = subtotal
 const btnSm = (bg) => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px' })
 const btnSmOutline = () => ({ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px' })
 const sectionLabel = { fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '18px 0 8px', padding: '0 4px' }
@@ -67,7 +71,7 @@ const NAV_BUCKET = {
   home: 'home',
   jobs: 'jobs', calendar: 'jobs',
   money: 'money', estimates: 'money', invoices: 'money', clients: 'money', insights: 'money', reports: 'money',
-  crew: 'crew', workers: 'crew', payroll: 'crew',
+  crew: 'crew', workers: 'crew', payroll: 'crew', crewweek: 'crew',
   more: 'more', compliance: 'more', warranties: 'more', settings: 'more',
 }
 const HubCard = ({ icon, title, sub, onClick }) => (
@@ -80,11 +84,39 @@ const BackBtn = ({ label, onClick }) => (
   <button onClick={onClick} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ {label}</button>
 )
 
+// One collapsible block inside a job tab. The count in the header is the whole
+// point: you can tell whether a section is worth opening WITHOUT opening it,
+// which is what the old tab rows could never do — every tab looked identical
+// whether it held 40 receipts or nothing.
+const JobSection = ({ title, count, open, onToggle, children }) => (
+  <div style={{ marginBottom: '6px' }}>
+    <button type="button" onClick={onToggle} aria-expanded={open}
+      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', borderBottom: '1px solid #EEE', padding: '10px 4px', cursor: 'pointer', textAlign: 'left', minHeight: 'var(--tap)' }}>
+      <span style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>{title}</span>
+      {count > 0 && <span style={{ fontSize: '11px', fontWeight: '700', color: '#E07B2A', background: '#FFF7ED', borderRadius: '999px', padding: '2px 8px' }}>{count}</span>}
+      <span style={{ flex: 1 }} />
+      <span style={{ color: '#9CA3AF', fontSize: '13px' }}>{open ? '▾' : '▸'}</span>
+    </button>
+    {open && <div style={{ paddingTop: '10px' }}>{children}</div>}
+  </div>
+)
+
 // Sunday-start week key (YYYY-MM-DD), used to group pay into weekly paychecks.
 const dateKey = (d) => {
   const x = new Date(d)
   const pad = (n) => String(n).padStart(2, '0')
   return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`
+}
+// Photos and written log entries, merged into one newest-first feed of days.
+// They were two separate tabs, but on a real job they are the same act: "here
+// is what happened today." Logs carry a plain 'YYYY-MM-DD' log_date; photos
+// carry a created_at timestamp, so both get reduced to the same day key.
+const buildDayFeed = (logs, photos) => {
+  const days = {}
+  const day = (k) => (days[k] = days[k] || { key: k, logs: [], photos: [] })
+  ;(logs || []).forEach((l) => day(String(l.log_date).slice(0, 10)).logs.push(l))
+  ;(photos || []).forEach((p) => day(dateKey(p.created_at)).photos.push(p))
+  return Object.values(days).sort((a, b) => (a.key < b.key ? 1 : -1))
 }
 const weekStartKey = (dateLike) => {
   const d = new Date(dateLike)
@@ -234,12 +266,22 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [testimonialSaving, setTestimonialSaving] = useState(false)
   const [workers, setWorkers] = useState([])
   const [workerStats, setWorkerStats] = useState({}) // keyed by worker id
+  // Open shifts — time entries with no clocked_out_at. Every OTHER time query in
+  // this file filters those OUT (they have no total_minutes or labor_cost yet, so
+  // they'd poison hours and payroll), which meant the owner had no way to see who
+  // is actually working right now. This is the one query that wants them.
+  const [onTheClock, setOnTheClock] = useState([])
   const [workersError, setWorkersError] = useState(false) // true when worker stats / assignments / time-off failed to load
   const [spendByProject, setSpendByProject] = useState({}) // keyed by project id: { materials, labor, other }
   const [spendError, setSpendError] = useState(false) // true when the live spend fetch failed (don't render a silent $0)
   const [selectedProject, setSelectedProject] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false) // job detail tables in flight (show loading, not a false empty-state)
-  const [projectTab, setProjectTab] = useState('receipts')
+  const [projectTab, setProjectTab] = useState('work')
+  // Sections are OPEN by default (this is a scrolling page, not an accordion) —
+  // this only remembers the ones you deliberately folded away.
+  const [closedSections, setClosedSections] = useState({})
+  const isOpen = (k) => !closedSections[k]
+  const toggleSection = (k) => setClosedSections(s => ({ ...s, [k]: !s[k] }))
   const [receipts, setReceipts] = useState([])
   const [timeEntries, setTimeEntries] = useState([])
   const [scheduleEntries, setScheduleEntries] = useState([])
@@ -270,7 +312,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Did the owner actually accept a scan for THIS receipt? scanResult is cleared
   // the moment he taps "Looks right", so it can't be used as the analytics flag.
   const [scanUsed, setScanUsed] = useState(false)
-  const [scheduleForm, setScheduleForm] = useState({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
+  const [scheduleForm, setScheduleForm] = useState({ worker_id: '', project_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
   const [mileageEntries, setMileageEntries] = useState([])
   const [showNewMileage, setShowNewMileage] = useState(false)
   const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
@@ -312,9 +354,16 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [estimates, setEstimates] = useState([])
   const [showNewEstimate, setShowNewEstimate] = useState(false)
   const [editingEstimateId, setEditingEstimateId] = useState(null)
-  const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
+  const [estimateForm, setEstimateForm] = useState({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', tax_mode: DEFAULT_TAX_MODE, notes: '' })
   const [estimateItems, setEstimateItems] = useState([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
   const [upcomingSchedule, setUpcomingSchedule] = useState([])
+  // The crew week grid. Sunday-start on purpose: it's the same week boundary
+  // Crew Pay uses, so the shifts you see in a week are the shifts in that
+  // paycheck. A Monday-start calendar next to a Sunday-start paycheck is how
+  // you end up arguing with a worker about which week Saturday belonged to.
+  const [crewWeekStart, setCrewWeekStart] = useState(() => weekStartKey(new Date()))
+  const [crewWeek, setCrewWeek] = useState([])
+  const [crewWeekLoading, setCrewWeekLoading] = useState(false)
   const [complianceItems, setComplianceItems] = useState([])
   const [warranties, setWarranties] = useState([])
   const [permits, setPermits] = useState([])
@@ -446,6 +495,28 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     }
   }, [])
 
+  // Who is on the clock this second. Small, cheap, and deliberately not paged —
+  // if a crew somehow has 1000 simultaneously open shifts, the count on the home
+  // screen being capped is the least of anyone's problems.
+  const fetchOnTheClock = useCallback(async (workerList) => {
+    const workerIds = (workerList || []).map(w => w.id)
+    if (!workerIds.length) { setOnTheClock([]); return }
+    try {
+      const { data, error } = await supabase
+        .from('time_entries')
+        .select('id, worker_id, project_id, clocked_in_at')
+        .in('worker_id', workerIds)
+        .is('clocked_out_at', null)
+        .order('clocked_in_at', { ascending: true })
+      if (error) throw error
+      setOnTheClock(data || [])
+    } catch (e) {
+      // Non-fatal: the card just doesn't render. Never show a false "0 working".
+      console.error('On-the-clock fetch failed:', e)
+      setOnTheClock([])
+    }
+  }, [])
+
   // Build weekly pay rows (one per worker per week) from clocked-out time, and
   // load any paychecks already recorded so each week shows paid vs. owed.
   const fetchPayroll = useCallback(async () => {
@@ -569,6 +640,24 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     } catch (e) { console.error('Upcoming schedule fetch failed:', e); showToast('Could not load the schedule. Check your connection and try again.', 'error') }
   }, [profile.id])
 
+  // One week of shifts across every job. Deliberately NOT filtered from
+  // upcomingSchedule (which starts at today) — the owner needs to page back to
+  // last week to answer "what did I have him down for on Tuesday."
+  const fetchCrewWeek = useCallback(async (startKey) => {
+    setCrewWeekLoading(true)
+    try {
+      const { data, error } = await supabase.from('schedule_entries')
+        .select('*, projects(name), profiles!schedule_entries_worker_id_fkey(full_name)')
+        .eq('owner_id', profile.id)
+        .gte('scheduled_date', startKey)
+        .lte('scheduled_date', addDaysKey(startKey, 6))
+        .order('start_time', { ascending: true, nullsFirst: false })
+      if (error) throw error
+      setCrewWeek(data || [])
+    } catch (e) { console.error('Crew week fetch failed:', e); showToast('Could not load the week. Check your connection and try again.', 'error') }
+    finally { setCrewWeekLoading(false) }
+  }, [profile.id])
+
   const fetchCompliance = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('compliance_items').select('*').eq('owner_id', profile.id).order('expires_on', { ascending: true })
@@ -593,6 +682,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     if (workers.length) fetchWorkerStats(workers)
   }, [workers, fetchWorkerStats])
 
+  // Re-read open shifts every time the owner lands on Home or Crew. "Who's
+  // working right now" is worthless if it's a snapshot from whenever the app was
+  // opened, and a poll would run all day for a number nobody is looking at.
+  useEffect(() => {
+    if (activeTab === 'home' || activeTab === 'workers') fetchOnTheClock(workers)
+  }, [activeTab, workers, fetchOnTheClock])
+
   useEffect(() => {
     fetchSpend(projects)
   }, [projects, fetchSpend])
@@ -600,6 +696,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   useEffect(() => {
     if (activeTab === 'payroll' && workers.length) fetchPayroll()
   }, [activeTab, workers, fetchPayroll])
+
+  // Refetch on every visit AND on every arrow — the week you're looking at is
+  // the query, so paging weeks is a fetch, not a filter.
+  useEffect(() => {
+    if (activeTab === 'crewweek') fetchCrewWeek(crewWeekStart)
+  }, [activeTab, crewWeekStart, fetchCrewWeek])
 
   // Invoices/estimates are fetched once, then reused across tabs — the
   // *Loaded flags stop every tab visit from refiring the query (T2.4). Mutations
@@ -1017,7 +1119,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // ---- Estimates ----
   const openNewEstimate = () => {
     setEditingEstimateId(null)
-    setEstimateForm({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', notes: '' })
+    setEstimateForm({ client_name: '', client_phone: '', client_email: '', title: '', tax_rate: '', tax_mode: DEFAULT_TAX_MODE, notes: '' })
     setEstimateItems([{ description: '', qty: '1', unit_price: '', kind: 'materials' }])
     setInlineError(''); setShowNewEstimate(true)
   }
@@ -1025,7 +1127,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     setEditingEstimateId(est.id)
     setEstimateForm({
       client_name: est.client_name || '', client_phone: est.client_phone || '', client_email: est.client_email || '',
-      title: est.title || '', tax_rate: est.tax_rate ? String(est.tax_rate) : '', notes: est.notes || ''
+      title: est.title || '', tax_rate: est.tax_rate ? String(est.tax_rate) : '',
+      // Rows written before FIX-DATABASE-28 have no tax_mode; normalize rescues them.
+      tax_mode: normalizeTaxMode(est.tax_mode), notes: est.notes || ''
     })
     const items = Array.isArray(est.items) ? est.items : []
     setEstimateItems(items.length
@@ -1047,11 +1151,21 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const payload = {
         owner_id: profile.id, client_name: estimateForm.client_name, client_phone: estimateForm.client_phone || null,
         client_email: estimateForm.client_email || null, title: estimateForm.title, items,
-        tax_rate: parseFloat(estimateForm.tax_rate || 0), notes: estimateForm.notes || null
+        tax_rate: parseFloat(estimateForm.tax_rate || 0), tax_mode: normalizeTaxMode(estimateForm.tax_mode),
+        notes: estimateForm.notes || null
       }
-      let error
-      if (editingEstimateId) ({ error } = await supabase.from('estimates').update(payload).eq('id', editingEstimateId))
-      else ({ error } = await supabase.from('estimates').insert({ ...payload, status: 'draft' }))
+      const write = (body) => editingEstimateId
+        ? supabase.from('estimates').update(body).eq('id', editingEstimateId)
+        : supabase.from('estimates').insert({ ...body, status: 'draft' })
+      let { error } = await write(payload)
+      // 42703 = column does not exist: this build is live but FIX-DATABASE-28
+      // hasn't been applied yet. Save the estimate anyway rather than losing the
+      // owner's typing; the total still computes correctly client-side and the
+      // mode starts persisting the moment the migration runs.
+      if (error && error.code === '42703') {
+        const { tax_mode, ...legacy } = payload
+        ;({ error } = await write(legacy))
+      }
       if (error) throw error
       setShowNewEstimate(false); setEditingEstimateId(null)
       await fetchEstimates(); showToast('Estimate saved ✓')
@@ -1165,9 +1279,15 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const emailEstimate = (est) => {
     const items = Array.isArray(est.items) ? est.items : []
     const lines = items.map(it => `• ${it.description}: ${it.qty} × $${(Number(it.unit_price) || 0).toFixed(2)} = $${estItemAmount(it).toFixed(2)}`).join('\n')
-    const total = estTotal(est.items, est.tax_rate)
+    const tax = taxAmount(items, est.tax_rate, est.tax_mode)
+    const total = estimateTotal(items, est.tax_rate, est.tax_mode)
+    // Only break out subtotal/tax when there IS tax — a capital-improvement job
+    // shows one clean number instead of a confusing "Tax: $0.00" line.
+    const totals = tax > 0
+      ? `Subtotal: $${estSubtotal(items).toFixed(2)}\nSales tax: $${tax.toFixed(2)}\nTotal: $${total.toFixed(2)}`
+      : `Total: $${total.toFixed(2)}`
     const subject = `Estimate${est.title ? ': ' + est.title : ''}`
-    const body = `Hi ${est.client_name || ''},\n\nHere's your estimate${est.title ? ' for ' + est.title : ''}:\n\n${lines}\n\nTotal: $${total.toFixed(2)}${est.notes ? '\n\n' + est.notes : ''}\n\nReply to approve and we'll get on the schedule.\n\nThanks,\n${profile.company_name || profile.full_name || ''}`
+    const body = `Hi ${est.client_name || ''},\n\nHere's your estimate${est.title ? ' for ' + est.title : ''}:\n\n${lines}\n\n${totals}${est.notes ? '\n\n' + est.notes : ''}\n\nReply to approve and we'll get on the schedule.\n\nThanks,\n${profile.company_name || profile.full_name || ''}`
     window.location.href = `mailto:${est.client_email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
   }
   const emailInvoice = (inv) => {
@@ -1279,10 +1399,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   const confirmScan = () => {
     if (!scanResult) return
-    // scan-receipt returns store, amount, tax and date. Tax is REAL MONEY —
-    // fetchSpend books cost = amount + tax_amount, so dropping it understates
-    // every scanned job's spend by the sales tax. Only overwrite tax when the
-    // scan actually found one (never blank out a number the owner typed).
+    // scan-receipt returns store, amount, tax, total and date. `amount` is the
+    // PRE-TAX subtotal and `tax` is the sales tax — the endpoint reconciles the
+    // two so amount + tax always equals the total the card was charged. That
+    // matters because fetchSpend books cost = amount + tax_amount: copying a
+    // grand total in here alongside the tax charges the job its sales tax twice.
+    // `total` is display-only and is deliberately not written to the form.
+    // Only overwrite tax when the scan actually found one (never blank out a
+    // number the owner typed).
     setReceiptForm(f => ({
       ...f,
       store: scanResult.store || f.store,
@@ -1329,25 +1453,54 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     setLoading(false)
   }
 
+  // Called from two places now: inside a job (the job is implied) and from the
+  // crew week grid (the job has to be picked). A shift with no job can't exist
+  // — the crew's phone shows them WHERE to be, not just when.
   const addSchedule = async () => {
+    const projectId = selectedProject ? selectedProject.id : scheduleForm.project_id
     if (!scheduleForm.worker_id || !scheduleForm.scheduled_date) return setInlineError('Worker and date are required')
+    if (!projectId) return setInlineError('Pick which job this shift is on')
     setLoading(true)
     setInlineError('')
     try {
       const { error } = await supabase.from('schedule_entries').insert({
         owner_id: profile.id, worker_id: scheduleForm.worker_id,
-        project_id: selectedProject.id, task_description: scheduleForm.task_description,
+        project_id: projectId, task_description: scheduleForm.task_description,
         scheduled_date: scheduleForm.scheduled_date, start_time: scheduleForm.start_time, end_time: scheduleForm.end_time
       })
       if (error) throw error
       setShowNewSchedule(false)
-      setScheduleForm({ worker_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
-      await refetchDetail('schedule_entries', setScheduleEntries, 'scheduled_date', true, '*, profiles!schedule_entries_worker_id_fkey(full_name)')
+      setScheduleForm({ worker_id: '', project_id: '', task_description: '', scheduled_date: '', start_time: '', end_time: '' })
+      if (selectedProject) {
+        await refetchDetail('schedule_entries', setScheduleEntries, 'scheduled_date', true, '*, profiles!schedule_entries_worker_id_fkey(full_name)')
+      } else {
+        // Jump the grid to the week the shift landed in, so a shift scheduled
+        // for next Tuesday doesn't vanish the moment you save it.
+        const wk = weekStartKey(scheduleForm.scheduled_date + 'T00:00:00')
+        if (wk !== crewWeekStart) setCrewWeekStart(wk)
+        else await fetchCrewWeek(crewWeekStart)
+        fetchUpcomingSchedule()
+      }
       showToast('Scheduled ✓')
     } catch (e) {
       setInlineError('Failed to save schedule. Try again.')
     }
     setLoading(false)
+  }
+
+  const deleteSchedule = async (entry) => {
+    if (!window.confirm('Remove this shift from the schedule?')) return
+    try {
+      const { error } = await supabase.from('schedule_entries').delete().eq('id', entry.id)
+      if (error) throw error
+      setCrewWeek(list => list.filter(s => s.id !== entry.id))
+      setScheduleEntries(list => list.filter(s => s.id !== entry.id))
+      fetchUpcomingSchedule()
+      showToast('Shift removed')
+    } catch (e) {
+      console.error('Delete schedule failed:', e)
+      showToast('Could not remove that shift. Try again.', 'error')
+    }
   }
 
   const assignWorkerToProject = async (workerId) => {
@@ -1730,9 +1883,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const activeProjects = realProjects.filter(p => p.stage !== 'end')
   const completedProjects = realProjects.filter(p => p.stage === 'end')
   const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
-  // Grand total = the contract value of all active jobs (materials + labor +
-  // profit). Shown on the at-a-glance summaries; unlike projected profit it
-  // doesn't move as costs are logged, so the "Grand total" label stays honest.
+  // Active job value = the contract value of all active jobs (materials + labor
+  // + profit). Shown on the at-a-glance summaries; unlike projected profit it
+  // doesn't move as costs are logged. Labelled "Grand total" until JP pointed
+  // out that a bare "grand total" on a dashboard reads as money SPENT.
   const grandTotal = activeProjects.reduce((sum, p) => sum + contractOf(p), 0)
 
   // ---- Home / Clients / Calendar derived data ----
@@ -1867,6 +2021,30 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     </div>
   )
 
+  // Scheduling is reachable from two screens now — inside a job, and from the
+  // crew week grid — and those live on opposite sides of the early return
+  // below. One definition rendered in both places, rather than two copies that
+  // drift apart the first time somebody adds a field.
+  const scheduleModal = showNewSchedule && (
+    <div className="modal-overlay" onClick={() => setShowNewSchedule(false)}>
+      <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+        <h2>Schedule Worker</h2>
+        <div className="input-group"><label>Worker</label><select value={scheduleForm.worker_id} onChange={e => setScheduleForm({ ...scheduleForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
+        {/* Only when the job isn't already implied by the screen you came from. */}
+        {!selectedProject && (
+          <div className="input-group"><label>Job</label><select value={scheduleForm.project_id} onChange={e => setScheduleForm({ ...scheduleForm, project_id: e.target.value })}><option value="">Select job</option>{activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        )}
+        <div className="input-group"><label>Task</label><input value={scheduleForm.task_description} onChange={e => setScheduleForm({ ...scheduleForm, task_description: e.target.value })} placeholder="Pour foundation" /></div>
+        <div className="input-group"><label>Date</label><input type="date" value={scheduleForm.scheduled_date} onChange={e => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })} /></div>
+        <div className="input-group"><label>Start Time</label><input type="time" value={scheduleForm.start_time} onChange={e => setScheduleForm({ ...scheduleForm, start_time: e.target.value })} /></div>
+        <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} /></div>
+        {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+        <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving…' : 'Schedule'}</button>
+        <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError('') }}>Cancel</button>
+      </div>
+    </div>
+  )
+
   // PROJECT DETAIL VIEW
   if (selectedProject) {
     const sp = spendOf(selectedProject.id)
@@ -1879,42 +2057,33 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         <div className="topbar">
           <button aria-label="Back" onClick={() => setSelectedProject(null)} style={{ background: 'none', border: 'none', color: 'white', fontSize: '20px', cursor: 'pointer', padding: '0' }}>←</button>
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
-          <span className={'status-pill status-' + selectedProject.stage} role="button" tabIndex={0} aria-label={`Job status: ${stageLabel(selectedProject.stage)}. ${selectedProject.stage === 'end' ? 'Activate to reopen.' : 'Activate to advance.'}`} style={{ cursor: 'pointer' }} onClick={() => cycleStage(selectedProject)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleStage(selectedProject) } }}>{stageLabel(selectedProject.stage)} ↻</span>
+          <span className={'status-pill status-' + selectedProject.stage} aria-label={`Job status: ${stageLabel(selectedProject.stage)}`}>{stageLabel(selectedProject.stage)}</span>
         </div>
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
-        {(() => {
-          const activeBucket = PROJECT_BUCKETS.find(b => b.tabs.includes(projectTab)) || PROJECT_BUCKETS[0]
-          return (
-            <div style={{ margin: '16px 16px 0' }}>
-              {/* Daily actions — always one tap, never buried in a bucket */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                {PROJECT_QUICK.map(q => (
-                  <button key={q.tab} onClick={() => setProjectTab(q.tab)} style={{ flex: 1, minHeight: '48px', padding: '10px 4px', borderRadius: '10px', border: projectTab === q.tab ? '2px solid #E07B2A' : '1px solid #ddd', background: projectTab === q.tab ? '#FFF7ED' : 'white', fontSize: '13px', fontWeight: '700', color: '#1C2B3A', cursor: 'pointer' }}>{q.label}</button>
-                ))}
-              </div>
-              {/* Lifecycle buckets — pick one to reveal its tabs */}
-              <div className="tabs tabs-scroll">
-                {PROJECT_BUCKETS.map(b => (
-                  <button key={b.key} className={'tab ' + (activeBucket.key === b.key ? 'active' : '')} onClick={() => setProjectTab(b.tabs[0])}>{b.label}</button>
-                ))}
-              </div>
-              {/* Tabs inside the active bucket */}
-              <div className="tabs tabs-scroll" style={{ marginTop: '4px' }}>
-                {activeBucket.tabs.map(t => (
-                  <button key={t} className={'tab ' + (projectTab === t ? 'active' : '')} onClick={() => setProjectTab(t)} style={{ fontSize: '12px' }}>{PROJECT_TAB_LABELS[t]}</button>
-                ))}
-              </div>
-            </div>
-          )
-        })()}
+        {/* The pill in the header now only REPORTS the stage; the control that
+            changes it says out loud what it will do. It used to be a "Not
+            started ↻" pill in the corner — plus a second, identical stage button
+            buried at the bottom of the Budget tab. One job, one control. */}
+        <div style={{ display: 'flex', gap: '8px', margin: '12px 16px 0' }}>
+          <button className="btn-primary" style={{ flex: 2, marginTop: 0 }} onClick={() => cycleStage(selectedProject)}>
+            {STAGE_ACTION[selectedProject.stage] || STAGE_ACTION.start}
+          </button>
+          <button className="btn-secondary" style={{ flex: 1, marginTop: 0 }} onClick={openEditJob}>✎ Edit</button>
+        </div>
+        <div className="tabs" style={{ margin: '12px 16px 0' }}>
+          {PROJECT_TABS.map(t => (
+            <button key={t.key} className={'tab ' + (projectTab === t.key ? 'active' : '')} onClick={() => setProjectTab(t.key)}>{t.label}</button>
+          ))}
+        </div>
         <div className="page">
           {detailLoading ? (
             <div className="empty-state"><p>Loading…</p></div>
           ) : (
           <>
-          {projectTab === 'budget' && (
+          {projectTab === 'money' && (
             <div>
+              <JobSection title="Budget & profit" open={isOpen('budget')} onToggle={() => toggleSection('budget')}>
               {/* Profit hero — the one number that matters, surfaced at the top
                   instead of buried as the last of six cards. If no budget was
                   set yet, don't show a scary $0/over-budget — prompt to add one. */}
@@ -2000,53 +2169,44 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>Non-materials receipts (gas, permits, tools, subs)</p>
                 </div>
               )}
-              <div className="card">
-                <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>PROFIT TARGET</p>
-                <p style={{ fontWeight: '700', fontSize: '22px', color: '#16A34A' }}>{formatCurrency(selectedProject.profit_target)}</p>
-              </div>
-              <div className="card">
-                <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>PROJECTED PROFIT</p>
-                <p style={{ fontWeight: '700', fontSize: '22px', color: projProfit >= 0 ? '#16A34A' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
-                {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px' }}>⚠️ Projected to go over budget</p>}
-              </div>
-              {selectedProject.stage !== 'end' && (
-                <button className="btn-primary" onClick={() => advanceStage(selectedProject)}>
-                  {selectedProject.stage === 'start' ? 'Start work →' : 'Mark as complete ✓'}
-                </button>
-              )}
-              <button className="btn-secondary" onClick={openEditJob}>✎ Edit job details</button>
-              {selectedProject.stage === 'end' && (
-                <button className="btn-secondary" onClick={() => reopenJob(selectedProject)}>↩ Reopen job</button>
-              )}
-            </div>
-          )}
-
-          {projectTab === 'receipts' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add receipt</button>
-              {receipts.map(r => (
-                <div key={r.id} className="card" role="button" tabIndex={0} onClick={() => setPhotoViewer(r)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPhotoViewer(r) } }} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <h3>{r.description}</h3>
-                      <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ` · tax ${formatCurrency(r.tax_amount)}` : ''}</p>
-                      {/* Show the date ON the receipt when we have it. '+T00:00:00'
-                          forces LOCAL midnight — a bare 'YYYY-MM-DD' parses as UTC
-                          and would display a day early everywhere west of London. */}
-                      <p style={{ fontSize: '11px', color: '#717171' }}>{r.purchase_date ? new Date(r.purchase_date + 'T00:00:00').toLocaleDateString() : new Date(r.created_at).toLocaleDateString()}</p>
-                      {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
-                    </div>
-                    <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
+              {/* The two cards that used to sit here (PROFIT TARGET and a second
+                  PROJECTED PROFIT) said the same thing as the hero at the top of
+                  this section, and the stage/edit buttons under them duplicated
+                  the ones now in the job header. Deleted, not moved. */}
+              </JobSection>
+              {/* Extras were a separate tab two rows away from the budget they
+                  change — but an approved extra IS budget: it raises the adjusted
+                  contract in the card above. Same tab, right underneath. */}
+              <JobSection title="Extras & add-ons" count={changeOrders.length} open={isOpen('extras')} onToggle={() => toggleSection('extras')}>
+                <button className="btn-primary" onClick={() => { setShowNewChange(true); setInlineError('') }} style={{ marginTop: 0 }}>+ Add extra / add-on</button>
+                {changeOrders.some(c => c.status === 'approved') && (
+                  <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Approved extras</p>
+                    <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>+{formatCurrency(changeOrders.filter(c => c.status === 'approved').reduce((s, c) => s + (c.amount || 0), 0))}</p>
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>added to what the client owes</p>
                   </div>
-                </div>
-              ))}
-              {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store and amount for you and adds it to this job's costs.</p></div>}
+                )}
+                {changeOrders.map(c => (
+                  <div key={c.id} className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, paddingRight: '10px' }}>
+                        <h3>{c.description}</h3>
+                        <span className={'status-pill ' + (c.status === 'approved' ? 'status-end' : c.status === 'declined' ? 'status-start' : 'status-mid')} style={{ marginTop: '4px' }}>{c.status}</span>
+                      </div>
+                      <p style={{ fontWeight: '700', color: c.status === 'approved' ? '#16A34A' : '#888', fontSize: '16px' }}>{formatCurrency(c.amount)}</p>
+                    </div>
+                    <button onClick={() => deleteChangeOrder(c)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
+                  </div>
+                ))}
+                {changeOrders.length === 0 && <div className="empty-state"><p>No extras yet. Log extra work the client approves so you get paid for it.</p></div>}
+              </JobSection>
             </div>
           )}
 
-          {projectTab === 'time' && (
+          {projectTab === 'work' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add time</button>
+              <JobSection title="Time" count={timeEntries.length} open={isOpen('time')} onToggle={() => toggleSection('time')}>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: new Date().toISOString().split('T')[0], start_time: '', end_time: '' }) }}>+ Add time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -2080,12 +2240,82 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               ))}
               {timeEntries.length === 0 && <div className="empty-state"><p>No hours logged yet. Crew hours show up here when they clock in — or tap below to add time yourself.</p></div>}
-            </div>
-          )}
+              </JobSection>
 
-          {projectTab === 'mileage' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
+              {/* Photos and the daily log used to be two separate tabs. On site
+                  they're one act — "here's what happened today" — so they're one
+                  feed now, grouped by day, newest first. Add a photo, add a
+                  note, or both; they land on the same day card. */}
+              <JobSection title="Daily notes" count={dailyLogs.length + jobPhotos.length} open={isOpen('daily')} onToggle={() => toggleSection('daily')}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <label className="btn-primary" style={{ flex: 1, marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
+                    {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
+                    {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
+                    <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
+                  </label>
+                  <button className="btn-secondary" style={{ flex: 1, marginTop: 0 }} onClick={() => { setShowNewLog(true); setInlineError('') }}>📝 Add note</button>
+                </div>
+                <input
+                  type="text"
+                  value={photoNote}
+                  onChange={(e) => setPhotoNote(e.target.value)}
+                  placeholder="Optional caption for the next photo you add"
+                  maxLength={140}
+                  style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0 0', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
+                />
+                {buildDayFeed(dailyLogs, jobPhotos).map(day => (
+                  <div key={day.key} className="card">
+                    {/* 'T00:00:00' forces LOCAL midnight — a bare 'YYYY-MM-DD'
+                        parses as UTC and shows a day early west of London. */}
+                    <p className="schedule-day">{new Date(day.key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                    {day.logs.map(l => (
+                      <div key={l.id} style={{ marginTop: '8px' }}>
+                        {l.weather && <p style={{ fontSize: '12px', color: '#E07B2A' }}>{l.weather}</p>}
+                        <p style={{ marginTop: '2px', whiteSpace: 'pre-wrap' }}>{l.note}</p>
+                        <button onClick={() => deleteLog(l)} style={{ marginTop: '8px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px' }}>Delete note</button>
+                      </div>
+                    ))}
+                    {day.photos.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '10px' }}>
+                        {day.photos.map(ph => (
+                          <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ cursor: 'pointer' }}>
+                            <JobPhoto path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption}
+                              style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px' }} />
+                            {ph.uploaded_by_name && ph.uploaded_by_name !== 'You' && (
+                              <p style={{ fontSize: '10px', color: '#717171', margin: '3px 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👷 {ph.uploaded_by_name}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {dailyLogs.length === 0 && jobPhotos.length === 0 && <div className="empty-state"><p>Nothing logged yet. Snap before/after shots and jot down what happened on site — great for clients, and it settles arguments later.</p></div>}
+              </JobSection>
+
+              <JobSection title="Receipts" count={receipts.length} open={isOpen('receipts')} onToggle={() => toggleSection('receipts')}>
+                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add receipt</button>
+                {receipts.map(r => (
+                  <div key={r.id} className="card" role="button" tabIndex={0} onClick={() => setPhotoViewer(r)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPhotoViewer(r) } }} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <h3>{r.description}</h3>
+                        <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ` · tax ${formatCurrency(r.tax_amount)}` : ''}</p>
+                        {/* Show the date ON the receipt when we have it. '+T00:00:00'
+                            forces LOCAL midnight — a bare 'YYYY-MM-DD' parses as UTC
+                            and would display a day early everywhere west of London. */}
+                        <p style={{ fontSize: '11px', color: '#717171' }}>{r.purchase_date ? new Date(r.purchase_date + 'T00:00:00').toLocaleDateString() : new Date(r.created_at).toLocaleDateString()}</p>
+                        {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
+                      </div>
+                      <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '16px' }}>{formatCurrency(r.amount)}</p>
+                    </div>
+                  </div>
+                ))}
+                {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store and amount for you and adds it to this job's costs.</p></div>}
+              </JobSection>
+
+              <JobSection title="Mileage" count={mileageEntries.length} open={isOpen('mileage')} onToggle={() => toggleSection('mileage')}>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
               {mileageEntries.length > 0 && (
                 <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
                   <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Mileage Deduction</p>
@@ -2108,42 +2338,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               ))}
               {mileageEntries.length === 0 && <div className="empty-state"><p>No mileage logged yet. Track miles driven for this job — it's a deduction.</p></div>}
+              </JobSection>
             </div>
           )}
 
-          {projectTab === 'photos' && (
+          {projectTab === 'docs' && (
             <div>
-              <input
-                type="text"
-                value={photoNote}
-                onChange={(e) => setPhotoNote(e.target.value)}
-                placeholder="Optional note for the next photo you add"
-                maxLength={140}
-                style={{ width: '100%', boxSizing: 'border-box', marginBottom: '8px', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
-              />
-              <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
-                {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
-                {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
-                <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '12px' }}>
-                {jobPhotos.map(ph => (
-                  <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ cursor: 'pointer' }}>
-                    <JobPhoto path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption}
-                      style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px' }} />
-                    {ph.uploaded_by_name && ph.uploaded_by_name !== 'You' && (
-                      <p style={{ fontSize: '10px', color: '#717171', margin: '3px 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👷 {ph.uploaded_by_name}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {jobPhotos.length === 0 && <div className="empty-state"><p>No photos yet. Snap before/after shots — great for clients and your portfolio.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'documents' && (
-            <div>
-              <label className="btn-primary" style={{ display: 'block', textAlign: 'center', cursor: 'pointer' }}>
+              <JobSection title="Documents" count={jobDocuments.length} open={isOpen('documents')} onToggle={() => toggleSection('documents')}>
+              <label className="btn-primary" style={{ display: 'block', marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
                 {uploadingDoc ? 'Uploading…' : '📎 Add document'}
                 <input type="file" onChange={addDocument} disabled={uploadingDoc} style={{ display: 'none' }} />
               </label>
@@ -2157,73 +2359,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               ))}
               {jobDocuments.length === 0 && <div className="empty-state"><p>No documents yet. Add the contract, permit, or plans for this job.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'punch' && (
-            <div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
-              </div>
-              {punchItems.map(it => (
-                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
-                  <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
-                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
-                  <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
-                </div>
-              ))}
-              {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'materials' && (
-            <div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
-              </div>
-              {materialItems.map(it => (
-                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
-                  <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
-                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
-                  <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
-                </div>
-              ))}
-              {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'changes' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewChange(true); setInlineError('') }}>+ Add extra / add-on</button>
-              {changeOrders.some(c => c.status === 'approved') && (
-                <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
-                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Approved extras</p>
-                  <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>+{formatCurrency(changeOrders.filter(c => c.status === 'approved').reduce((s, c) => s + (c.amount || 0), 0))}</p>
-                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>added to what the client owes</p>
-                </div>
-              )}
-              {changeOrders.map(c => (
-                <div key={c.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, paddingRight: '10px' }}>
-                      <h3>{c.description}</h3>
-                      <span className={'status-pill ' + (c.status === 'approved' ? 'status-end' : c.status === 'declined' ? 'status-start' : 'status-mid')} style={{ marginTop: '4px' }}>{c.status}</span>
-                    </div>
-                    <p style={{ fontWeight: '700', color: c.status === 'approved' ? '#16A34A' : '#888', fontSize: '16px' }}>{formatCurrency(c.amount)}</p>
-                  </div>
-                  <button onClick={() => deleteChangeOrder(c)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
-                </div>
-              ))}
-              {changeOrders.length === 0 && <div className="empty-state"><p>No extras yet. Log extra work the client approves so you get paid for it.</p></div>}
-            </div>
-          )}
-
-          {projectTab === 'permits' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add permit</button>
+              </JobSection>
+              {/* A permit IS a document — it was a whole separate tab because the
+                  old nav had room for twelve of them. Same page, one scroll down. */}
+              <JobSection title="Permits & inspections" count={permits.length} open={isOpen('permits')} onToggle={() => toggleSection('permits')}>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add permit</button>
               {permits.map(p => {
                 const sc = (p.status === 'passed' || p.status === 'approved') ? 'status-end' : p.status === 'failed' ? 'status-start' : 'status-mid'
                 return (
@@ -2240,38 +2380,58 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 )
               })}
               {permits.length === 0 && <div className="empty-state"><p>Track permits and inspections for this job. Tap a status to advance it.</p></div>}
+              </JobSection>
             </div>
           )}
 
-          {projectTab === 'log' && (
+          {/* Plan = everything that hasn't happened yet: who's coming, what to
+              buy, what's left to fix. Three lists that used to be three tabs
+              in two different rows of navigation. */}
+          {projectTab === 'plan' && (
             <div>
-              <button className="btn-primary" onClick={() => { setShowNewLog(true); setInlineError('') }}>+ Add log entry</button>
-              {dailyLogs.map(l => (
-                <div key={l.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <p className="schedule-day" style={{ margin: 0 }}>{l.log_date ? new Date(l.log_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : ''}</p>
-                    {l.weather && <span style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600' }}>{l.weather}</span>}
+              <JobSection title="Schedule" count={scheduleEntries.length} open={isOpen('schedule')} onToggle={() => toggleSection('schedule')}>
+                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule worker</button>
+                {scheduleEntries.map(s => (
+                  <div key={s.id} className="card">
+                    <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
+                    <h3>{s.profiles ? s.profiles.full_name : 'Worker'}</h3>
+                    <p>{s.task_description}</p>
+                    {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
                   </div>
-                  <p style={{ marginTop: '6px', whiteSpace: 'pre-wrap' }}>{l.note}</p>
-                  <button onClick={() => deleteLog(l)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
-                </div>
-              ))}
-              {dailyLogs.length === 0 && <div className="empty-state"><p>No log entries yet. Jot down what happened on site — handy for memory and disputes.</p></div>}
-            </div>
-          )}
+                ))}
+                {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job. They see their own days on their phone.</p></div>}
+              </JobSection>
 
-          {projectTab === 'schedule' && (
-            <div>
-              <button className="btn-primary" onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule worker</button>
-              {scheduleEntries.map(s => (
-                <div key={s.id} className="card">
-                  <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                  <h3>{s.profiles ? s.profiles.full_name : 'Worker'}</h3>
-                  <p>{s.task_description}</p>
-                  {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
+              <JobSection title="Shopping list" count={materialItems.filter(it => !it.bought).length} open={isOpen('materials')} onToggle={() => toggleSection('materials')}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
                 </div>
-              ))}
-              {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job.</p></div>}
+                {materialItems.map(it => (
+                  <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                    <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                    <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
+                    <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                  </div>
+                ))}
+                {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them. The crew on this job sees it too.</p></div>}
+              </JobSection>
+
+              <JobSection title="Fix-it list" count={punchItems.filter(it => !it.done).length} open={isOpen('punch')} onToggle={() => toggleSection('punch')}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                  <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
+                </div>
+                {punchItems.map(it => (
+                  <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                    <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                    <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
+                    <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                  </div>
+                ))}
+                {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done — the crew sees these too.</p></div>}
+              </JobSection>
             </div>
           )}
           </>
@@ -2292,9 +2452,15 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
                   <p style={{ fontSize: '12px', color: '#16A34A', fontWeight: '600', marginBottom: '8px' }}>📷 Scanned — confirm before saving</p>
                   <p style={{ fontSize: '15px', fontWeight: '600' }}>Store: {scanResult.store}</p>
-                  <p style={{ fontSize: '15px', fontWeight: '600' }}>Amount: {formatCurrency(scanResult.amount)}</p>
+                  {/* Subtotal + tax + total, in the order they're printed on the
+                      paper, so the owner can check the scan against the receipt
+                      in their hand. Only the first two get saved. */}
+                  <p style={{ fontSize: '15px', fontWeight: '600' }}>Subtotal: {formatCurrency(scanResult.amount)}</p>
                   {scanResult.tax && !/^none$/i.test(String(scanResult.tax)) && (
                     <p style={{ fontSize: '15px', fontWeight: '600' }}>Sales tax: {formatCurrency(scanResult.tax)}</p>
+                  )}
+                  {scanResult.total && (
+                    <p style={{ fontSize: '15px', fontWeight: '700', color: '#166534' }}>Total: {formatCurrency(scanResult.total)}</p>
                   )}
                   {scanResult.date && /^\d{4}-\d{2}-\d{2}$/.test(scanResult.date) && (
                     <p style={{ fontSize: '15px', fontWeight: '600' }}>Date: {scanResult.date}</p>
@@ -2307,7 +2473,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               )}
               <div className="input-group"><label>Description</label><input value={receiptForm.description} onChange={e => setReceiptForm({ ...receiptForm, description: e.target.value })} placeholder="Concrete mix" /></div>
               <div className="input-group"><label>Store</label><input value={receiptForm.store} onChange={e => setReceiptForm({ ...receiptForm, store: e.target.value })} placeholder="Home Depot" /></div>
-              <div className="input-group"><label>Amount ($)</label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
+              {/* Labelled "before tax" because the tax goes in its own field
+                  below and the job's cost is the two added together. An owner
+                  who types the grand total here AND the tax pays the tax twice. */}
+              <div className="input-group"><label>Amount ($) <span style={{ color: '#888', fontWeight: '400' }}>— before tax</span></label><input type="number" value={receiptForm.amount} onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Sales Tax ($) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={receiptForm.tax} onChange={e => setReceiptForm({ ...receiptForm, tax: e.target.value })} placeholder="0.00" /></div>
               <div className="input-group"><label>Date on the receipt <span style={{ color: '#888', fontWeight: '400' }}>— leave blank for today</span></label><input type="date" value={receiptForm.purchase_date} onChange={e => setReceiptForm({ ...receiptForm, purchase_date: e.target.value })} /></div>
               <div className="input-group"><label>Category</label><select value={receiptForm.category} onChange={e => setReceiptForm({ ...receiptForm, category: e.target.value })}>{RECEIPT_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select></div>
@@ -2318,21 +2487,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           </div>
         )}
 
-        {showNewSchedule && (
-          <div className="modal-overlay" onClick={() => setShowNewSchedule(false)}>
-            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-              <h2>Schedule Worker</h2>
-              <div className="input-group"><label>Worker</label><select value={scheduleForm.worker_id} onChange={e => setScheduleForm({ ...scheduleForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
-              <div className="input-group"><label>Task</label><input value={scheduleForm.task_description} onChange={e => setScheduleForm({ ...scheduleForm, task_description: e.target.value })} placeholder="Pour foundation" /></div>
-              <div className="input-group"><label>Date</label><input type="date" value={scheduleForm.scheduled_date} onChange={e => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })} /></div>
-              <div className="input-group"><label>Start Time</label><input type="time" value={scheduleForm.start_time} onChange={e => setScheduleForm({ ...scheduleForm, start_time: e.target.value })} /></div>
-              <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} /></div>
-              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving…' : 'Schedule'}</button>
-              <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError('') }}>Cancel</button>
-            </div>
-          </div>
-        )}
+        {scheduleModal}
 
         {showNewMileage && (
           <div className="modal-overlay" onClick={() => { setShowNewMileage(false); setInlineError('') }}>
@@ -2514,11 +2669,89 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
         {activeTab === 'crew' && (
           <div>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers and their pay.</p>
+            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers, their week, and their pay.</p>
+            <HubCard icon="📅" title="This week" sub="Who's working which day, and where" onClick={() => setActiveTab('crewweek')} />
             <HubCard icon="👷" title="Workers" sub="Add crew, set rates, time-off requests" onClick={() => setActiveTab('workers')} />
             <HubCard icon="💰" title="Crew Pay" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
           </div>
         )}
+
+        {activeTab === 'crewweek' && (() => {
+          const todayWeek = weekStartKey(new Date())
+          const todayKey = dateKey(new Date())
+          const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDaysKey(crewWeekStart, i))
+          const endKey = days[6]
+          const scheduledIds = new Set(crewWeek.map(s => s.worker_id))
+          const unscheduled = workers.filter(w => !scheduledIds.has(w.id))
+          // Approved time off only. A pending request isn't a promise, and
+          // showing it as "out" would have the owner planning around a day the
+          // worker is still expected to show up for.
+          const offOn = (key) => timeOff.filter(r => r.status === 'approved' && r.start_date <= key && r.end_date >= key)
+          const openAdd = (key) => {
+            setScheduleForm({ worker_id: '', project_id: '', task_description: '', scheduled_date: key, start_time: '', end_time: '' })
+            setInlineError('')
+            setShowNewSchedule(true)
+          }
+          return (
+            <div>
+              <BackBtn label="Crew" onClick={() => setActiveTab('crew')} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+                <button aria-label="Previous week" onClick={() => setCrewWeekStart(addDaysKey(crewWeekStart, -7))} style={{ minHeight: '44px', minWidth: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '18px', fontWeight: '700', cursor: 'pointer' }}>‹</button>
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatDateRange(crewWeekStart, endKey)}</p>
+                  <p style={{ fontSize: '12px', color: '#888' }}>{crewWeekStart === todayWeek ? 'This week' : (crewWeekStart < todayWeek ? 'Past week' : 'Upcoming')}{crewWeekLoading ? ' · loading…' : ` · ${crewWeek.length} shift${crewWeek.length === 1 ? '' : 's'}`}</p>
+                </div>
+                <button aria-label="Next week" onClick={() => setCrewWeekStart(addDaysKey(crewWeekStart, 7))} style={{ minHeight: '44px', minWidth: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '18px', fontWeight: '700', cursor: 'pointer' }}>›</button>
+              </div>
+              {crewWeekStart !== todayWeek && (
+                <button onClick={() => setCrewWeekStart(todayWeek)} style={{ width: '100%', minHeight: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: '700', cursor: 'pointer', marginBottom: '12px' }}>Back to this week</button>
+              )}
+
+              {days.map(key => {
+                const shifts = crewWeek.filter(s => s.scheduled_date === key)
+                const out = offOn(key)
+                const isToday = key === todayKey
+                const d = new Date(key + 'T00:00:00')
+                return (
+                  <div key={key} className="card" style={{ padding: '12px 14px', marginBottom: '8px', border: isToday ? '2px solid #1C2B3A' : undefined }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
+                      <p style={{ fontWeight: '700', fontSize: '14px', color: '#1C2B3A' }}>
+                        {d.toLocaleDateString('en-US', { weekday: 'long' })} <span style={{ color: '#888', fontWeight: '500' }}>{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                        {isToday && <span style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 800, letterSpacing: '1px', color: '#1D4ED8', background: '#DBEAFE', borderRadius: '6px', padding: '2px 6px' }}>TODAY</span>}
+                      </p>
+                      <button onClick={() => openAdd(key)} style={{ background: 'none', border: 'none', color: '#1C2B3A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', minHeight: '44px', padding: '0 2px' }}>+ Add</button>
+                    </div>
+                    {shifts.length === 0 && out.length === 0 && <p style={{ fontSize: '13px', color: '#aaa', marginTop: '2px' }}>Nobody scheduled</p>}
+                    {shifts.map(s => (
+                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid #f0f0f0' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ fontWeight: '600', fontSize: '14px' }}>{s.profiles ? s.profiles.full_name : 'Worker'}{s.start_time ? ` · ${(s.start_time || '').slice(0, 5)}${s.end_time ? '–' + (s.end_time || '').slice(0, 5) : ''}` : ' · time not set'}</p>
+                          <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : 'No job'}{s.task_description ? ' · ' + s.task_description : ''}</p>
+                        </div>
+                        <button aria-label="Remove shift" onClick={() => deleteSchedule(s)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px', flexShrink: 0 }}>Remove</button>
+                      </div>
+                    ))}
+                    {out.map(r => {
+                      const wk = workers.find(x => x.id === r.worker_id)
+                      return <p key={r.id} style={{ fontSize: '13px', color: '#B45309', marginTop: '6px' }}>🌴 {wk ? wk.full_name : 'A worker'} is off{r.reason ? ` — ${r.reason}` : ''}</p>
+                    })}
+                  </div>
+                )
+              })}
+
+              {/* Not a nag — it's the answer to "who am I forgetting to put to work." */}
+              {unscheduled.length > 0 && (
+                <div className="card" style={{ marginTop: '12px', background: '#FAFAFA' }}>
+                  <p style={sectionLabel}>Not on the schedule this week</p>
+                  <p style={{ fontSize: '13px', color: '#555' }}>{unscheduled.map(w => w.full_name).join(', ')}</p>
+                </div>
+              )}
+              {workers.length === 0 && (
+                <div className="empty-state"><p>No crew yet. Add workers first, then put them on the calendar.</p><button className="btn-primary" onClick={() => setActiveTab('workers')}>Add a worker</button></div>
+              )}
+            </div>
+          )
+        })()}
 
         {activeTab === 'more' && (
           <div>
@@ -2623,7 +2856,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   <div className="budget-bar"><div className="budget-bar-fill" style={{ width: (arTotal ? (b.total / arTotal * 100) : 0) + '%', background: b.color }} /></div>
                 </div>
               ))}
-              {arTotal === 0 && <p style={{ fontSize: '13px', color: '#888' }}>Nothing outstanding — you're all collected up.</p>}
+              {arTotal === 0 && <p style={{ fontSize: '13px', color: '#888' }}>No unpaid invoices.</p>}
             </div>
             <div className="card">
               <p style={sectionLabel}>Collected — last 6 months</p>
@@ -2693,31 +2926,39 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               )
             })()}
             {!initialLoading && (() => {
+              // ONE next thing, not a five-item chore list.
+              //
+              // This used to render all five steps at once with a "2 of 5 done"
+              // counter — which reads as homework to a contractor who opened the
+              // app to look at a job, and puts four things they aren't doing
+              // right now above the numbers they came for. The steps still exist
+              // as the state machine; only the first unfinished one is shown.
+              //
+              // The old 'compliance' step (insurance & license docs) is gone from
+              // onboarding entirely. Nobody sets up their COI on the day they
+              // sign up, so it sat permanently unchecked and kept the card on
+              // screen forever. The Compliance tab is still there for whoever
+              // wants it.
               const steps = [
-                { key: 'job', label: 'Create your first job', done: realProjects.length > 0, cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') } },
-                { key: 'crew', label: 'Add your crew', done: workers.length > 0, cta: () => setActiveTab('workers') },
-                { key: 'estimate', label: 'Send your first estimate', done: estimates.length > 0, cta: () => setActiveTab('estimates') },
-                { key: 'invoice', label: 'Create your first invoice', done: invoices.length > 0, cta: () => setActiveTab('invoices') },
-                { key: 'compliance', label: 'Add your insurance & license info', done: complianceItems.length > 0, cta: () => setActiveTab('compliance') },
+                { key: 'job', label: 'Create your first job', hint: 'Everything else hangs off a job — start here.', action: 'Create job', cta: () => { setActiveTab('jobs'); setShowNewJob(true); setInlineError('') }, done: realProjects.length > 0 },
+                { key: 'crew', label: 'Add your crew', hint: 'Text them a link — they clock in from their own phone.', action: 'Invite', cta: () => setActiveTab('workers'), done: workers.length > 0 },
+                { key: 'estimate', label: 'Send your first estimate', hint: 'Price a job and send it out.', action: 'New estimate', cta: () => setActiveTab('estimates'), done: estimates.length > 0 },
+                { key: 'invoice', label: 'Bill your first job', hint: 'Turn finished work into money owed to you.', action: 'New invoice', cta: () => setActiveTab('invoices'), done: invoices.length > 0 },
               ]
+              const next = steps.find(s => !s.done)
+              if (!next) return null
               const doneCount = steps.filter(s => s.done).length
-              if (doneCount === steps.length) return null
               return (
-                <div className="card" style={{ border: '2px solid #E07B2A', marginBottom: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#1C2B3A' }}>👋 Get set up</h2>
-                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#E07B2A' }}>{doneCount} of {steps.length} done</span>
+                <div className="card" role="button" tabIndex={0} onClick={next.cta} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); next.cta() } }}
+                  style={{ border: '2px solid #E07B2A', marginBottom: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '11px', fontWeight: '700', color: '#E07B2A', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      {doneCount > 0 ? 'Next' : 'Start here'}
+                    </p>
+                    <p style={{ fontSize: '17px', fontWeight: '800', color: '#1C2B3A', marginTop: '2px' }}>{next.label}</p>
+                    <p style={{ fontSize: '13px', color: '#717171', marginTop: '2px', lineHeight: '1.4' }}>{next.hint}</p>
                   </div>
-                  <p style={{ fontSize: '13px', color: '#717171', marginBottom: '14px', lineHeight: '1.5' }}>A few quick steps to get the most out of JobTally — they check off automatically as you go.</p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {steps.map((s, i) => (
-                      <div key={s.key} role={s.done ? undefined : 'button'} tabIndex={s.done ? undefined : 0} onClick={s.done ? undefined : s.cta} onKeyDown={s.done ? undefined : (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.cta() } })} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '10px', border: '1px solid #eee', background: s.done ? '#F0FDF4' : 'white', cursor: s.done ? 'default' : 'pointer' }}>
-                        <span style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '700', background: s.done ? '#16A34A' : '#1C2B3A', color: 'white' }}>{s.done ? '✓' : i + 1}</span>
-                        <span style={{ flex: 1, fontSize: '14px', fontWeight: '600', color: s.done ? '#9CA3AF' : '#1C2B3A', textDecoration: s.done ? 'line-through' : 'none' }}>{s.label}</span>
-                        {!s.done && <span style={{ color: '#E07B2A', fontSize: '18px' }}>›</span>}
-                      </div>
-                    ))}
-                  </div>
+                  <span style={{ background: '#E07B2A', color: 'white', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', fontWeight: '700', whiteSpace: 'nowrap', flexShrink: 0 }}>{next.action} ›</span>
                 </div>
               )
             })()}
@@ -2731,15 +2972,51 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               )
             })()}
+            {/* Who is working, right now. The first thing an owner standing in a
+                driveway at 7am actually wants off this screen. Only renders when
+                somebody is clocked in — an empty "0 on the clock" card every
+                evening is noise. */}
+            {onTheClock.length > 0 && (
+              <div className="card" role="button" tabIndex={0} onClick={() => setActiveTab('workers')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab('workers') } }}
+                style={{ border: '2px solid #16A34A', background: '#F0FDF4', cursor: 'pointer' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                  <p style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>
+                    🟢 {onTheClock.length} on the clock right now
+                  </p>
+                  <span style={{ color: '#16A34A', fontSize: '18px' }}>›</span>
+                </div>
+                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {onTheClock.slice(0, 4).map(t => {
+                    const w = workers.find(x => x.id === t.worker_id)
+                    const job = projects.find(p => p.id === t.project_id)
+                    return (
+                      <p key={t.id} style={{ fontSize: '13px', color: '#1C2B3A' }}>
+                        <strong>{w ? w.full_name : 'Worker'}</strong>
+                        {job ? ` · ${job.name}` : ''}
+                        <span style={{ color: '#717171' }}> · since {new Date(t.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+                      </p>
+                    )
+                  })}
+                  {onTheClock.length > 4 && <p style={{ fontSize: '13px', color: '#717171' }}>+{onTheClock.length - 4} more</p>}
+                </div>
+              </div>
+            )}
             <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
               <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Owed to you</p>
-              {owedTotal > 0
-                ? <p style={{ fontSize: '44px', fontWeight: '800', color: '#F59E0B', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
-                : <p style={{ fontSize: '22px', fontWeight: '700', color: 'rgba(255,255,255,0.85)', lineHeight: '1.2', marginTop: '6px' }}>Nothing outstanding — you're all paid up 👍</p>}
-              <div style={{ display: 'flex', gap: '24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+              {/* Always a number in the same place. The old copy swapped the
+                  figure out for "Nothing outstanding — you're all paid up 👍",
+                  which reads as a greeting card and moves the layout around. */}
+              <p style={{ fontSize: '44px', fontWeight: '800', color: owedTotal > 0 ? '#F59E0B' : 'rgba(255,255,255,0.9)', lineHeight: '1.05', marginTop: '2px' }}>{formatCurrency(owedTotal)}</p>
+              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: '2px' }}>
+                {owedTotal > 0 ? 'Invoices sent and not paid yet' : 'No unpaid invoices'}
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 24px', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active jobs</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{activeProjects.length}</p></div>
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>On the clock</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{onTheClock.length}</p></div>
                 <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Open estimates</p><p style={{ fontSize: '16px', fontWeight: '700' }}>{openEstimateCount}</p></div>
-                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Grand total</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(grandTotal)}</p></div>
+                {/* Was "Grand total", which told the owner nothing about WHICH
+                    total. It's the contract value of every job still open. */}
+                <div><p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>Active job value</p><p style={{ fontSize: '16px', fontWeight: '700', color: '#16A34A' }}>{formatCurrency(grandTotal)}</p></div>
               </div>
             </div>
             {budgetAlerts.length > 0 && (
@@ -2753,7 +3030,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </>
             )}
             <p style={sectionLabel}>This week</p>
-            {thisWeekSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled this week.</p></div>}
+            {thisWeekSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled this week. Open a job and use its Plan tab to put crew on days — what you schedule shows up here and on their phones.</p></div>}
             {thisWeekSchedule.map(s => (
               <div key={s.id} className="card" style={{ padding: '12px 16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -2824,7 +3101,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <div className="stat-card"><div className="stat-value">{activeProjects.length}</div><div className="stat-label">Active Jobs</div></div>
               <div className="stat-card"><div className="stat-value">{completedProjects.length}</div><div className="stat-label">Completed</div></div>
-              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Grand total</div></div>
+              <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Active job value</div></div>
             </div>
             <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New job</button>
 
@@ -3099,7 +3376,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             </p>
             <button className="btn-primary" onClick={openNewEstimate}>+ New estimate</button>
             {estimates.map(est => {
-              const total = estTotal(est.items, est.tax_rate)
+              const total = estimateTotal(est.items, est.tax_rate, est.tax_mode)
               const statusColor = est.status === 'accepted' ? 'status-end' : est.status === 'sent' ? 'status-mid' : 'status-start'
               return (
                 <div key={est.id} className="card" style={est.status === 'accepted' ? { background: '#f9fafb' } : undefined}>
@@ -3363,12 +3640,33 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </div>
             ))}
             <button onClick={addEstimateRow} style={{ background: 'none', border: '1px dashed #E07B2A', color: '#E07B2A', borderRadius: '8px', padding: '10px', width: '100%', fontSize: '13px', fontWeight: '600', cursor: 'pointer', marginBottom: '12px' }}>+ Add line</button>
-            <div className="input-group"><label>Tax Rate (%) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={estimateForm.tax_rate} onChange={e => setEstimateForm({ ...estimateForm, tax_rate: e.target.value })} placeholder="8" /></div>
+            <div className="input-group">
+              <label>Sales tax on this job</label>
+              <select value={estimateForm.tax_mode} onChange={e => setEstimateForm({ ...estimateForm, tax_mode: e.target.value })}>
+                {TAX_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              <p style={{ fontSize: '12px', color: '#6B7280', margin: '6px 2px 0', lineHeight: 1.4 }}>
+                {(TAX_MODES.find(m => m.value === estimateForm.tax_mode) || TAX_MODES[0]).help}
+                {' '}<span style={{ color: '#9CA3AF' }}>Rules vary by state — check yours with your accountant once, then it's set.</span>
+              </p>
+            </div>
+            {estimateForm.tax_mode !== 'capital' && (
+              <div className="input-group"><label>Tax Rate (%) <span style={{ color: '#888', fontWeight: '400' }}>— optional</span></label><input type="number" value={estimateForm.tax_rate} onChange={e => setEstimateForm({ ...estimateForm, tax_rate: e.target.value })} placeholder="8" /></div>
+            )}
             <div className="input-group"><label>Notes (optional)</label><input value={estimateForm.notes} onChange={e => setEstimateForm({ ...estimateForm, notes: e.target.value })} placeholder="50% deposit to start, balance on completion" /></div>
             <div style={{ background: '#1C2B3A', color: 'white', borderRadius: '12px', padding: '14px', marginBottom: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)' }}><span>Subtotal</span><span>{formatCurrency(estSubtotal(estimateItems))}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}><span>Tax ({parseFloat(estimateForm.tax_rate) || 0}%)</span><span>{formatCurrency(estSubtotal(estimateItems) * (parseFloat(estimateForm.tax_rate) || 0) / 100)}</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}><span>Total</span><span>{formatCurrency(estTotal(estimateItems, estimateForm.tax_rate))}</span></div>
+              {estimateForm.tax_mode === 'capital'
+                ? <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginTop: '6px' }}>No sales tax charged — capital improvement.</div>
+                : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>
+                    {/* Says out loud WHAT is being taxed, so an owner who picks the wrong
+                        mode sees it here instead of on a customer's phone. */}
+                    <span>Tax ({parseFloat(estimateForm.tax_rate) || 0}% of {formatCurrency(taxableBase(estimateItems, estimateForm.tax_mode))}{estimateForm.tax_mode === 'materials' ? ' materials' : ''})</span>
+                    <span>{formatCurrency(taxAmount(estimateItems, estimateForm.tax_rate, estimateForm.tax_mode))}</span>
+                  </div>
+                )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}><span>Total</span><span>{formatCurrency(estimateTotal(estimateItems, estimateForm.tax_rate, estimateForm.tax_mode))}</span></div>
             </div>
             {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
             <button className="btn-primary" onClick={saveEstimate} disabled={loading}>{loading ? 'Saving…' : 'Save estimate'}</button>
@@ -3394,6 +3692,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           </div>
         </div>
       )}
+
+      {scheduleModal}
 
       {testimonialModal}
 

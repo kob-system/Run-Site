@@ -124,9 +124,16 @@ const weekStartOf = (dateLike, tz) => {
 }
 // Snap a plain local date key to its week's Sunday (no tz shift needed).
 const snapToSunday = (key) => addDaysKey(key, -new Date(`${key}T00:00:00Z`).getUTCDay())
-// Mirrors OwnerDashboard estItemAmount/estSubtotal.
+// Mirrors src/utils/estimateMath.js — the source of truth for estimate money.
+// A Vercel function can't import out of the React bundle, so this is a port;
+// change both or the assistant will write a total the screen disagrees with.
 const estItemAmount = (it) => (parseFloat(it && it.qty) || 0) * (parseFloat(it && it.unit_price) || 0)
 const estSubtotal = (items) => (Array.isArray(items) ? items : []).reduce((s, it) => s + estItemAmount(it), 0)
+// 'materials' = tax materials lines only (labor exempt, the default); 'repair'
+// = tax the whole charge incl. labor; 'capital' = no sales tax at all. See
+// FIX-DATABASE-28 for the NY rules behind the three.
+const TAX_MODES = ['materials', 'repair', 'capital']
+const normalizeTaxMode = (m) => (TAX_MODES.includes(m) ? m : 'materials')
 const BLOCKED = 'Save was blocked (check your subscription is active).'
 
 // ---------- resolvers (all under the caller's RLS) ----------
@@ -740,20 +747,31 @@ async function runTool(tool, args, ctx) {
     }
     const taxRate = args.tax_rate != null ? asNum(args.tax_rate) : 0
     if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 30) return { error: 'Tax rate must be between 0 and 30%.' }
-    const { ok, data } = await userReq(token, 'estimates', 'POST', {
+    const taxMode = normalizeTaxMode(args.tax_mode)
+    const payload = {
       owner_id: uid,
       client_name: clean(args.client_name, 120) || null,
       client_phone: clean(args.client_phone, 40) || null,
       client_email: clean(args.client_email, 160) || null,
-      title, items, tax_rate: taxRate, notes: clean(args.notes, 500) || null,
+      title, items, tax_rate: taxRate, tax_mode: taxMode, notes: clean(args.notes, 500) || null,
       status: 'draft',
-    })
+    }
+    let { ok, data } = await userReq(token, 'estimates', 'POST', payload)
+    // 42703 = column does not exist: this build is deployed but FIX-DATABASE-28
+    // hasn't run yet. Save the estimate rather than losing it; the mode starts
+    // persisting the moment the migration is applied.
+    if (!ok && data && data.code === '42703') {
+      const { tax_mode, ...legacy } = payload
+      ;({ ok, data } = await userReq(token, 'estimates', 'POST', legacy))
+    }
     if (!ok) return { error: BLOCKED }
     const row = Array.isArray(data) ? data[0] : data
     const subtotal = rc(estSubtotal(items))
     return {
       ok: true,
-      message: `Created estimate “${title}” — ${items.length} line${items.length > 1 ? 's' : ''}, ${money(subtotal)} before tax.`,
+      // "before tax" is a lie on a capital-improvement job — there is no tax
+      // coming. Say the number that's actually going on the quote.
+      message: `Created estimate “${title}” — ${items.length} line${items.length > 1 ? 's' : ''}, ${money(subtotal)}${taxMode === 'capital' || !taxRate ? '.' : ' before tax.'}`,
       result: { id: row && row.id, title, subtotal },
     }
   }
