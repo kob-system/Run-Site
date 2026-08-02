@@ -18,6 +18,7 @@ const OwnerDashboard = React.lazy(() => import('./pages/OwnerDashboard'))
 const WorkerDashboard = React.lazy(() => import('./pages/WorkerDashboard'))
 const Billing = React.lazy(() => import('./pages/Billing'))
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
+const HowItWorks = React.lazy(() => import('./pages/HowItWorks'))
 const Landing = React.lazy(() => import('./pages/Landing'))
 const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
@@ -207,8 +208,14 @@ export default function App() {
 
   // Public marketing routes — rendered before ANY auth/billing decision so
   // they work for logged-out visitors (and logged-in ones checking the page).
-  if (window.location.pathname.replace(/\/+$/, '') === '/remodelers') {
+  const publicPath = window.location.pathname.replace(/\/+$/, '')
+  if (publicPath === '/remodelers') {
     return <Screen><Remodelers /></Screen>
+  }
+  // The instructions page. Public on purpose: prospects read it before signing
+  // up, and trial owners get sent here from inside the app.
+  if (publicPath === '/how-it-works') {
+    return <Screen><HowItWorks /></Screen>
   }
 
   if (loading) return <div className="loading">Loading JobTally...</div>

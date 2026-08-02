@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { getAttribution } from '../utils/attribution'
 import { computeJobProfit, profitVerdict, formatMoney } from '../utils/jobCalc'
+import { track, EV } from '../utils/analytics'
+import VideoBlock from '../components/VideoBlock'
 import './Remodelers.css'
 
 // Public marketing page at /remodelers — remodelers & GCs running a 2–10 man
 // crew. Rendered before any auth check (App.js), so it works logged-out.
 // The CTA points at the REAL signup: /login opens the auth screen, ?signup=1
-// flips it to Create Account. New owners get the existing 30-day no-card free
-// window — no invented trials, no invented pricing.
+// flips it to Create Account. New owners get a 30-day free trial that DOES
+// take a card up front (Stripe trial_period_days=30) — never write "no card
+// required" here. No invented trials, no invented pricing.
 const SIGNUP_URL = '/login?signup=1'
 
 // Clean stroke icons (inherit color via CSS `currentColor`) instead of emoji —
@@ -181,6 +184,14 @@ export default function Remodelers() {
         </div>
       </section>
 
+      {/* The walkthrough. Click-to-play — nothing downloads until they press it,
+          and the whole block disappears if the file isn't shipped yet. */}
+      <VideoBlock
+        name="howTo"
+        footer={<>Rather read it? <a href="/how-it-works">The written walkthrough →</a></>}
+        onPlay={() => track(EV.LANDING_CTA, { where: 'remodelers-howto-play' })}
+      />
+
       {/* Free calculator */}
       <section className="rl-calc" id="calculator">
         <div className="rl-inner">
@@ -283,7 +294,7 @@ export default function Remodelers() {
       </section>
 
       <footer className="rl-footer">
-        <a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>·<a href="/login">Sign in</a>
+        <a href="/how-it-works">How it works</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>·<a href="/login">Sign in</a>
         <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
       </footer>
     </div>
