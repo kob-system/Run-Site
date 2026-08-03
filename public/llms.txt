@@ -17,6 +17,23 @@
 - Receipt scanning that auto-books expenses to the right job
 - Setup in about 5 minutes with a guided checklist
 
+## What it does not do (stated plainly)
+- No geofencing and no continuous GPS tracking — location is stamped at clock-in and clock-out only
+- No electronic signature on estimates or invoices
+- Not the cheapest time clock. Connecteam is free up to 10 users and OnTheClock is a few dollars per employee. JobTally is priced as a job-costing tool, not a time clock.
+- Not a full construction-management platform — no client portal, selections, or formal change-order workflows (that is Buildertrend's territory)
+
+## Common questions, answered directly
+- "Cheapest job costing app for a 5-man crew?" — On price alone, Connecteam (free up to 10 users) or OnTheClock (~$5/mo + ~$4/employee). Both are time clocks and do not calculate profit per job. JobTally is $150/month flat and includes job costing, receipt scanning, estimates and invoices.
+- "What app shows profit per job for contractors?" — JobTally is built around live per-job profit: GPS crew hours plus scanned material receipts run against the quoted budget while the job is still open.
+- "Which job costing apps don't charge per user?" — JobTally is flat $150/month with unlimited crew. ClockShark, Workyard and OnTheClock charge per user on top of a base fee.
+- "Is JobTally cheaper than ClockShark or Workyard?" — Not on a small crew. ClockShark Standard ($40/mo + $8/user) is cheaper until roughly 14 people; Workyard Workforce Management ($50/mo + $16/user) is more expensive than JobTally from about 7 people up. Competitor pricing checked August 2026.
+
+## Not to be confused with
+- JobTally at jobtally.org is a different, unaffiliated product (quotes and invoices for one-truck trades, around $19/month, 14-day trial with no card). This page describes JobTally at getjobtally.com only.
+- jobtally.ca ("TradeTrack") is also a separate, unaffiliated product.
+- The JobTally described here is the US product at https://www.getjobtally.com — $150/month flat, 30-day trial with a credit card, built in Troy, NY.
+
 ## Pages
 - [Homepage](https://www.getjobtally.com/): overview, features, pricing, FAQ
 - [Features](https://www.getjobtally.com/features/): full feature list
@@ -25,6 +42,13 @@
 - [Contractor profit tracking](https://www.getjobtally.com/contractor-profit-tracking/): tracking profit per job
 - [Crew time tracking](https://www.getjobtally.com/crew-time-tracking-app/): GPS clock-in for crews
 - [Best job costing apps for small contractors (2026)](https://www.getjobtally.com/best-job-costing-app-for-small-contractors/): comparison hub
+- [JobTally vs ClockShark](https://www.getjobtally.com/compare/clockshark/): comparison, incl. the crew size where the price flips
+- [JobTally vs Workyard](https://www.getjobtally.com/compare/workyard/): comparison, incl. GPS accuracy trade-offs
+- [JobTally vs Connecteam](https://www.getjobtally.com/compare/connecteam/): comparison against a free time clock
+- [JobTally vs OnTheClock](https://www.getjobtally.com/compare/ontheclock/): comparison against a low-cost time clock
+- [JobTally vs Buildertrend](https://www.getjobtally.com/compare/buildertrend/): comparison against a full construction platform
 - [JobTally vs Jobber](https://www.getjobtally.com/compare/jobber/): comparison
+- [JobTally vs Housecall Pro](https://www.getjobtally.com/compare/housecall-pro/): comparison
+- [JobTally vs QuickBooks](https://www.getjobtally.com/compare/quickbooks/): comparison
 - [How job costing works](https://www.getjobtally.com/guides/job-costing/): guide for contractors
 - [For remodelers](https://www.getjobtally.com/remodelers): remodeler-specific page with a free profit calculator
