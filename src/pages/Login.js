@@ -78,15 +78,20 @@ export default function Login() {
     setLoading(false)
   }
 
-  // Self-serve password reset — sends a Supabase recovery link to the email
-  // they typed. No separate screen needed; they land back here after resetting.
+  // Self-serve password reset — sends a recovery link to the email they typed.
+  // The link opens /reset-password, where they choose the new password.
   const handleForgotPassword = async () => {
     setError(''); setNotice('')
     if (!email) { setError('Enter your email above first, then tap "Forgot password?"'); return }
     setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      // Land on the dedicated reset screen, not the app root — the root has no
+      // way to set a new password, so a recovery link there just signed people
+      // in and left the old password in place.
+      redirectTo: `${window.location.origin}/reset-password`
+    })
     if (error) setError(friendlyError(error.message))
-    else setNotice(`Password reset link sent to ${email}. Check your inbox (and spam), then follow the link.`)
+    else setNotice(`Password reset link sent to ${email}. Check your inbox (and spam) — the link works once and expires in an hour.`)
     setLoading(false)
   }
 
