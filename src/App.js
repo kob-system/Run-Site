@@ -4,6 +4,7 @@ import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import { track, trackOnce, setAnalyticsUser, EV } from './utils/analytics'
 import { seedSampleJob } from './utils/sampleJob'
 import { legacyFreeDaysLeft } from './utils/trialWindow'
+import { isRecoveryUrl } from './utils/recoveryUrl'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
@@ -21,6 +22,7 @@ const Remodelers = React.lazy(() => import('./pages/Remodelers'))
 const Landing = React.lazy(() => import('./pages/Landing'))
 const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
+const ResetPassword = React.lazy(() => import('./pages/ResetPassword'))
 
 // Single Suspense fallback for every code-split screen, so each return site can
 // just wrap its element in <Screen>…</Screen> instead of repeating the boilerplate.
@@ -43,6 +45,11 @@ export default function App() {
   const [inviteToken, setInviteToken] = useState(
     () => new URLSearchParams(window.location.search).get('invite')
   )
+  // Same deal for password recovery: the reset screen strips the spent one-time
+  // token out of the address bar as soon as it's redeemed, so re-reading the URL
+  // every render would kick the user off the "Password updated" confirmation and
+  // onto the landing page the instant they succeeded.
+  const [recovering] = useState(isRecoveryUrl)
 
   useEffect(() => {
     // onAuthStateChange fires INITIAL_SESSION immediately with the stored session
@@ -209,6 +216,14 @@ export default function App() {
   // they work for logged-out visitors (and logged-in ones checking the page).
   if (window.location.pathname.replace(/\/+$/, '') === '/remodelers') {
     return <Screen><Remodelers /></Screen>
+  }
+
+  // Password recovery beats every other branch, including a live session. The
+  // older implicit recovery link signs the user in as the page loads, so any
+  // auth check ahead of this would send them to the dashboard and they'd never
+  // get to actually change the password they came here to change.
+  if (recovering) {
+    return <Screen><ResetPassword /></Screen>
   }
 
   if (loading) return <div className="loading">Loading JobTally...</div>
