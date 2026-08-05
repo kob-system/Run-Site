@@ -19,6 +19,7 @@ const OwnerDashboard = React.lazy(() => import('./pages/OwnerDashboard'))
 const WorkerDashboard = React.lazy(() => import('./pages/WorkerDashboard'))
 const Billing = React.lazy(() => import('./pages/Billing'))
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
+const Start = React.lazy(() => import('./pages/Start'))
 const Landing = React.lazy(() => import('./pages/Landing'))
 const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
@@ -214,8 +215,15 @@ export default function App() {
 
   // Public marketing routes — rendered before ANY auth/billing decision so
   // they work for logged-out visitors (and logged-in ones checking the page).
-  if (window.location.pathname.replace(/\/+$/, '') === '/remodelers') {
+  const publicPath = window.location.pathname.replace(/\/+$/, '')
+  if (publicPath === '/remodelers') {
     return <Screen><Remodelers /></Screen>
+  }
+  // Where the printed brochure QR lands (vercel.json redirects /josh here with
+  // ?ref= and the flyer UTMs). The paper can't be changed once it's printed, so
+  // this path is permanent — retarget the CONTENT, never the URL.
+  if (publicPath === '/start') {
+    return <Screen><Start /></Screen>
   }
 
   // Password recovery beats every other branch, including a live session. The

@@ -24,6 +24,12 @@ const AID_KEY = 'jobtally_aid'
 export const EV = {
   LANDING_VIEW: 'landing_view',
   LANDING_CTA: 'landing_cta',
+  // /start — the printed-brochure QR funnel. `ref` in props is the partner code
+  // off the flyer, so we can tell which piece of paper produced which signup.
+  START_VIEW: 'start_view',
+  START_INTRO_PLAY: 'start_intro_play',
+  START_HOWTO_PLAY: 'start_howto_play',
+  START_CTA: 'start_cta',
   SIGNUP_STARTED: 'signup_started',
   SIGNUP_COMPLETED: 'signup_completed',
   APP_OPENED: 'app_opened',
