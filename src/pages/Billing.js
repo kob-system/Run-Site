@@ -33,6 +33,47 @@ const btn = {
   border: 'none', background: 'var(--orange)', color: '#fff', cursor: 'pointer', minHeight: 44,
 }
 
+// A brand-new owner hits this screen seconds after signing up, before they have
+// seen a single thing the product does. Plan cards alone read as a toll booth,
+// so the same five steps the dashboard walks them through get shown here first:
+// the card is a door into something specific, not a wall.
+const CYCLE = [
+  ['Set the job', 'Client, contract price, materials and labor budget.'],
+  ['Put the crew on it', 'They clock in from their own phone, stamped where they stood.'],
+  ['Feed it costs', 'Snap the receipt. It reads the store, total and tax off the photo.'],
+  ['Watch the number', 'Spent vs. budget, live. Amber at 80%, red if you go over.'],
+  ['Close it out', 'Invoice it, mark it paid, and the real profit on that job is locked in.'],
+]
+
+function Onramp() {
+  return (
+    <div style={{ marginTop: 18, border: '1px solid #e3e8ef', borderRadius: 14, padding: '18px 20px', background: '#fff' }}>
+      <div style={{ fontWeight: 800, color: '#1C2B3A', fontSize: 17 }}>What you're about to run</div>
+      <p style={{ color: '#667085', fontSize: 14, margin: '4px 0 14px' }}>
+        Five steps. Same five on every job, start to finish.
+      </p>
+      <ol style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {CYCLE.map(([title, detail], i) => (
+          <li key={title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <span style={{
+              flex: 'none', width: 26, height: 26, borderRadius: '50%', background: '#1C2B3A', color: '#fff',
+              fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1,
+            }}>{i + 1}</span>
+            <span>
+              <strong style={{ color: '#1C2B3A', fontSize: 15, display: 'block' }}>{title}</strong>
+              <span style={{ color: '#667085', fontSize: 13.5, lineHeight: 1.45 }}>{detail}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p style={{ color: '#425466', fontSize: 14, margin: '16px 0 0', paddingTop: 14, borderTop: '1px solid #eef2f6' }}>
+        Pick a plan below and you land straight on your dashboard with a sample job already in it.
+        Your first real job takes about two minutes to set up.
+      </p>
+    </div>
+  )
+}
+
 export default function Billing({ profile, sub, mode = 'manage' }) {
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
@@ -140,9 +181,9 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
         </p>
       ) : (
         <p style={{ color: '#667085', marginTop: 0 }}>
-          Pick a plan and get <strong>30 days free</strong> — <strong>$0 charged today</strong>. You enter your card on
-          Stripe's secure checkout so the app keeps running when the trial ends; billing starts on day 31.
-          Cancel anytime before then from Manage billing and you're never charged.
+          <strong>30 days free</strong>, <strong>$0 charged today</strong>. You put a card on Stripe's secure checkout so
+          the app doesn't shut off on you mid-job. Billing starts on day 31. Cancel before then from Manage billing and
+          you're never charged.
         </p>
       )}
 
@@ -151,6 +192,10 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
           {err}
         </div>
       )}
+
+      {/* Brand-new owner only. A returning owner already knows what the app does;
+          showing them the tour again would just delay the button they came for. */}
+      {!activeSub && !status && <Onramp />}
 
       {!activeSub && (
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>

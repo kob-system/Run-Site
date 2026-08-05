@@ -138,7 +138,7 @@ JP confirmed Josh uses QBO but prefers export→import over a live integration �
 - Tradeoff vs the old live-API design: manual periodic export→import instead of real-time auto-sync — fine at this scale. The live-API approach (OAuth, webhooks, token refresh, Intuit review) is parked; revisit only if JP later wants full automation.
 
 ### C. Server-sent emails + PDF + e-signature
-- **Email:** replace the `mailto:` shortcuts with **Resend** server sends (`api/send-document.js`) — HTML email + **PDF attachment**. (`api/notify-owner.js` already shows the Resend pattern; today it uses `onboarding@resend.dev` + `NOTIFY_OVERRIDE_TO` because no domain is verified.)
+- **Email:** replace the `mailto:` shortcuts with **Resend** server sends (`api/send-document.js`) — HTML email + **PDF attachment**. (`api/notify-owner.js` already shows the Resend pattern; it sends from the verified `getjobtally.com` domain straight to the real owner.)
 - **PDF:** generate server-side. Options: `pdf-lib` (lightweight, programmatic) or `@react-pdf/renderer` (JSX templates) or Puppeteer/Chromium-on-Vercel (heaviest). Recommend `@react-pdf/renderer` for branded estimate/invoice docs.
 - **E-signature:** estimate email contains a tokenized portal link → client reviews → draws/types signature on a `<canvas>` → store `estimates.signed_at`, `signature_png`, `signed_name`, `signed_ip`. (Full DocuSign-grade is overkill; a captured signature + audit trail is the right bar for this market.)
 - **Needs from JP:** a **domain** (he didn't have one) to verify in Resend (DNS records) so email sends from `you@hisdomain.com` and the portal lives on a real URL. This **gates C-email + the portal** going live.
@@ -185,7 +185,7 @@ All keys go in **Vercel env vars** (server-side only).
 - **Storage:** uploads go to the private `receipts` bucket under `${profile.id}/...`; view via short-lived `createSignedUrl`. `photo_url`/`file_url` may also be a full external URL (the `JobPhoto` component + doc opener handle both).
 - **Build/deploy:** `cd Desktop\run-site; $env:CI='true'; npm run build` (CRA; `.env.production` sets `DISABLE_ESLINT_PLUGIN=true`). Push `main` → Vercel deploys in ~20–60s. Bundle hash changes on real source changes.
 - **Driving Supabase SQL editor via Claude-in-Chrome:** Monaco; synthetic paste blocked. Inject SQL as UTF-8 base64 → decode → `model.setValue()` (checksum-guard the embed). DROP/UPDATE/ALTER show a "Potential issue detected" dialog → click its **Run query** (find by button text via `javascript_tool` if `computer` screenshots time out — they do intermittently).
-- **Secrets already in Vercel:** `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY` (public), `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `RESEND_FROM`, `NOTIFY_OVERRIDE_TO`, `ANTHROPIC_KEY` (server-side; rotated after a prior leak — keep server-only).
+- **Secrets already in Vercel:** `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY` (public), `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `RESEND_FROM`, `LEAD_ALERT_TO`, `ANTHROPIC_KEY` (server-side; rotated after a prior leak — keep server-only).
 
 ## 7. Demo / data notes
 - The demo account is fully populated for client walkthroughs; **don't wipe it.** Seeds were one-off idempotent SQL DO-blocks (skip-if-exists). New features should seed a small realistic sample too.

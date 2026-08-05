@@ -4,7 +4,7 @@
 // spoofed, and user-controlled text is HTML-escaped as defense in depth.
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-const FROM = process.env.RESEND_FROM || 'JobTally <onboarding@resend.dev>'
+const FROM = process.env.RESEND_FROM || 'JobTally <noreply@getjobtally.com>'
 
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -78,14 +78,10 @@ export default async function handler(req, res) {
     const ownerEmail = ownerRows && ownerRows[0] && ownerRows[0].email
     if (!ownerEmail) return res.json({ success: false, error: 'Owner email not found' })
 
-    // TEMP (until a Resend sending domain is verified): onboarding@resend.dev can only
-    // deliver to the Resend account's own email. Set NOTIFY_OVERRIDE_TO in Vercel to that
-    // address to route every alert there for testing; remove it once a domain is verified
-    // so alerts go to the real owners.
-    const recipient = process.env.NOTIFY_OVERRIDE_TO || ownerEmail
-    const testNote = process.env.NOTIFY_OVERRIDE_TO
-      ? `<p style="font-size:12px;color:#888;margin:8px 0 0;">Test mode — originally addressed to ${esc(ownerEmail)}.</p>`
-      : ''
+    // getjobtally.com is a verified Resend sending domain, so alerts go straight
+    // to the real owner. (The old NOTIFY_OVERRIDE_TO test hatch existed only
+    // because onboarding@resend.dev could deliver to one address — it's gone.)
+    const recipient = ownerEmail
 
     let jobName = 'a job'
     if (projectId) {
@@ -119,7 +115,7 @@ export default async function handler(req, res) {
             <h2 style="color: #1C2B3A; margin-bottom: 8px;">JobTally</h2>
             <div style="background: #f4f6f9; border-radius: 12px; padding: 20px; margin-top: 16px;">
               <p style="font-size: 18px; font-weight: 700; color: #1C2B3A; margin: 0 0 8px;">${line}</p>
-              <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by JobTally</p>${testNote}
+              <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by JobTally</p>
             </div>
           </div>
         `
