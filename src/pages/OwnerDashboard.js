@@ -2215,16 +2215,32 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                       <h3>{t.profiles ? t.profiles.full_name : 'Worker'}</h3>
                       <p>{new Date(t.clocked_in_at).toLocaleDateString()}</p>
                       <p>{t.total_minutes ? formatTime(t.total_minutes) : 'Still clocked in'}</p>
-                      {t.gps_lat != null && t.gps_lng != null && (
-                        <a
-                          href={`https://www.google.com/maps?q=${t.gps_lat},${t.gps_lng}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ fontSize: '12px', color: '#E07B2A', textDecoration: 'none', marginTop: '4px', display: 'inline-block' }}
-                        >
-                          📍 Clock-in location
-                        </a>
-                      )}
+                      {/* Both ends of the shift, each its own map pin. Either
+                          can be missing (location blocked / no fix), so they
+                          render independently — never assume a start pin
+                          means there's an end pin. */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '4px' }}>
+                        {t.gps_lat != null && t.gps_lng != null && (
+                          <a
+                            href={`https://www.google.com/maps?q=${t.gps_lat},${t.gps_lng}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '12px', color: '#E07B2A', textDecoration: 'none', display: 'inline-block' }}
+                          >
+                            📍 Clock-in location
+                          </a>
+                        )}
+                        {t.gps_out_lat != null && t.gps_out_lng != null && (
+                          <a
+                            href={`https://www.google.com/maps?q=${t.gps_out_lat},${t.gps_out_lng}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '12px', color: '#E07B2A', textDecoration: 'none', display: 'inline-block' }}
+                          >
+                            🏁 Clock-out location
+                          </a>
+                        )}
+                      </div>
                     </div>
                     <p style={{ fontWeight: '700', color: '#1C2B3A' }}>{t.labor_cost ? formatCurrency(t.labor_cost) : '—'}</p>
                   </div>

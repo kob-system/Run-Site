@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatTime } from '../utils/formatTime'
 import { todayLocal } from '../utils/todayLocal'
+import { captureGps } from '../utils/gps'
 import AssistantPanel from '../components/AssistantPanel'
 import ConfirmSheet from '../components/ConfirmSheet'
 
@@ -220,6 +221,11 @@ export default function WorkerDashboard({ profile }) {
           gps_lat: cur.gps_lat,
           gps_lng: cur.gps_lng,
           clocked_out_at: cur.clocked_out_at || null,
+          // Gated on clocked_out_at for the same reason the totals are: an
+          // open shift has no end. Sending them anyway would just be nulled
+          // by the trigger, but keeping the client honest costs nothing.
+          gps_out_lat: cur.clocked_out_at ? (cur.gps_out_lat ?? null) : null,
+          gps_out_lng: cur.clocked_out_at ? (cur.gps_out_lng ?? null) : null,
           total_minutes: cur.clocked_out_at ? cur.total_minutes : null,
           labor_cost: cur.clocked_out_at ? cur.labor_cost : null
         }, { onConflict: 'client_id' }).select().single()
@@ -515,29 +521,17 @@ export default function WorkerDashboard({ profile }) {
     setLoading(true)
     setError('')
 
-    let gpsLat = null
-    let gpsLng = null
-    setGpsIssue('')
-    try {
-      if (!navigator.geolocation) throw { code: 0 }
-      const pos = await new Promise((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 })
-      )
-      gpsLat = pos.coords.latitude
-      gpsLng = pos.coords.longitude
-    } catch (e) {
-      // The clock-in still goes through without GPS — but never swallow the
-      // reason. A silent failure here hid a site-wide GPS outage for a week.
-      const code = e && e.code
-      setGpsIssue(
-        code === 1 ? 'Location is blocked for this site. Tap the lock icon in your browser bar and allow Location, then clock out and back in.'
-        : code === 2 ? "Your phone couldn't get a fix (no signal or GPS off). Your hours are saved — only the location is missing."
-        : code === 3 ? 'Getting your location timed out. Your hours are saved — only the location is missing.'
-        : "This browser can't share location. Your hours are saved — only the location is missing."
-      )
-    }
-
+    // Stamp the TAP, not the GPS fix. Locking on can take the full 8s timeout,
+    // and the man started work when he pressed the button, not when the
+    // satellites agreed.
     const clockInTime = new Date().toISOString()
+
+    setGpsIssue('')
+    const gps = await captureGps('in')
+    setGpsIssue(gps.issue)
+    const gpsLat = gps.lat
+    const gpsLng = gps.lng
+
     const jobName = projects.find(p => p.id === selectedProject)?.name || ''
     const entry = { client_id: newId(), project_id: selectedProject, clocked_in_at: clockInTime, gps_lat: gpsLat, gps_lng: gpsLng, job_name: jobName }
 
@@ -586,16 +580,25 @@ export default function WorkerDashboard({ profile }) {
     const entry = activeEntry || offlineEntry
     if (!entry) { setLoading(false); return }
 
+    // Stamp the tap first, THEN go looking for the location — the shift ended
+    // when he hit the button, not up to 8 seconds later when the fix landed.
     const now = new Date()
     const clockedIn = new Date(entry.clocked_in_at)
     const totalMinutes = Math.floor((now - clockedIn) / 60000)
     const laborCost = (totalMinutes / 60) * (profile.hourly_rate || 0)
 
+    // Where the shift ENDED. Captured before every branch below (offline,
+    // deferred, and online) so the end location survives whichever path this
+    // clock-out takes. Nulls are fine — the shift still closes.
+    setGpsIssue('')
+    const gpsOut = await captureGps('out')
+    setGpsIssue(gpsOut.issue)
+
     if (offlineEntry && !activeEntry) {
       // Build the completed entry and KEEP it in localStorage until the server
       // confirms the insert. The sync effect (driven by offlineEntry changing)
       // picks it up; attemptSync clears local storage only on success.
-      const fullEntry = { ...offlineEntry, clocked_out_at: now.toISOString(), total_minutes: totalMinutes, labor_cost: laborCost }
+      const fullEntry = { ...offlineEntry, clocked_out_at: now.toISOString(), total_minutes: totalMinutes, labor_cost: laborCost, gps_out_lat: gpsOut.lat, gps_out_lng: gpsOut.lng }
       saveOfflineEntry(fullEntry)
       setOfflineEntry(fullEntry)
       setTimer(0)
@@ -615,6 +618,8 @@ export default function WorkerDashboard({ profile }) {
         gps_lat: activeEntry.gps_lat,
         gps_lng: activeEntry.gps_lng,
         clocked_out_at: now.toISOString(),
+        gps_out_lat: gpsOut.lat,
+        gps_out_lng: gpsOut.lng,
         total_minutes: totalMinutes,
         labor_cost: laborCost
       }
@@ -634,6 +639,8 @@ export default function WorkerDashboard({ profile }) {
     try {
       const { error: timeError } = await supabase.from('time_entries').update({
         clocked_out_at: now.toISOString(),
+        gps_out_lat: gpsOut.lat,
+        gps_out_lng: gpsOut.lng,
         total_minutes: totalMinutes,
         labor_cost: laborCost
       }).eq('id', activeEntry.id)
@@ -814,9 +821,12 @@ export default function WorkerDashboard({ profile }) {
                 <p style={{ fontSize: '13px', color: '#4B5563', marginBottom: '4px' }}>{activeJobAddress}</p>
               )}
               <p style={{ fontSize: '12px', fontWeight: '600', color: (currentEntry && currentEntry.gps_lat != null) ? '#16A34A' : '#9CA3AF', marginBottom: '4px' }}>
-                {!currentEntry ? '📍 GPS off' : (currentEntry.gps_lat != null ? '📍 GPS on — start location stamped' : '📍 Clocked in — location unavailable')}
+                {!currentEntry ? '📍 GPS off' : (currentEntry.gps_lat != null ? '📍 GPS on — start stamped, end stamps when you clock out' : '📍 Clocked in — location unavailable')}
               </p>
-              {currentEntry && currentEntry.gps_lat == null && gpsIssue && (
+              {/* Also shown right AFTER a clock-out (currentEntry is null by
+                  then) so a failed end-location tells the worker why, instead
+                  of disappearing with the shift. */}
+              {gpsIssue && (!currentEntry || currentEntry.gps_lat == null) && (
                 <p style={{ fontSize: '12px', color: '#B45309', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '8px', padding: '8px 10px', margin: '0 0 8px', textAlign: 'left', lineHeight: 1.4 }}>
                   {gpsIssue}
                 </p>
@@ -865,7 +875,7 @@ export default function WorkerDashboard({ profile }) {
                 </button>
               )}
               <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '14px', lineHeight: '1.5', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
-                🔒 Your location is stamped once, when you clock in, so your hours can never be disputed. Nothing is tracked after that, and nothing while you're clocked out.
+                🔒 Your location is stamped twice — once when you clock in, once when you clock out — so your hours can never be disputed. Nothing is tracked in between, and nothing while you're clocked out.
               </p>
             </div>
 
