@@ -19,9 +19,9 @@ const FEATURES = [
     img: '/landing/clockin-active.png',
     alt: 'JobTally crew clock-in screen with GPS stamp',
     kicker: 'Crew hours',
-    title: 'Your crew clocks in with one tap — GPS-stamped',
+    title: 'Your crew clocks in and out with one tap — both GPS-stamped',
     body:
-      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. You get an email the moment anyone clocks in or out. No more \"I was there at 7.\" It's one stamp at the start, not a tracker — nothing follows your crew around all day, which is why they'll actually use it.",
+      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. No more \"I was there at 7\" — or \"I stayed till 4.\" Two stamps, start and finish, not a tracker — nothing follows your crew around in between, which is why they'll actually use it.",
   },
   {
     img: '/landing/receipts-list.png',

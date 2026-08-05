@@ -7,8 +7,9 @@ import './Remodelers.css'
 // Public marketing page at /remodelers — remodelers & GCs running a 2–10 man
 // crew. Rendered before any auth check (App.js), so it works logged-out.
 // The CTA points at the REAL signup: /login opens the auth screen, ?signup=1
-// flips it to Create Account. New owners get the existing 30-day no-card free
-// window — no invented trials, no invented pricing.
+// flips it to Create Account. New owners get the existing 30-day free trial,
+// which DOES take a card up front (see api/create-checkout-session.js — the
+// old no-card window is retired). No invented trials, no invented pricing.
 const SIGNUP_URL = '/login?signup=1'
 
 // Clean stroke icons (inherit color via CSS `currentColor`) instead of emoji —
@@ -36,9 +37,9 @@ const ICONS = {
 const FEATURES = [
   {
     icon: 'pin',
-    title: 'Crew clock-in with GPS',
+    title: 'Crew clock-in and clock-out with GPS',
     body:
-      "Your guys tap one button on their phone and they're on the clock — and that tap stamps where they were standing when they made it. You get an email the moment anyone clocks in or out. No more \"I was there at 7.\" One stamp at the start, not an all-day tracker.",
+      "Your guys tap one button on their phone and they're on the clock — and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. No more \"I was there at 7\" or \"I stayed till 4.\" Two stamps, start and finish — not an all-day tracker.",
   },
   {
     icon: 'receipt',
