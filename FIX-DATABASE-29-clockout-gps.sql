@@ -17,9 +17,14 @@
 --
 -- SAFE TO RE-RUN (add-column-if-not-exists + create-or-replace).
 --
--- ⚠️ JP: apply this in the Supabase SQL editor, then run the SELF-TEST at the
--- bottom (transaction + ROLLBACK, leaves NO junk data), and finally clock in
--- and out once as a worker (mike@firstclassdemo.com) to confirm the real flow.
+-- ✅ APPLIED TO PROD 2026-08-05 via the Supabase Management API
+--    (POST /v1/projects/yvwpesvjfdofsxvtooha/database/query, vaulted `supabase-pat`).
+--    Nothing for JP to paste into the SQL editor — that is not how this repo
+--    ships migrations. Verified after apply: both columns exist and are
+--    nullable, trg_compute_time_entry_pay is enabled, and the SELF-TEST below
+--    passed 6/6 against real prod rows inside a transaction that rolled back
+--    (0 junk rows left). Remaining manual step: clock in and out once as a real
+--    worker to watch both pins land on the owner dashboard.
 -- =====================================================================
 
 alter table public.time_entries
@@ -88,36 +93,48 @@ create trigger trg_compute_time_entry_pay
 --   2. a CLOSED shift keeps the end location the phone sent,
 --   3. the payroll recompute from #8 still works.
 -- =====================================================================
+-- NOTE: time_entries has NO created_at column — the test tracks its own row by
+-- the client_id it generates, never by "the newest row."
+--
 -- begin;
---   with w as (
---     select id, hourly_rate from public.profiles
---     where role = 'worker' and coalesce(hourly_rate,0) > 0
---     limit 1
---   ),
---   p as (
---     select pw.project_id from public.project_workers pw
---     join w on w.id = pw.worker_id limit 1
---   ),
---   ins as (
+--   do $test$
+--   declare
+--     v_worker uuid; v_project uuid; v_rate numeric; v_cid uuid := gen_random_uuid();
+--     r record;
+--   begin
+--     select p.id, coalesce(p.hourly_rate,0) into v_worker, v_rate
+--     from public.profiles p
+--     where p.role = 'worker' and coalesce(p.hourly_rate,0) > 0 limit 1;
+--
+--     select pw.project_id into v_project
+--     from public.project_workers pw where pw.worker_id = v_worker limit 1;
+--
+--     if v_worker is null or v_project is null then
+--       raise notice 'SKIPPED — no worker with a rate on a project'; return;
+--     end if;
+--
+--     -- 1. OPEN shift carrying a BOGUS end pin and BOGUS pay.
 --     insert into public.time_entries
 --       (client_id, project_id, worker_id, clocked_in_at, clocked_out_at,
 --        gps_lat, gps_lng, gps_out_lat, gps_out_lng, total_minutes, labor_cost)
---     select gen_random_uuid(), (select project_id from p), (select id from w),
---            now() - interval '2 hours', null,
---            42.7284, -73.6918, 42.9999, -73.9999,   -- bogus end pin on an OPEN shift
---            9999, 9999                              -- bogus pay
---     returning *
---   )
---   select 'OPEN shift'  as case,
---          gps_out_lat is null and gps_out_lng is null as end_pin_cleared,
---          total_minutes is null and labor_cost is null as totals_cleared
---   from ins;
+--     values (v_cid, v_project, v_worker, now() - interval '2 hours', null,
+--             42.7284, -73.6918, 42.9999, -73.9999, 9999, 9999);
 --
---   -- now close it and confirm the end pin STICKS
---   update public.time_entries
---     set clocked_out_at = now(), gps_out_lat = 42.9999, gps_out_lng = -73.9999
---   where client_id = (select client_id from public.time_entries order by created_at desc limit 1);
+--     select * into r from public.time_entries where client_id = v_cid;
+--     raise notice 'OPEN   → end pin cleared: %  | totals cleared: %',
+--       (r.gps_out_lat is null and r.gps_out_lng is null),
+--       (r.total_minutes is null and r.labor_cost is null);
 --
---   select 'CLOSED shift' as case, gps_out_lat, gps_out_lng, total_minutes, labor_cost
---   from public.time_entries order by created_at desc limit 1;
+--     -- 2. Close it — the end pin must now STICK and pay must recompute.
+--     update public.time_entries
+--        set clocked_out_at = now(), gps_out_lat = 42.9999, gps_out_lng = -73.9999,
+--            total_minutes = 9999, labor_cost = 9999   -- bogus again; trigger must fix
+--      where client_id = v_cid;
+--
+--     select * into r from public.time_entries where client_id = v_cid;
+--     raise notice 'CLOSED → end pin kept: %  | minutes: % (expect ~120)  | pay: % (expect ~%)',
+--       (r.gps_out_lat = 42.9999 and r.gps_out_lng = -73.9999),
+--       r.total_minutes, r.labor_cost, round(2 * v_rate, 2);
+--   end
+--   $test$;
 -- rollback;
