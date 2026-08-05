@@ -45,6 +45,6 @@ That's the pilot. Goal = first real Run-Site user on a real job before **July 1*
 
 ---
 
-**Resend note:** clock-in emails currently send from `onboarding@resend.dev`, which only
-delivers to your own Resend account email. To email Josh's address, verify a sending domain
-in Resend. Not a launch blocker — everything else works without it.
+**Resend note:** `getjobtally.com` is a verified Resend sending domain, so transactional
+email goes to real owner addresses from `JobTally <noreply@getjobtally.com>`. The
+`onboarding@resend.dev` fallback and the `NOTIFY_OVERRIDE_TO` test hatch are retired.

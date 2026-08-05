@@ -10,8 +10,13 @@ import crypto from 'crypto'
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-const FROM = process.env.RESEND_FROM || 'JobTally <onboarding@resend.dev>'
+const FROM = process.env.RESEND_FROM || 'JobTally <noreply@getjobtally.com>'
 const APP_URL = process.env.APP_URL || 'https://getjobtally.com'
+// Every calculator lead also pings the owner. Without this a lead lands in the
+// `leads` table and nobody is told — the row is only found if someone remembers
+// to go look, which in practice means the lead goes cold. Env-overridable so the
+// alert address can change without a deploy.
+const LEAD_ALERT_TO = process.env.LEAD_ALERT_TO || 'jpkobrossi@hotmail.com'
 
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -57,6 +62,21 @@ async function allowedRate(key, bucket, max, windowSecs) {
   } catch { return true }
 }
 
+// One place to POST Resend so the lead's own email and the owner alert can be
+// fired independently — neither failure may swallow the other.
+async function sendMail(payload) {
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify(payload),
+  })
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+  return true
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!process.env.RESEND_API_KEY) return res.json({ success: false, error: 'Email not configured' })
@@ -67,7 +87,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ success: false, error: 'Too many requests' })
   }
 
-  const { email, results } = req.body || {}
+  const { email, results, source, attrib } = req.body || {}
   const addr = typeof email === 'string' ? email.trim() : ''
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) || addr.length > 320) {
     return res.status(400).json({ success: false, error: 'Invalid email' })
@@ -89,58 +109,102 @@ export default async function handler(req, res) {
 
   const profitColor = profit >= 0 ? '#16A34A' : '#DC2626'
 
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: FROM,
-        to: addr,
-        subject: `Your job's real number: ${fmt(profit)} profit (${margin}% margin)`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 440px; margin: 0 auto; padding: 24px;">
-            <h2 style="color: #1C2B3A; margin: 0 0 4px;">JobTally</h2>
-            <p style="color: #4B5563; font-size: 14px; margin: 0 0 16px;">Here's the job you ran through the profit calculator:</p>
-            <div style="background: #f4f6f9; border-radius: 12px; padding: 20px;">
-              <table style="width:100%;border-collapse:collapse;">
-                ${row('Contract price', contract)}
-                ${row('Labor', labor)}
-                ${row('Materials', materials)}
-                ${row('Overhead', overhead)}
-                ${row('Total cost', cost, true)}
-              </table>
-              <p style="font-size: 30px; font-weight: 800; color: ${profitColor}; margin: 14px 0 0; text-align: center;">${esc(fmt(profit))}</p>
-              <p style="font-size: 13px; color: #6B7280; margin: 2px 0 0; text-align: center;">true profit · ${margin}% margin</p>
-            </div>
-            <p style="color: #4B5563; font-size: 14px; margin: 18px 0 0;">
-              JobTally keeps score like this on every job automatically — crew hours, receipts,
-              and what's left for you, while the job is still running.
-            </p>
-            <p style="margin: 16px 0 0;">
-              <a href="${APP_URL}/?signup=1&utm_source=lead-email&utm_medium=email&utm_campaign=calculator"
-                 style="display:inline-block;background:#E07B2A;color:#fff;font-weight:700;font-size:15px;padding:12px 20px;border-radius:8px;text-decoration:none;">
-                Start your 30-day free trial
-              </a>
-            </p>
-            <p style="font-size: 12px; color: #888; margin: 16px 0 0;">
-              You asked for this one-time email on getjobtally.com/remodelers. No list, no follow-up spam.
-            </p>
-          </div>
-        `,
-      }),
-    })
+  // Where the lead came from, for the owner alert only — never echoed back to
+  // the visitor. Truncated because these land in an email subject/body and are
+  // client-supplied strings.
+  const tag = (v) => (typeof v === 'string' ? v.trim().slice(0, 80) : '')
+  const a = attrib && typeof attrib === 'object' ? attrib : {}
+  const origin = [
+    tag(source) || 'remodelers-calculator',
+    tag(a.utm_source) && `utm_source=${tag(a.utm_source)}`,
+    tag(a.utm_medium) && `utm_medium=${tag(a.utm_medium)}`,
+    tag(a.utm_campaign) && `utm_campaign=${tag(a.utm_campaign)}`,
+    tag(a.ref) && `ref=${tag(a.ref)}`,
+  ].filter(Boolean).join(' · ')
 
-    if (!response.ok) {
-      const body = await response.text()
-      console.error('Resend error', response.status, body)
+  // The owner alert, fired alongside the lead's own email rather than after it,
+  // so a Resend rejection on one still lets the other go out. Resolves to null
+  // on success or to the Error on failure — it never rejects, so it can't
+  // become an unhandled rejection if the lead send throws first.
+  const alert = sendMail({
+    from: FROM,
+    to: LEAD_ALERT_TO,
+    reply_to: addr,
+    subject: `New JobTally lead: ${addr} · ${fmt(profit)} profit`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 460px; margin: 0 auto; padding: 20px;">
+        <p style="font-size:13px;color:#6B7280;margin:0 0 6px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;">New calculator lead</p>
+        <p style="font-size:20px;font-weight:800;color:#1C2B3A;margin:0 0 2px;">
+          <a href="mailto:${esc(addr)}" style="color:#1C2B3A;">${esc(addr)}</a>
+        </p>
+        <p style="font-size:13px;color:#6B7280;margin:0 0 16px;">${esc(origin)}</p>
+        <div style="background:#f4f6f9;border-radius:12px;padding:18px;">
+          <table style="width:100%;border-collapse:collapse;">
+            ${row('Contract price', contract)}
+            ${row('Labor', labor)}
+            ${row('Materials', materials)}
+            ${row('Overhead', overhead)}
+            ${row('Total cost', cost, true)}
+          </table>
+          <p style="font-size:26px;font-weight:800;color:${profitColor};margin:12px 0 0;text-align:center;">${esc(fmt(profit))}</p>
+          <p style="font-size:13px;color:#6B7280;margin:2px 0 0;text-align:center;">their profit · ${margin}% margin</p>
+        </div>
+        <p style="color:#4B5563;font-size:14px;margin:16px 0 0;">
+          They ran their own job and gave you their email. Hit reply — this email replies straight to them.
+        </p>
+      </div>
+    `,
+  }).then(() => null, (e) => e)
+
+  try {
+    const lead = sendMail({
+      from: FROM,
+      to: addr,
+      subject: `Your job's real number: ${fmt(profit)} profit (${margin}% margin)`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 440px; margin: 0 auto; padding: 24px;">
+          <h2 style="color: #1C2B3A; margin: 0 0 4px;">JobTally</h2>
+          <p style="color: #4B5563; font-size: 14px; margin: 0 0 16px;">Here's the job you ran through the profit calculator:</p>
+          <div style="background: #f4f6f9; border-radius: 12px; padding: 20px;">
+            <table style="width:100%;border-collapse:collapse;">
+              ${row('Contract price', contract)}
+              ${row('Labor', labor)}
+              ${row('Materials', materials)}
+              ${row('Overhead', overhead)}
+              ${row('Total cost', cost, true)}
+            </table>
+            <p style="font-size: 30px; font-weight: 800; color: ${profitColor}; margin: 14px 0 0; text-align: center;">${esc(fmt(profit))}</p>
+            <p style="font-size: 13px; color: #6B7280; margin: 2px 0 0; text-align: center;">true profit · ${margin}% margin</p>
+          </div>
+          <p style="color: #4B5563; font-size: 14px; margin: 18px 0 0;">
+            JobTally keeps score like this on every job automatically — crew hours, receipts,
+            and what's left for you, while the job is still running.
+          </p>
+          <p style="margin: 16px 0 0;">
+            <a href="${APP_URL}/?signup=1&utm_source=lead-email&utm_medium=email&utm_campaign=calculator"
+               style="display:inline-block;background:#E07B2A;color:#fff;font-weight:700;font-size:15px;padding:12px 20px;border-radius:8px;text-decoration:none;">
+              Start your 30-day free trial
+            </a>
+          </p>
+          <p style="font-size: 12px; color: #888; margin: 16px 0 0;">
+            You asked for this one-time email on getjobtally.com/remodelers. No list, no follow-up spam.
+          </p>
+        </div>
+      `,
+    }).then(() => null, (e) => e)
+
+    const [leadErr, alertErr] = await Promise.all([lead, alert])
+    // The alert failing is an owner-side problem, not the visitor's — log it
+    // loudly but still tell them their numbers are on the way.
+    if (alertErr) console.error('lead alert failed:', alertErr)
+    if (leadErr) {
+      console.error('lead email failed:', leadErr)
       return res.json({ success: false, error: 'Email failed' })
     }
     return res.json({ success: true })
   } catch (err) {
     console.error('send-lead-numbers error:', err)
+    await alert.then((e) => { if (e) console.error('lead alert failed:', e) })
     return res.json({ success: false, error: 'Email failed' })
   }
 }

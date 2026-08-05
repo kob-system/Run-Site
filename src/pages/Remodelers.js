@@ -109,7 +109,17 @@ export default function Remodelers() {
     fetch('/api/send-lead-numbers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: addr, results }),
+      //    Attribution rides along so the owner alert says where the lead came
+      //    from (which flyer, which QR) without a second round-trip to `leads`.
+      body: JSON.stringify({
+        email: addr,
+        results,
+        source: 'remodelers-calculator',
+        // `ref` is the referrer code off the flyer QR (?ref=josh). It isn't part
+        // of getAttribution(), and it's the single most useful thing on the
+        // alert — it says WHICH piece of paper produced this lead.
+        attrib: { ...attrib, ref: (typeof localStorage !== 'undefined' && localStorage.getItem('jobtally_ref')) || null },
+      }),
     }).catch(() => {})
     setGate('done')
   }
@@ -134,7 +144,9 @@ export default function Remodelers() {
           and GCs with a 2–10 man crew.
         </p>
         <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
-        <div className="rl-cta-note">Free for 30 days — $0 charged today. Then $150/mo, everything included.</div>
+        {/* Says card-required UP FRONT on purpose. The Stripe screen comes right
+            after sign-up, and a card nobody warned them about is the drop point. */}
+        <div className="rl-cta-note">30 days free — $0 charged today. Card up front so it doesn't shut off on you mid-job. Then $150/mo, everything included. Cancel anytime.</div>
         <br />
         <a className="rl-calc-link" href="#calculator">Not ready? Run your last job through the free profit calculator ↓</a>
       </section>
@@ -264,7 +276,7 @@ export default function Remodelers() {
             <ul>
               <li>Unlimited crew — no per-seat charges</li>
               <li>Every feature included, nothing gated</li>
-              <li>30 days free up front — $0 charged today</li>
+              <li>30 days free up front — $0 charged today, card on file</li>
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
@@ -281,6 +293,7 @@ export default function Remodelers() {
         <h2>Know your number before the job's over.</h2>
         <p>Set up takes about five minutes. Your crew clocks in tomorrow morning.</p>
         <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
+        <div className="rl-cta-note">Sign up, put a card on file, and nothing is charged for 30 days.</div>
       </section>
 
       <footer className="rl-footer">
