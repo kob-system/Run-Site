@@ -4,6 +4,9 @@
 
 .rl { background: var(--surface); color: var(--text); line-height: 1.55; }
 .rl section { padding: 48px 20px; }
+/* The top bar is sticky, so a jump to #video / #get-started / #calculator would
+   otherwise park the heading underneath it. */
+.rl section[id] { scroll-margin-top: 72px; }
 .rl .rl-inner { max-width: 960px; margin: 0 auto; }
 
 /* Top bar */
