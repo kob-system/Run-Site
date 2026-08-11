@@ -36,6 +36,15 @@
 .rl-watch-link:hover { border-color: #fff; background: rgba(255,255,255,0.08); }
 .rl-watch-link .rl-play { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--orange); color: #fff; flex-shrink: 0; }
 
+/* Introduction video — sits above the walkthrough and is tinted on purpose.
+   Two identical white video blocks stacked back to back read as the same video
+   twice; the tint makes them land as two different beats. */
+.rl-intro { background: var(--orange-tint); }
+.rl-intro h2 { font-size: clamp(22px, 4vw, 30px); font-weight: 800; text-align: center; margin-bottom: 8px; }
+/* The name is the whole point of this line — it's the only credential on the
+   page before anyone has used the product, so it gets weight, not muted grey. */
+.rl-intro .rl-kicker { text-align: center; color: var(--text-secondary); font-size: 15px; font-weight: 600; margin-bottom: 24px; }
+
 /* Video */
 .rl-video { background: var(--bg); }
 .rl-video h2 { font-size: clamp(22px, 4vw, 30px); font-weight: 800; text-align: center; margin-bottom: 8px; }

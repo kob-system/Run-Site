@@ -84,6 +84,17 @@ export default function Remodelers() {
     track(EV.LANDING_CTA, { where: 'video-play', page: 'remodelers' })
   }
 
+  // The intro gets its OWN guard and its own `where`. Two videos now sit on this
+  // page and they answer different questions: "did the flyer crowd trust a face
+  // enough to press play" vs "did they stay for the product". One shared ref
+  // would collapse both into whichever they hit first.
+  const introPlayedRef = useRef(false)
+  const onIntroPlay = () => {
+    if (introPlayedRef.current) return
+    introPlayedRef.current = true
+    track(EV.LANDING_CTA, { where: 'intro-video-play', page: 'remodelers' })
+  }
+
   // ── Calculator state ────────────────────────────────────────────
   const [inputs, setInputs] = useState({ contract: '', hours: '', rate: '', materials: '', overheadPct: '10' })
   const set = (k) => (e) => setInputs((s) => ({ ...s, [k]: e.target.value }))
@@ -166,19 +177,52 @@ export default function Remodelers() {
             after sign-up, and a card nobody warned them about is the drop point. */}
         <div className="rl-cta-note">30 days free — $0 charged today. Card up front so it doesn't shut off on you mid-job. Then $150/mo, everything included. Cancel anytime.</div>
         {/* Most people landing here came off a paper flyer's QR code and have
-            never heard of JobTally. Point them at the video before the pitch —
-            watching it beats reading the same thing. */}
-        <a className="rl-watch-link" href="#video" onClick={cta('hero-watch')}>
+            never heard of JobTally — or of the person who built it. Point them
+            at the introduction first: a face and a reason beat a feature list
+            when nobody knows who you are yet. */}
+        <a className="rl-watch-link" href="#intro" onClick={cta('hero-watch')}>
           <span className="rl-play" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
           </span>
-          New here? Watch the 3-minute walkthrough first
+          New here? Start with the 2-minute introduction
         </a>
         <br />
         <a className="rl-calc-link" href="#calculator">Not ready? Run your last job through the free profit calculator ↓</a>
       </section>
 
-      {/* Watch-it-run video. Click-to-play with preload="none" — the file is
+      {/* Introduction — the FIRST thing flyer traffic should hit. Someone who
+          just scanned a QR code in their truck has no idea who is behind this,
+          and the honest origin (a contractor described the problem, so it got
+          built) is the only credibility available before they've used anything.
+          Same preload="none" rule as below: 12.5 MB, cell data, click to play. */}
+      <section className="rl-intro" id="intro">
+        <div className="rl-inner">
+          <h2>Introduction video</h2>
+          <p className="rl-kicker">
+            John Paul Kobrossi — the builder of JobTally
+          </p>
+          <div className="rl-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/intro-poster.jpg"
+              src="/landing/JobTally-Intro.mp4"
+              onPlay={onIntroPlay}
+            >
+              Your browser can't play this video.
+            </video>
+          </div>
+          <div className="rl-video-after">
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start your 30-day free trial</a>
+            <div className="rl-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Watch-it-run video. This is the "how-to" the introduction points at, so
+          it has to stay BELOW the intro — the closing line of that video tells
+          people it's down here. Click-to-play with preload="none" — the file is
           ~8 MB and a lot of these visitors are standing on a job site on
           cell data, so nothing downloads until they actually hit play. */}
       <section className="rl-video" id="video">
