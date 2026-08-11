@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { getAttribution } from '../utils/attribution'
+import { track, trackOnce, EV } from '../utils/analytics'
 import { computeJobProfit, profitVerdict, formatMoney } from '../utils/jobCalc'
 import './Remodelers.css'
 
@@ -64,7 +65,35 @@ const FEATURES = [
 export default function Remodelers() {
   useEffect(() => {
     document.title = 'JobTally for Remodelers — know what every job really makes'
+    trackOnce(EV.LANDING_VIEW, { page: 'remodelers' })
   }, [])
+
+  // Which CTA actually moved someone. `where` rides along so the flyer funnel
+  // (/josh → here) can be read end to end: view → video play → CTA → signup.
+  const cta = (where) => () => track(EV.LANDING_CTA, { where, page: 'remodelers' })
+
+  // "Did the flyer crowd actually watch the video" is the whole question this
+  // page exists to answer, so the play is worth an event. onPlay fires again on
+  // every resume after a pause, hence the guard — we want one row meaning "this
+  // visitor started it", not one per scrub. Not trackOnce(): that dedupes on the
+  // event NAME, so it would burn the shared landing_cta key for the whole tab.
+  const playedRef = useRef(false)
+  const onVideoPlay = () => {
+    if (playedRef.current) return
+    playedRef.current = true
+    track(EV.LANDING_CTA, { where: 'video-play', page: 'remodelers' })
+  }
+
+  // The intro gets its OWN guard and its own `where`. Two videos now sit on this
+  // page and they answer different questions: "did the flyer crowd trust a face
+  // enough to press play" vs "did they stay for the product". One shared ref
+  // would collapse both into whichever they hit first.
+  const introPlayedRef = useRef(false)
+  const onIntroPlay = () => {
+    if (introPlayedRef.current) return
+    introPlayedRef.current = true
+    track(EV.LANDING_CTA, { where: 'intro-video-play', page: 'remodelers' })
+  }
 
   // ── Calculator state ────────────────────────────────────────────
   const [inputs, setInputs] = useState({ contract: '', hours: '', rate: '', materials: '', overheadPct: '10' })
@@ -131,7 +160,7 @@ export default function Remodelers() {
         <a className="rl-logo" href="/remodelers">JobTally</a>
         <nav>
           <a className="rl-signin" href="/login">Sign in</a>
-          <a className="rl-cta-sm" href={SIGNUP_URL}>Start free</a>
+          <a className="rl-cta-sm" href={SIGNUP_URL} onClick={cta('topbar')}>Start free</a>
         </nav>
       </header>
 
@@ -143,12 +172,143 @@ export default function Remodelers() {
           what's left for you — from the phone already in your pocket. Built for remodelers
           and GCs with a 2–10 man crew.
         </p>
-        <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
+        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start your 30-day free trial</a>
         {/* Says card-required UP FRONT on purpose. The Stripe screen comes right
             after sign-up, and a card nobody warned them about is the drop point. */}
         <div className="rl-cta-note">30 days free — $0 charged today. Card up front so it doesn't shut off on you mid-job. Then $150/mo, everything included. Cancel anytime.</div>
+        {/* Most people landing here came off a paper flyer's QR code and have
+            never heard of JobTally — or of the person who built it. Point them
+            at the introduction first: a face and a reason beat a feature list
+            when nobody knows who you are yet. */}
+        <a className="rl-watch-link" href="#intro" onClick={cta('hero-watch')}>
+          <span className="rl-play" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
+          </span>
+          New here? Start with the 2-minute introduction
+        </a>
         <br />
         <a className="rl-calc-link" href="#calculator">Not ready? Run your last job through the free profit calculator ↓</a>
+      </section>
+
+      {/* Introduction — the FIRST thing flyer traffic should hit. Someone who
+          just scanned a QR code in their truck has no idea who is behind this,
+          and the honest origin (a contractor described the problem, so it got
+          built) is the only credibility available before they've used anything.
+          Same preload="none" rule as below: 12.5 MB, cell data, click to play. */}
+      <section className="rl-intro" id="intro">
+        <div className="rl-inner">
+          <h2>Introduction video</h2>
+          <p className="rl-kicker">
+            John Paul Kobrossi — the builder of JobTally
+          </p>
+          <div className="rl-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/intro-poster.jpg"
+              src="/landing/JobTally-Intro.mp4"
+              onPlay={onIntroPlay}
+            >
+              Your browser can't play this video.
+            </video>
+          </div>
+          <div className="rl-video-after">
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start your 30-day free trial</a>
+            <div className="rl-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Watch-it-run video. This is the "how-to" the introduction points at, so
+          it has to stay BELOW the intro — the closing line of that video tells
+          people it's down here. Click-to-play with preload="none" — the file is
+          ~8 MB and a lot of these visitors are standing on a job site on
+          cell data, so nothing downloads until they actually hit play. */}
+      <section className="rl-video" id="video">
+        <div className="rl-inner">
+          <h2>See it run — 3-minute walkthrough</h2>
+          <p className="rl-kicker">
+            Watch a real job go from clock-in to profit. No sign-up, nothing to fill out.
+          </p>
+          <div className="rl-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/pitch-poster.jpg"
+              src="/landing/JobTally-Pitch.mp4"
+              onPlay={onVideoPlay}
+            >
+              Your browser can't play this video.
+            </video>
+          </div>
+          <div className="rl-video-after">
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('video')}>Start your 30-day free trial</a>
+            <div className="rl-cta-note">Then follow the four steps below — you'll be running by tomorrow morning.</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Getting started. The video sells it; this removes every "…okay, but
+          what do I actually DO?" excuse between watching and signing up. */}
+      <section className="rl-how" id="get-started">
+        <div className="rl-inner">
+          <h2>How to get started</h2>
+          <p className="rl-kicker">Four steps. About five minutes total, and you only do it once.</p>
+          <ol className="rl-steps">
+            <li className="rl-step">
+              <span className="rl-step-num">1</span>
+              <div>
+                <h3>Make your account</h3>
+                <p>
+                  Tap <strong>Start your 30-day free trial</strong>. Your name, your company name,
+                  email and a password. That's the whole form — about two minutes.
+                </p>
+              </div>
+            </li>
+            <li className="rl-step">
+              <span className="rl-step-num">2</span>
+              <div>
+                <h3>Put a card on file</h3>
+                <p>
+                  <strong>$0 is charged today.</strong> The card just holds your spot so the app
+                  doesn't shut off on you in the middle of a job. 30 days free, then $150/mo —
+                  cancel anytime before day 30 and you're never billed.
+                </p>
+              </div>
+            </li>
+            <li className="rl-step">
+              <span className="rl-step-num">3</span>
+              <div>
+                <h3>Put in one real job</h3>
+                <p>
+                  Not a test — a job you're actually running. The name, the address, what you're
+                  charging. A setup guide on your home screen walks you through it and checks
+                  each step off as you go.
+                </p>
+              </div>
+            </li>
+            <li className="rl-step">
+              <span className="rl-step-num">4</span>
+              <div>
+                <h3>Text your crew the invite link</h3>
+                <p>
+                  JobTally gives you a link — text it to your guys. They set a password on their
+                  own phone and clock in tomorrow morning. Nothing to install, no training.
+                </p>
+              </div>
+            </li>
+          </ol>
+          <div className="rl-how-first">
+            <strong>Your very first move:</strong> snap a photo of the last receipt sitting in your
+            truck. It reads the store, the total and the tax by itself and books it to the job.
+            That's the whole thing in about ten seconds — and that's when it clicks.
+          </div>
+          <div className="rl-how-cta">
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('how')}>Start your 30-day free trial</a>
+          </div>
+        </div>
       </section>
 
       {/* Origin story */}
@@ -280,7 +440,7 @@ export default function Remodelers() {
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
-            <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start your 30-day free trial</a>
             <p className="rl-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
             </p>
@@ -292,7 +452,7 @@ export default function Remodelers() {
       <section className="rl-final">
         <h2>Know your number before the job's over.</h2>
         <p>Set up takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="rl-cta" href={SIGNUP_URL}>Start your 30-day free trial</a>
+        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('final')}>Start your 30-day free trial</a>
         <div className="rl-cta-note">Sign up, put a card on file, and nothing is charged for 30 days.</div>
       </section>
 

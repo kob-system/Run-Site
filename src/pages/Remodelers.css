@@ -4,6 +4,9 @@
 
 .rl { background: var(--surface); color: var(--text); line-height: 1.55; }
 .rl section { padding: 48px 20px; }
+/* The top bar is sticky, so a jump to #video / #get-started / #calculator would
+   otherwise park the heading underneath it. */
+.rl section[id] { scroll-margin-top: 72px; }
 .rl .rl-inner { max-width: 960px; margin: 0 auto; }
 
 /* Top bar */
@@ -24,6 +27,46 @@
 .rl-hero .rl-cta-note { color: rgba(255,255,255,0.55); font-size: 13px; margin-top: 10px; }
 .rl-hero .rl-calc-link { display: inline-block; color: var(--orange); font-size: 15px; font-weight: 600; text-decoration: none; margin-top: 22px; }
 .rl-hero .rl-calc-link:hover { text-decoration: underline; }
+
+/* "Watch the walkthrough" — a bordered pill, not a plain link. Most arrivals
+   scanned a QR off a paper flyer and know nothing yet; the video is the real
+   first step for them, so it has to be visible without competing with the
+   orange primary CTA above it. */
+.rl-watch-link { display: inline-flex; align-items: center; gap: 9px; margin-top: 20px; padding: 11px 20px; min-height: var(--tap); border: 1.5px solid rgba(255,255,255,0.35); border-radius: 999px; color: #fff; font-size: 15px; font-weight: 600; text-decoration: none; transition: border-color .15s ease, background .15s ease; }
+.rl-watch-link:hover { border-color: #fff; background: rgba(255,255,255,0.08); }
+.rl-watch-link .rl-play { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--orange); color: #fff; flex-shrink: 0; }
+
+/* Introduction video — sits above the walkthrough and is tinted on purpose.
+   Two identical white video blocks stacked back to back read as the same video
+   twice; the tint makes them land as two different beats. */
+.rl-intro { background: var(--orange-tint); }
+.rl-intro h2 { font-size: clamp(22px, 4vw, 30px); font-weight: 800; text-align: center; margin-bottom: 8px; }
+/* The name is the whole point of this line — it's the only credential on the
+   page before anyone has used the product, so it gets weight, not muted grey. */
+.rl-intro .rl-kicker { text-align: center; color: var(--text-secondary); font-size: 15px; font-weight: 600; margin-bottom: 24px; }
+
+/* Video */
+.rl-video { background: var(--bg); }
+.rl-video h2 { font-size: clamp(22px, 4vw, 30px); font-weight: 800; text-align: center; margin-bottom: 8px; }
+.rl-video .rl-kicker { text-align: center; color: var(--text-muted); font-size: 15px; margin-bottom: 24px; }
+.rl-video-frame { max-width: 720px; margin: 0 auto; border-radius: var(--radius-lg); overflow: hidden; background: #000; box-shadow: var(--shadow-md); line-height: 0; }
+.rl-video-frame video { width: 100%; height: auto; display: block; }
+.rl-video-after { text-align: center; }
+.rl-video-after .rl-cta-note { color: var(--text-muted); font-size: 13px; margin-top: 10px; }
+
+/* How to get started */
+.rl-how { background: var(--orange-tint); }
+.rl-how h2 { font-size: clamp(22px, 4vw, 30px); font-weight: 800; text-align: center; margin-bottom: 8px; }
+.rl-how .rl-kicker { text-align: center; color: var(--text-muted); font-size: 15px; margin-bottom: 28px; }
+.rl-steps { list-style: none; margin: 0 auto; padding: 0; max-width: 640px; display: grid; gap: 14px; }
+.rl-step { display: flex; gap: 14px; align-items: flex-start; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+.rl-step-num { flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: var(--navy); color: #fff; font-size: 15px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+.rl-step h3 { font-size: 17px; font-weight: 700; margin: 4px 0 6px; }
+.rl-step p { font-size: 14px; color: var(--text-secondary); }
+.rl-step p strong { color: var(--text); }
+.rl-how-first { max-width: 640px; margin: 22px auto 0; background: var(--bg); border-left: 4px solid var(--orange); border-radius: var(--radius-sm); padding: 16px 18px; font-size: 15px; color: var(--text-secondary); }
+.rl-how-first strong { color: var(--text); }
+.rl-how-cta { text-align: center; }
 
 /* Story */
 .rl-story { background: var(--orange-tint); }

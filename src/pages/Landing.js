@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import './Landing.css'
 import { supabase } from '../supabaseClient'
 import { track, trackOnce, EV } from '../utils/analytics'
@@ -115,6 +115,23 @@ export default function Landing() {
   // the page sells on the promise or on the price.
   const cta = (where) => () => track(EV.LANDING_CTA, { where })
 
+  // Two videos sit on this page and they answer different questions: "did a
+  // stranger trust a face enough to press play" vs "did they stay for the
+  // product". Each gets its own guard so one play is one event, not one per
+  // scrub, and its own `where` so the two never collapse into each other.
+  const introPlayedRef = useRef(false)
+  const onIntroPlay = () => {
+    if (introPlayedRef.current) return
+    introPlayedRef.current = true
+    track(EV.LANDING_CTA, { where: 'intro-video-play' })
+  }
+  const pitchPlayedRef = useRef(false)
+  const onPitchPlay = () => {
+    if (pitchPlayedRef.current) return
+    pitchPlayedRef.current = true
+    track(EV.LANDING_CTA, { where: 'video-play' })
+  }
+
   return (
     <div className="ld">
       {/* Top bar */}
@@ -138,6 +155,12 @@ export default function Landing() {
             </p>
             <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start your 30-day free trial</a>
             <div className="ld-cta-note">Free for 30 days — $0 charged today. Then $150/mo, everything included.</div>
+            <a className="ld-intro-link" href="#intro">
+              <span className="ld-play" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
+              </span>
+              New here? Start with the 2-minute introduction
+            </a>
             <ul className="ld-trust">
               <li>Set up in ~5 minutes</li>
               <li>Works on any phone</li>
@@ -153,8 +176,36 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Introduction — a face and the honest origin, before anyone is asked
+          for anything. Same file and same placement rule as /remodelers: it
+          sits ABOVE the walkthrough, because the intro's closing line points
+          down at it. 13 MB, so preload="none" — a guy standing on a job site
+          on cell data downloads nothing until he actually presses play. */}
+      <section className="ld-intro" id="intro">
+        <div className="ld-inner">
+          <h2>Introduction video</h2>
+          <p className="ld-kicker">John Paul Kobrossi — the builder of JobTally</p>
+          <div className="ld-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/intro-poster.jpg"
+              src="/landing/JobTally-Intro.mp4"
+              onPlay={onIntroPlay}
+            >
+              Your browser can't play this video.
+            </video>
+          </div>
+          <div className="ld-video-after">
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start your 30-day free trial</a>
+            <div className="ld-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
+          </div>
+        </div>
+      </section>
+
       {/* Watch-it-run video — click-to-play, nothing loads until they hit play */}
-      <section className="ld-video">
+      <section className="ld-video" id="video">
         <div className="ld-inner">
           <h2>See it run — 3-minute walkthrough</h2>
           <p className="ld-kicker">Watch a real job go from clock-in to profit. No sign-up needed.</p>
@@ -165,6 +216,7 @@ export default function Landing() {
               preload="none"
               poster="/landing/pitch-poster.jpg"
               src="/landing/JobTally-Pitch.mp4"
+              onPlay={onPitchPlay}
             >
               Your browser can't play this video.
             </video>
@@ -196,6 +248,12 @@ export default function Landing() {
             tax-time archaeology — all of it. One app, on the phones you and your crew already carry,
             that keeps score while the job is running.
           </p>
+          <a className="ld-intro-link" href="#intro">
+            <span className="ld-play" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
+            </span>
+            Hear it from the guy who built it — 2-minute introduction
+          </a>
         </div>
       </section>
 
@@ -347,6 +405,12 @@ export default function Landing() {
         <h2>Know your number before the job's over.</h2>
         <p>Setup takes about five minutes. Your crew clocks in tomorrow morning.</p>
         <a className="ld-cta" href={SIGNUP_URL} onClick={cta('final')}>Start your 30-day free trial</a>
+        <a className="ld-intro-link ld-intro-link-onnavy" href="#intro">
+          <span className="ld-play" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
+          </span>
+          Still deciding? Watch the 2-minute introduction
+        </a>
       </section>
 
       <footer className="ld-footer">
