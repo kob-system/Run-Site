@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { getAttribution } from '../utils/attribution'
 import { track, trackOnce, EV } from '../utils/analytics'
+import InstallButton from '../components/InstallButton'
 import { computeJobProfit, profitVerdict, formatMoney } from '../utils/jobCalc'
 import './Remodelers.css'
 
@@ -176,6 +177,17 @@ export default function Remodelers() {
         {/* Says card-required UP FRONT on purpose. The Stripe screen comes right
             after sign-up, and a card nobody warned them about is the drop point. */}
         <div className="rl-cta-note">30 days free — $0 charged today. Card up front so it doesn't shut off on you mid-job. Then $150/mo, everything included. Cancel anytime.</div>
+        {/* Flyer traffic arrives ON A PHONE, in a truck. This is the one page
+            where "there's nothing to download" lands hardest — and where a guy
+            who isn't ready to sign up today can still leave with the icon on
+            his phone. Renders only where it can actually do something. */}
+        <div className="rl-a2hs">
+          <div className="rl-a2hs-copy">
+            <strong>Nothing to download.</strong> No app store. It's a web page — put it on your
+            home screen and it opens like anything else on your phone.
+          </div>
+          <InstallButton />
+        </div>
         {/* Most people landing here came off a paper flyer's QR code and have
             never heard of JobTally — or of the person who built it. Point them
             at the introduction first: a face and a reason beat a feature list

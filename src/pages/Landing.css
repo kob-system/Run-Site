@@ -156,3 +156,20 @@
 .ld-footer { background: var(--navy); border-top: 1px solid rgba(255,255,255,0.12); padding: 20px; text-align: center; font-size: 13px; color: rgba(255,255,255,0.5); }
 .ld-footer a { color: rgba(255,255,255,0.6); text-decoration: none; margin: 0 8px; }
 .ld-footer a:hover { text-decoration: underline; }
+
+/* "Nothing to download" — add-to-home-screen block in the hero.
+   Only renders on a phone that can actually act on it (see InstallButton),
+   so it is styled for a narrow column first. */
+.ld-a2hs {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.ld-a2hs-copy {
+  font-size: 14px;
+  line-height: 1.55;
+  margin-bottom: 12px;
+  opacity: 0.95;
+}
