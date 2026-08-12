@@ -141,6 +141,27 @@
       .seo-fallback .note { font-size: 13px; color: #6b7a8d; }
       .seo-fallback .load { text-align: center; color: #9aa7b6; font-size: 13px; margin-top: 40px; }
     </style>
+
+    <!-- Catch `beforeinstallprompt` before React exists.
+         Chrome fires this event once, early — often before the bundle has even
+         parsed. A listener added inside a React effect frequently misses it,
+         and then the "Add it to my phone" button has nothing to fire and never
+         appears. So we stash it here, in the document head, and let the app
+         pick it up whenever it's ready (see src/utils/installPrompt.js). -->
+    <script>
+      (function () {
+        window.__jtInstallEvent = null;
+        window.addEventListener('beforeinstallprompt', function (e) {
+          e.preventDefault();
+          window.__jtInstallEvent = e;
+          window.dispatchEvent(new Event('jt-installable'));
+        });
+        window.addEventListener('appinstalled', function () {
+          window.__jtInstallEvent = null;
+          window.dispatchEvent(new Event('jt-installed'));
+        });
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run the JobTally app. JobTally is a job costing app for small contractors — track crew hours, receipts, and per-job profit from your phone. Visit https://www.getjobtally.com to start a 30-day free trial — $0 charged today.</noscript>

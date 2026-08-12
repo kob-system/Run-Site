@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import './Landing.css'
 import { supabase } from '../supabaseClient'
 import { track, trackOnce, EV } from '../utils/analytics'
+import InstallButton from '../components/InstallButton'
 
 // Public landing page at / — what a stranger sees before they have an
 // account. Rendered before the Login screen (App.js) for logged-out
@@ -166,6 +167,16 @@ export default function Landing() {
               <li>Works on any phone</li>
               <li>No modules, no training, no 3-week setup</li>
             </ul>
+            {/* The strongest objection-killer we have and it went unsaid for
+                months: there is nothing to download. Renders only on a phone
+                that can actually act on it. */}
+            <div className="ld-a2hs">
+              <div className="ld-a2hs-copy">
+                <strong>Nothing to download.</strong> No app store, no waiting — it's a web page.
+                Put it on your home screen and it opens like anything else on your phone.
+              </div>
+              <InstallButton />
+            </div>
           </div>
           <div className="ld-hero-shot">
             <div className="ld-phone">
