@@ -10,7 +10,7 @@ import InstallPrompt from '../components/InstallPrompt'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
 import { track, EV } from '../utils/analytics'
-import { legacyFreeDaysLeft } from '../utils/trialWindow'
+import { legacyFreeDaysLeft, canStartJob } from '../utils/trialWindow'
 import {
   itemAmount, subtotal, taxableBase, taxAmount, estimateTotal,
   normalizeTaxMode, TAX_MODES, DEFAULT_TAX_MODE
@@ -1414,6 +1414,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   const createJob = async () => {
     if (!jobForm.name) return setInlineError('Job name is required')
+    // Say it in plain English BEFORE the database says it in SQL. The RLS
+    // policy is the real gate, but a raw "new row violates row-level security"
+    // is not something to show a contractor.
+    if (!canAddJob) {
+      return setInlineError(
+        `You're on the free plan — one job at a time. Finish “${activeProjects[0] ? activeProjects[0].name : 'your current job'}” to start another, or subscribe to run as many as you want.`
+      )
+    }
     setLoading(true)
     setInlineError('')
     try {
@@ -2069,6 +2077,18 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   const activeProjects = realProjects.filter(p => p.stage !== 'end')
   const completedProjects = realProjects.filter(p => p.stage === 'end')
+
+  // FREE FOREVER, ONE ACTIVE JOB. The paywall no longer sits at the front door
+  // (App.js lets everyone in) — it sits here, on starting a SECOND job.
+  //
+  // `activeProjects` is already the exact set the DB counts: real jobs (sample
+  // excluded) that haven't reached stage 'end'. That match is deliberate — the
+  // RLS policy in FIX-DATABASE-25 is the real gate, and if this disagreed with
+  // it the owner would get a button that throws.
+  //
+  // Not gated when billing isn't enforced, so a dev/comp environment behaves.
+  const paidNow = !billingEnforced || (sub && ['active', 'trialing', 'comp'].includes(sub.status))
+  const canAddJob = canStartJob({ paid: paidNow, activeJobs: activeProjects.length })
   const projectedProfit = activeProjects.reduce((sum, p) => sum + profitOf(p), 0)
   // Active job value = the contract value of all active jobs (materials + labor
   // + profit). Shown on the at-a-glance summaries; unlike projected profit it
@@ -3392,7 +3412,25 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <div className="stat-card"><div className="stat-value">{completedProjects.length}</div><div className="stat-label">Completed</div></div>
               <div className="stat-card"><div className="stat-value" style={{ fontSize: '16px', color: '#1C2B3A' }}>{formatCurrency(grandTotal)}</div><div className="stat-label">Active job value</div></div>
             </div>
-            <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New job</button>
+            {canAddJob ? (
+              <button className="btn-primary" onClick={() => { setShowNewJob(true); setInlineError('') }}>+ New job</button>
+            ) : (
+              // Free plan, slot already used. Don't hide the button and don't
+              // let it fail — say what's true and give both ways forward, since
+              // finishing the current job is a real option, not just upgrading.
+              <div style={{ padding: '12px 14px', borderRadius: 10, border: '1px solid #FED7AA', background: '#FFF7ED' }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: '#9A3412', marginBottom: 4 }}>
+                  You're on the free plan — one job at a time
+                </div>
+                <div style={{ fontSize: 12.5, color: '#9A3412', lineHeight: 1.5, marginBottom: 10 }}>
+                  Finish “{activeProjects[0] ? activeProjects[0].name : 'your current job'}” and you can start
+                  the next one, free, same as this one. Or run as many at once as you want for $150/mo.
+                </div>
+                <button className="btn-primary" style={{ margin: 0 }} onClick={() => window.location.assign('?billing')}>
+                  See plans
+                </button>
+              </div>
+            )}
 
             {spendError && (
               <div className="alert-danger" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', margin: '12px 0' }}>
