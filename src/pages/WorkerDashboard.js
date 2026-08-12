@@ -4,6 +4,7 @@ import { formatTime } from '../utils/formatTime'
 import { todayLocal } from '../utils/todayLocal'
 import { captureGps } from '../utils/gps'
 import AssistantPanel from '../components/AssistantPanel'
+import InstallPrompt from '../components/InstallPrompt'
 import ConfirmSheet from '../components/ConfirmSheet'
 
 const OFFLINE_KEY = 'runsite_offline_entry'
@@ -1164,6 +1165,9 @@ export default function WorkerDashboard({ profile }) {
       />
 
       <AssistantPanel role="worker" onDataChanged={() => { checkActiveEntry(); fetchHistory(); fetchSchedule(); fetchTimeOff(); fetchLists() }} />
+      {/* The crew is who this matters most for — a guy who adds it to his home
+          screen stops re-finding a URL every morning and starts clocking in. */}
+      <InstallPrompt />
     </div>
   )
 }

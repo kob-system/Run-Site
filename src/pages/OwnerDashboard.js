@@ -6,6 +6,7 @@ import { todayLocal } from '../utils/todayLocal'
 import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
 import { downloadCsv } from '../utils/csv'
 import AssistantPanel from '../components/AssistantPanel'
+import InstallPrompt from '../components/InstallPrompt'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
 import { track, EV } from '../utils/analytics'
@@ -3717,6 +3718,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
       <AssistantPanel onDataChanged={fetchProjects} />
+      <InstallPrompt />
 
       <div className="bottom-nav">
         {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs'], ['money', '💵', 'Money'], ['crew', '👷', 'Crew'], ['more', '⋯', 'More']].map(([key, icon, label]) => (
