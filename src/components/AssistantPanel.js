@@ -10,10 +10,45 @@ import { supabase } from '../supabaseClient'
 // Mic dictation (live interim text) where the browser supports SpeechRecognition,
 // and receipt photo → /api/scan-receipt → normal add_expense confirm flow, now
 // for owner and crew alike (date + tax read off the receipt flow into the ask).
+// v0.6: talk-back — a spoken question gets a spoken answer (speechSynthesis), so
+// a guy with gloves on and hands full never has to look at the screen. Typed
+// turns stay silent on purpose; the header 🔊 kills it outright.
 const NAVY = '#1C2B3A'
 const ORANGE = '#E07B2A'
 const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
+const SS = typeof window !== 'undefined' ? window.speechSynthesis : null
 const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
+// Talk-back. The rule is deliberately narrow: it speaks ONLY when the turn it is
+// answering came in through the mic. Talk to it and it talks back; type at it and
+// it stays quiet. That keeps a guy with his hands full hands-free without making
+// the app start shouting at anyone who taps a template on a quiet jobsite.
+// 'auto' | 'off', remembered per device. The header 🔊 flips it.
+const SPEAK_KEY = 'jt_assistant_speak'
+const speakPref = () => {
+  try { return localStorage.getItem(SPEAK_KEY) === 'off' ? 'off' : 'auto' } catch { return 'auto' }
+}
+
+// Strip what sounds wrong out loud: emoji, markdown bold, bullet glyphs, and the
+// bracketed control lines we feed the model but never show. Long replies get cut
+// at a sentence boundary — iOS Safari mangles very long utterances anyway, and a
+// contractor wants the answer, not a paragraph read at him.
+function speakable(text) {
+  if (!text) return ''
+  let t = String(text)
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[*_`#>]/g, ' ')
+    .replace(/[•–—]/g, ' ')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (t.length > 320) {
+    const cut = t.slice(0, 320)
+    const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '))
+    t = stop > 120 ? cut.slice(0, stop + 1) : cut + '…'
+  }
+  return t
+}
 
 // Tap-a-template starters. A chip does nothing clever — it just sends a plain
 // English opener, so the assistant runs its normal guided flow (GUIDED SETUPS
@@ -94,8 +129,8 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       // do far better than a paragraph does. Anything not on a card still
       // works by typing or talking.
       text: isOwner
-        ? "Hey — tap one of these, or just tell me what you need (jobs, money, crew, receipts, invoices, permits, punch lists…). Nothing saves until you hit Confirm."
-        : "Hey — tap one of these, or just say it (you can use the mic). Nothing saves until you hit Confirm.",
+        ? "Hey — tap one of these, or hit 🎤 and just talk (jobs, money, crew, receipts, invoices, permits, punch lists…). Ask out loud and I'll answer out loud. Nothing saves until you hit Confirm."
+        : "Hey — tap one of these, or hit 🎤 and just say it. Ask out loud and I'll answer out loud. Nothing saves until you hit Confirm.",
     },
   ])
   const [input, setInput] = useState('')
@@ -104,9 +139,14 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
   const [activity, setActivity] = useState(null)
   const [listening, setListening] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [speakMode, setSpeakMode] = useState(speakPref)
   const scrollRef = useRef(null)
   const recogRef = useRef(null)
   const fileRef = useRef(null)
+  // True while the current turn traces back to the mic. Set when dictation lands
+  // text, cleared by any typed/tapped send — and deliberately NOT cleared by the
+  // confirm round-trip, so a voice-started action is also confirmed out loud.
+  const voiceTurnRef = useRef(false)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -114,10 +154,36 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
 
   const pushMsg = (m) => setMsgs((prev) => [...prev, m])
 
+  const hush = useCallback(() => { try { if (SS) SS.cancel() } catch { /* nothing queued */ } }, [])
+
+  // Speak a reply. Barge-in first: whatever is still playing is cancelled, so a
+  // fast second question never stacks up behind the last answer.
+  const say = useCallback((text) => {
+    if (!SS || speakMode === 'off' || !voiceTurnRef.current) return
+    const t = speakable(text)
+    if (!t) return
+    try {
+      SS.cancel()
+      const u = new window.SpeechSynthesisUtterance(t)
+      u.lang = 'en-US'
+      u.rate = 1.02
+      SS.speak(u)
+    } catch { /* voice is a bonus, never a blocker */ }
+  }, [speakMode])
+
+  // Stop talking when the sheet closes or the component goes away — audio that
+  // outlives its own UI is the fastest way to make someone distrust the mic.
+  useEffect(() => { if (!open) hush() }, [open, hush])
+  useEffect(() => hush, [hush])
+
   const send = useCallback(async (overrideText) => {
     const text = (typeof overrideText === 'string' ? overrideText : input).trim()
     if (!text || busy) return
-    if (typeof overrideText !== 'string') setInput('')
+    // A template tap or a receipt scan is not a spoken turn — it silences
+    // talk-back until the mic is used again.
+    if (typeof overrideText === 'string') voiceTurnRef.current = false
+    else setInput('')
+    hush()
     setPending(null)
     pushMsg({ role: 'user', text })
     setBusy(true)
@@ -139,19 +205,23 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       if (!r.ok) { pushMsg({ role: 'assistant', text: data.error || 'Something went wrong.' }); return }
       if (data.type === 'confirm') {
         setPending({ tool: data.tool, args: data.args, summary: data.summary })
+        // Read the proposal out loud with the ask attached — otherwise a
+        // hands-free user hears what's about to happen and no way to stop it.
+        say(`About to: ${data.summary}. Tap confirm to save it, or cancel.`)
         // The confirm card is its own UI, not a bubble — but the model still
         // has to SEE that it already proposed this, or the next turn re-asks
         // for fields it just collected (or re-proposes a cancelled write).
         pushMsg({ role: 'assistant', text: `[proposed for confirmation] ${data.summary}`, hidden: true })
       } else {
         pushMsg({ role: 'assistant', text: data.reply })
+        say(data.reply)
       }
     } catch {
       pushMsg({ role: 'assistant', text: "Couldn't reach the assistant. Check your connection." })
     } finally {
       setBusy(false)
     }
-  }, [input, busy, msgs])
+  }, [input, busy, msgs, say, hush])
 
   // Cancel has to leave a trace in the history, otherwise the model only sees
   // an unfinished setup and proposes the exact same write again on the next
@@ -174,7 +244,9 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
         body: JSON.stringify({ tool: p.tool, args: p.args, tz: new Date().getTimezoneOffset() }),
       })
       const data = await r.json().catch(() => ({}))
-      pushMsg({ role: 'assistant', text: r.ok ? (data.message || 'Done ✓') : (data.error || "Couldn't do that.") })
+      const outcome = r.ok ? (data.message || 'Done ✓') : (data.error || "Couldn't do that.")
+      pushMsg({ role: 'assistant', text: outcome })
+      say(outcome)
       if (r.ok) {
         if (typeof onDataChanged === 'function') onDataChanged() // refresh dashboard money after a confirmed write
         if (activity) loadActivity()
@@ -184,12 +256,15 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
     } finally {
       setBusy(false)
     }
-  }, [pending, busy, activity, onDataChanged])
+  }, [pending, busy, activity, onDataChanged, say])
 
   // Mic dictation — browser speech-to-text into the input box. Button only
   // renders when the browser has SpeechRecognition (iOS Safari 14.5+, Chrome).
   const toggleMic = useCallback(() => {
     if (!SR) return
+    // Barge-in: stop talking the instant the mic opens, or the assistant's own
+    // voice ends up in the transcript.
+    hush()
     if (listening) {
       try { if (recogRef.current) recogRef.current.stop() } catch { /* already stopped */ }
       setListening(false)
@@ -209,11 +284,14 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
         if (e.results[i].isFinal) finalText += seg
         else interim += seg
       }
+      // They actually spoke — this turn earns a spoken answer back.
+      if (finalText.trim()) voiceTurnRef.current = true
       setInput((base + (finalText + interim)).replace(/\s+/g, ' ').trimStart())
     }
     rec.onend = () => setListening(false)
     rec.onerror = (e) => {
       setListening(false)
+      voiceTurnRef.current = false
       const err = e && e.error
       if (err === 'not-allowed' || err === 'service-not-allowed') {
         pushMsg({ role: 'assistant', text: 'I need microphone access to hear you — allow the mic for this site in your browser settings, then tap 🎤 again. You can always just type instead.' })
@@ -228,7 +306,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       rec.start()
       setListening(true)
     } catch { setListening(false) }
-  }, [listening, input])
+  }, [listening, input, hush])
 
   // Receipt photo (owner or crew): photo → /api/scan-receipt (Haiku vision) →
   // auto-send the store/amount/date so the normal add_expense confirm flow takes
@@ -357,7 +435,17 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
             <span style={{ fontSize: 18 }}>✨</span>
             <strong style={{ fontSize: 16 }}>JobTally Assistant</strong>
           </div>
-          <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: 'transparent', border: 'none', color: 'white', fontSize: 22, cursor: 'pointer' }}>×</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {SS && (
+              <button
+                onClick={() => { const next = speakMode === 'off' ? 'auto' : 'off'; setSpeakMode(next); try { localStorage.setItem(SPEAK_KEY, next) } catch { /* private mode */ } if (next === 'off') hush() }}
+                aria-label={speakMode === 'off' ? 'Turn on spoken answers' : 'Turn off spoken answers'}
+                title={speakMode === 'off' ? 'Spoken answers off' : 'Speaks back when you use the mic'}
+                style={{ background: 'transparent', border: 'none', color: 'white', fontSize: 17, cursor: 'pointer', opacity: speakMode === 'off' ? 0.45 : 1, padding: '0 4px' }}
+              >{speakMode === 'off' ? '🔇' : '🔊'}</button>
+            )}
+            <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: 'transparent', border: 'none', color: 'white', fontSize: 22, cursor: 'pointer' }}>×</button>
+          </div>
         </div>
         {/* tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', background: 'white' }}>
