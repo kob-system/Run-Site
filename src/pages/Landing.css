@@ -97,19 +97,16 @@
 .ld-row-copy h3 { font-size: clamp(20px, 3vw, 26px); font-weight: 800; line-height: 1.2; margin-bottom: 10px; }
 .ld-row-copy p { font-size: 16px; color: var(--text-secondary); }
 
-/* Home-screen / guided-setup band */
-.ld-home { background: var(--orange-tint); }
-.ld-home-grid { display: grid; grid-template-columns: 1fr; gap: 32px; align-items: center; }
-@media (min-width: 760px) { .ld-home-grid { grid-template-columns: 5fr 7fr; } }
-.ld-home h2 { text-align: left; }
-.ld-home p { font-size: 16px; color: var(--text-secondary); margin-top: 14px; }
-.ld-home p strong { color: var(--text); }
-@media (max-width: 759px) { .ld-home h2 { text-align: center; } .ld-home .ld-cta { display: flex; } }
+/* The home-screen band and the "Everything included" band are both gone —
+   they were the feature list a third and fourth time. The home screen is now a
+   row in What it does; the included list lives inside the price card. */
 
-/* Everything included */
+/* What you get, inside the price card */
+.ld-price-inc { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); text-align: left; }
+.ld-price-inc-head { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
+.ld-price-inc .ld-inc-grid { margin-top: 14px; }
 .ld-inc-grid { list-style: none; padding: 0; margin: 28px 0 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
 @media (min-width: 560px) { .ld-inc-grid { grid-template-columns: 1fr 1fr; } }
-@media (min-width: 860px) { .ld-inc-grid { grid-template-columns: 1fr 1fr 1fr; } }
 .ld-inc-grid li { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px 12px 38px; font-size: 15px; font-weight: 600; position: relative; }
 .ld-inc-grid li::before { content: '✓'; position: absolute; left: 14px; color: var(--green); font-weight: 700; }
 
