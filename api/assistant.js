@@ -20,6 +20,11 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY
 const MODEL = 'claude-sonnet-5'
+// How many writes can ride on one confirm card. The cap isn't technical — it's
+// that a card is the last thing somebody reads before it saves, and nobody
+// reads a list of ten on a phone. Past this, the extras are named out loud
+// rather than dropped.
+const MAX_BATCH = 6
 
 async function getUser(req) {
   const auth = req.headers.authorization || ''
@@ -1424,8 +1429,9 @@ export default async function handler(req, res) {
     `RULES:\n` +
     `- Use the read tools to look things up — never invent job names, worker names, or numbers.\n` +
     `- For anything that CHANGES data, call the matching write tool. The app shows the owner a confirm card before it saves, so don't ask "are you sure?" yourself — just call the tool.\n` +
-    `- One change per message: if they ask for several changes at once, do the first and tell them to send the next after confirming.\n` +
-    `- If a required detail is missing (amount, which job, which worker), ask ONE short question instead of guessing.\n` +
+    `- SAY IT ALL IN ONE BREATH. If one message asks for several changes ("driving to Maple, 15 miles each way, Dave and Tony on it six hours each"), call EVERY matching write tool in the SAME turn. They all land on one confirm card and save together. Never make him repeat himself, and never say "one at a time." Six actions max per message.\n` +
+    `- Only ever propose what he actually asked for. Never pad a batch with an action he didn't ask for.\n` +
+    `- If a required detail is missing (amount, which job, which worker), ask ONE short question instead of guessing. When most of a multi-part request is complete and one piece is missing, ask about the missing piece FIRST — don't propose a half-filled action.\n` +
     `- If they ask how to do something in the app, offer to just do it for them right here.\n` +
     `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.\n\n` +
     `GUIDED SETUPS (the tap-a-suggestion flows — the owner is on a phone, often in a truck):\n` +
@@ -1455,7 +1461,7 @@ export default async function handler(req, res) {
     `- Check clock_status before proposing clock_in or clock_out (can't clock in twice; can't clock out if not clocked in).\n` +
     `- For clock in/out, time off, or logging a receipt/expense, call the matching write tool. The app shows them a confirm card before it saves, so don't ask "are you sure?" yourself — just call the tool.\n` +
     `- Logging an expense: use add_expense with the receipt TOTAL (tax already included) and which of THEIR jobs it's for. It books to the boss's records — the crew member can't see the job's money, only add the cost.\n` +
-    `- One change per message: if they ask for several at once, do the first and tell them to send the next after confirming.\n` +
+    `- If one message asks for several things at once, call every matching write tool in the SAME turn — they go on one confirm card and save together. Don't make them repeat themselves.\n` +
     `- Their pay = their clocked hours × their hourly rate. You cannot see or discuss the business's money, other crew members' pay, job profit, or anything owner-side — if asked, say that's owner-only and they should ask their boss.\n` +
     `- If a required detail is missing (which job, which dates), ask ONE short question instead of guessing.\n` +
     `- If a lookup says a name is ambiguous, ask which one they meant using the matches given.\n\n` +
@@ -1488,23 +1494,37 @@ export default async function handler(req, res) {
         const toolUses = blocks.filter((b) => b.type === 'tool_use')
 
         // If the model wants to WRITE, stop and ask the user to confirm.
-        // One write per turn.
+        //
+        // A single spoken sentence is very often SEVERAL writes: "heading to
+        // Maple, fifteen miles each way, Dave and Tony are on it six hours
+        // each" is one mileage trip and two time entries. This used to take
+        // the first one and tell him to come back and say the other two —
+        // which is exactly the friction that makes someone give up on talking
+        // to it and go tap through screens instead. Now the whole sentence
+        // lands on ONE confirm card as a numbered list and saves together.
         const writes = toolUses.filter((b) => writeNames.has(b.name))
-        const write = writes[0]
-        if (write) {
-          // The confirm card has to name a REAL job. The model echoes whatever
-          // the owner said ("the Klein bathroom"), which used to sail onto the
-          // card and only fail AFTER they tapped Confirm — the worst possible
-          // moment. Resolve it here instead: one match gets rewritten to the
-          // job's actual name, a miss or a tie becomes a question, not a card.
-          const wantedJob = write.input && typeof write.input.job_name === 'string'
-            ? write.input.job_name.trim()
-            : ''
-          if (wantedJob) {
-            const finder = isOwner ? findProjects : findMyProjects
-            const matches = (await finder(user.token, wantedJob)) || []
+        if (writes.length) {
+          const batch = writes.slice(0, MAX_BATCH)
+
+          // Every confirm card has to name a REAL job. The model echoes
+          // whatever the owner said ("the Klein bathroom"), which used to sail
+          // onto the card and only fail AFTER they tapped Confirm — the worst
+          // possible moment. Resolve it here instead: one match gets rewritten
+          // to the job's actual name, a miss or a tie becomes a question, not
+          // a card. Cached per distinct name — a three-action batch on one job
+          // is one lookup, not three.
+          const finder = isOwner ? findProjects : findMyProjects
+          const jobCache = new Map()
+          for (const write of batch) {
+            const wantedJob = write.input && typeof write.input.job_name === 'string'
+              ? write.input.job_name.trim()
+              : ''
+            if (!wantedJob) continue
+            const key = wantedJob.toLowerCase()
+            if (!jobCache.has(key)) jobCache.set(key, (await finder(user.token, wantedJob)) || [])
+            const matches = jobCache.get(key)
             const exact = matches.find(
-              (p) => String(p.name || '').trim().toLowerCase() === wantedJob.toLowerCase()
+              (p) => String(p.name || '').trim().toLowerCase() === key
             )
             if (matches.length === 0) {
               const all = (await finder(user.token, '')) || []
@@ -1525,17 +1545,31 @@ export default async function handler(req, res) {
             write.input.job_name = (exact || matches[0]).name
           }
 
-          const base = summarize(write.name, write.input || {})
-          // One write per turn — if the model queued more, tell the
-          // owner so the extras aren't silently dropped.
-          const more = writes.length > 1
-            ? ' (One action at a time — after this saves, ask me for the next.)'
+          const actions = batch.map((w) => ({
+            tool: w.name,
+            args: w.input || {},
+            summary: summarize(w.name, w.input || {}),
+          }))
+          // Never drop work silently. If he rattled off more than a card can
+          // honestly be read at, say so — he can send the rest after.
+          const over = writes.length - actions.length
+          const more = over > 0
+            ? ` (That's ${MAX_BATCH} at once — tell me the other ${over} after this saves.)`
             : ''
+          const summary = actions.length === 1
+            ? actions[0].summary + more
+            : `${actions.length} things — ` +
+              actions.map((a, i) => `${i + 1}) ${a.summary}`).join('; ') + more
+
           return res.json({
             type: 'confirm',
-            tool: write.name,
-            args: write.input || {},
-            summary: base + more,
+            // tool/args carry the FIRST action so an older cached client (this
+            // is a PWA — stale bundles are a fact of life) still saves
+            // something real instead of choking on a shape it doesn't know.
+            tool: actions[0].tool,
+            args: actions[0].args,
+            actions,
+            summary,
           })
         }
 

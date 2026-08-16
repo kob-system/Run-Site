@@ -11,9 +11,15 @@
 // v0.4: workers get their own three tools (clock_in / clock_out /
 // request_time_off), whitelisted PER ROLE — a worker can never run an owner
 // tool and vice versa. Worker writes mirror WorkerDashboard.js shapes.
+// v0.5: one confirm card can carry SEVERAL actions ("15 miles each way and put
+// Dave and Tony on it for six hours"). They run in order, each audited on its
+// own row; the single-action {tool, args} body still works for cached bundles.
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY
+// Must match MAX_BATCH in api/assistant.js — this endpoint never trusts that
+// the proposal came from there, so it enforces its own ceiling.
+const MAX_BATCH = 6
 
 async function getUser(req) {
   const auth = req.headers.authorization || ''
@@ -1220,12 +1226,27 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {}
-  const tool = typeof body.tool === 'string' ? body.tool : ''
-  const args = body.args && typeof body.args === 'object' ? body.args : {}
+  // One confirm card can carry several actions (see api/assistant.js — a spoken
+  // sentence is often three writes). `actions` is the current shape; `tool` +
+  // `args` is the single-action shape an older cached bundle still sends, and
+  // it stays supported forever for exactly that reason.
+  const queued = Array.isArray(body.actions) && body.actions.length
+    ? body.actions
+    : [{ tool: body.tool, args: body.args }]
+  if (queued.length > MAX_BATCH) return res.status(400).json({ error: 'Too many actions at once.' })
+
   // Per-role whitelist: an owner token can never run a worker tool, and a
   // worker token can never run an owner tool — regardless of what was proposed.
+  // Checked for EVERY action before ANY of them runs, so a batch can't smuggle
+  // a forbidden tool in behind a legitimate first one.
   const allowed = isOwner ? WRITE_TOOLS : WORKER_WRITE_TOOLS
-  if (!allowed.has(tool)) return res.status(400).json({ error: 'Not an executable action.' })
+  const steps = queued.map((a) => ({
+    tool: a && typeof a.tool === 'string' ? a.tool : '',
+    args: a && a.args && typeof a.args === 'object' ? a.args : {},
+  }))
+  if (!steps.every((s) => allowed.has(s.tool))) {
+    return res.status(400).json({ error: 'Not an executable action.' })
+  }
 
   // Client timezone offset in minutes (Date.getTimezoneOffset), clamped.
   const tz = Number.isFinite(body.tz) ? Math.max(-840, Math.min(840, body.tz)) : 0
@@ -1234,20 +1255,53 @@ export default async function handler(req, res) {
   const ownerScope = isOwner ? user.id : profile.owner_id
   const ctx = { uid: user.id, token: user.token, tz, origin: req.headers.origin, profile }
 
-  let outcome
-  try {
-    outcome = await runTool(tool, args, ctx)
-  } catch (e) {
-    console.error('assistant-execute error:', e)
-    await logAction(user.id, profile.role, ownerScope, tool, args, 'failed', { error: 'exception' })
-    return res.status(502).json({ error: 'Could not complete that action.' })
+  // Run in the order they were proposed — order matters (clock in before clock
+  // out; create the job before you bill it). Each one is audited on its own, so
+  // the Activity log reads the same whether it came in alone or in a batch.
+  //
+  // There is no transaction across PostgREST calls, so a mid-batch failure
+  // CANNOT be rolled back. The rule is therefore: stop at the first failure and
+  // say plainly what saved and what didn't. Ploughing on would compound the
+  // mess, and pretending it all worked is worse than either.
+  const done = []
+  for (const step of steps) {
+    let outcome
+    let logged = false
+    try {
+      outcome = await runTool(step.tool, step.args, ctx)
+    } catch (e) {
+      console.error('assistant-execute error:', e)
+      await logAction(user.id, profile.role, ownerScope, step.tool, step.args, 'failed', { error: 'exception' })
+      logged = true
+      outcome = { error: 'Could not complete that action.' }
+    }
+
+    if (outcome.error) {
+      if (!logged) {
+        await logAction(user.id, profile.role, ownerScope, step.tool, step.args, 'failed', { error: outcome.error })
+      }
+      // Nothing saved at all — same 400 as a single failed action always gave.
+      if (!done.length) return res.status(400).json({ error: outcome.error })
+      // Some of it DID save. That's a 200 with the truth in it, not an error —
+      // the dashboard has to refresh for the rows that landed.
+      return res.json({
+        ok: true,
+        partial: true,
+        saved: done.length,
+        message:
+          `Saved ${done.length} of ${steps.length}:\n` +
+          done.map((m) => `✓ ${m}`).join('\n') +
+          `\n\n✗ Then it stopped: ${outcome.error}`,
+      })
+    }
+
+    await logAction(user.id, profile.role, ownerScope, step.tool, step.args, 'executed', outcome.result || null)
+    done.push(outcome.message || 'Done')
   }
 
-  if (outcome.error) {
-    await logAction(user.id, profile.role, ownerScope, tool, args, 'failed', { error: outcome.error })
-    return res.status(400).json({ error: outcome.error })
-  }
-
-  await logAction(user.id, profile.role, ownerScope, tool, args, 'executed', outcome.result || null)
-  return res.json({ ok: true, message: outcome.message })
+  return res.json({
+    ok: true,
+    saved: done.length,
+    message: done.length === 1 ? done[0] : done.map((m) => `✓ ${m}`).join('\n'),
+  })
 }
