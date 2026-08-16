@@ -6,6 +6,26 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #1C2B3A; display: flex; z-index: 100; }
 .bottom-nav button { flex: 1; background: transparent; border: none; color: rgba(255,255,255,0.5); padding: 12px 0; font-size: 11px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .bottom-nav button.active { color: #E07B2A; }
+/* Ask — the raised centre button. It breaks the row on purpose: it's the one
+   control that can do anything in the app, so it shouldn't look like a peer of
+   Jobs and Money. The orb overhangs the bar, so the bar itself needs no extra
+   height and nothing below it moves. */
+.bottom-nav button.nav-ask { color: rgba(255,255,255,0.9); font-weight: 700; justify-content: flex-end; }
+.bottom-nav button.nav-ask .nav-ask-orb {
+  /* left is offset by half the width rather than translateX(-50%), so the
+     :active scale below has the transform to itself. */
+  position: absolute; top: -20px; left: calc(50% - 26px);
+  width: 52px; height: 52px; border-radius: 50%;
+  background: #E07B2A; color: #fff; font-size: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border: 4px solid #1C2B3A;
+  box-shadow: 0 4px 14px rgba(224,123,42,0.45);
+  transition: transform .12s ease;
+}
+.bottom-nav button.nav-ask { position: relative; }
+.bottom-nav button.nav-ask:active .nav-ask-orb { transform: scale(0.94); }
+.bottom-nav button.nav-ask:focus-visible .nav-ask-orb { outline: 2px solid #fff; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .bottom-nav button.nav-ask .nav-ask-orb { transition: none; } }
 .page { padding: 16px; padding-bottom: 80px; }
 .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }

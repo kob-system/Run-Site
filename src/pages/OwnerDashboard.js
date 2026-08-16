@@ -74,7 +74,9 @@ const NAV_BUCKET = {
   jobs: 'jobs', calendar: 'jobs',
   money: 'money', estimates: 'money', invoices: 'money', clients: 'money', insights: 'money', reports: 'money',
   crew: 'crew', workers: 'crew', payroll: 'crew', crewweek: 'crew',
-  more: 'more', compliance: 'more', warranties: 'more', settings: 'more',
+  // "More" lost its nav slot to Ask and now hangs off Home, so everything
+  // inside it lights Home instead of a button that no longer exists.
+  more: 'home', compliance: 'home', warranties: 'home', settings: 'home',
 }
 const HubCard = ({ icon, title, sub, onClick }) => (
   <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 'var(--tap)' }} onClick={onClick} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}>
@@ -259,6 +261,7 @@ function JobPhoto({ path, alt, style, onClick, signedUrl }) {
 
 export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [activeTab, setActiveTab] = useState('home')
+  const [assistantOpen, setAssistantOpen] = useState(false)
   const [projects, setProjects] = useState([])
   const [removingSample, setRemovingSample] = useState(false) // demo-job cleanup in flight
   // Social proof. The ask only ever fires after a REAL job closes in the black —
@@ -2773,6 +2776,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
         {activeTab === 'more' && (
           <div>
+            <BackBtn label="Home" onClick={() => setActiveTab('home')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
             <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
             <HubCard icon="🔧" title="Callbacks & warranty work" sub="Post-job follow-ups and fixes under warranty" onClick={() => setActiveTab('warranties')} />
@@ -3060,6 +3064,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               </div>
             ))}
+            {/* The old More bucket, rehomed. It's the least-visited corner of
+                the app (insurance, warranty, settings), so the bottom of Home
+                is a fairer place for it than a permanent nav slot. */}
+            <p style={sectionLabel}>Everything else</p>
+            <HubCard icon="⋯" title="More tools" sub="Insurance & licenses, callbacks, settings & billing" onClick={() => setActiveTab('more')} />
           </div>
         )}
 
@@ -3717,11 +3726,25 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
-      <AssistantPanel onDataChanged={fetchProjects} />
+      <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} onDataChanged={fetchProjects} />
       <InstallPrompt />
 
+      {/* Ask sits in the MIDDLE, raised out of the bar, because talking to it is
+          now the front door and not a shortcut. It costs no nav slot — the old
+          "More" bucket moved onto the Home screen as a hub card, where the
+          things in it (insurance, warranty, settings) actually belong. */}
       <div className="bottom-nav">
-        {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs'], ['money', '💵', 'Money'], ['crew', '👷', 'Crew'], ['more', '⋯', 'More']].map(([key, icon, label]) => (
+        {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs']].map(([key, icon, label]) => (
+          <button key={key} className={(NAV_BUCKET[activeTab] || 'home') === key ? 'active' : ''} onClick={() => setActiveTab(key)} aria-label={label}>
+            <span style={{ fontSize: '20px', lineHeight: '1' }}>{icon}</span>
+            <span>{label}</span>
+          </button>
+        ))}
+        <button className="nav-ask" onClick={() => setAssistantOpen(true)} aria-label="Ask JobTally">
+          <span className="nav-ask-orb">✨</span>
+          <span>Ask</span>
+        </button>
+        {[['money', '💵', 'Money'], ['crew', '👷', 'Crew']].map(([key, icon, label]) => (
           <button key={key} className={(NAV_BUCKET[activeTab] || 'home') === key ? 'active' : ''} onClick={() => setActiveTab(key)} aria-label={label}>
             <span style={{ fontSize: '20px', lineHeight: '1' }}>{icon}</span>
             <span>{label}</span>

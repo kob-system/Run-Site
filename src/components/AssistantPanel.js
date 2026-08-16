@@ -118,9 +118,18 @@ async function authHeader() {
   return tok ? { Authorization: `Bearer ${tok}` } : {}
 }
 
-export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
+// `open` + `onOpenChange` make this a CONTROLLED panel — the owner's bottom nav
+// owns the ✨ button now, because talking to it is meant to read as a place you
+// go, not a helper hovering over the screen you're already on. Left uncontrolled
+// (the crew side) it keeps its own floating button and behaves exactly as before.
+export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange }) {
   const isOwner = role !== 'worker'
-  const [open, setOpen] = useState(false)
+  const controlled = typeof openProp === 'boolean'
+  const [openState, setOpenState] = useState(false)
+  const open = controlled ? openProp : openState
+  const setOpen = useCallback((v) => {
+    if (controlled) { if (onOpenChange) onOpenChange(v) } else setOpenState(v)
+  }, [controlled, onOpenChange])
   const [tab, setTab] = useState('chat')
   const [msgs, setMsgs] = useState([
     {
@@ -441,6 +450,9 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
   }
 
   if (!open) {
+    // Controlled: the parent's nav is the button, so don't stack a second one
+    // on top of it.
+    if (controlled) return null
     return (
       <button
         onClick={() => setOpen(true)}
@@ -457,7 +469,10 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 950, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.4)' }} onClick={() => setOpen(false)}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: '#F7F8FA', borderTopLeftRadius: 18, borderTopRightRadius: 18, height: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* As a destination it takes the whole screen — a sheet with the old
+          dashboard peeking out above it still reads as "a helper on top of the
+          real app," which is the opposite of the point. */}
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#F7F8FA', borderTopLeftRadius: controlled ? 0 : 18, borderTopRightRadius: controlled ? 0 : 18, height: controlled ? '100%' : '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* header */}
         <div style={{ background: NAVY, color: 'white', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
