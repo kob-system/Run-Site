@@ -22,6 +22,10 @@ const Billing = React.lazy(() => import('./pages/Billing'))
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
 const Landing = React.lazy(() => import('./pages/Landing'))
 const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
+// Public, self-contained, and lazily loaded like every other screen — the demo's
+// sample data and CSS must never ride in the bundle a paying customer downloads.
+const Demo = React.lazy(() => import('./pages/Demo'))
+const NotFound = React.lazy(() => import('./pages/NotFound'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
 const ResetPassword = React.lazy(() => import('./pages/ResetPassword'))
 
@@ -209,8 +213,15 @@ export default function App() {
 
   // Public marketing routes — rendered before ANY auth/billing decision so
   // they work for logged-out visitors (and logged-in ones checking the page).
-  if (window.location.pathname.replace(/\/+$/, '') === '/remodelers') {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (path === '/remodelers') {
     return <Screen><Remodelers /></Screen>
+  }
+  // /demo is public and stateless — it holds its own sample data and never
+  // touches Supabase, so a signed-in owner can open it too (to show somebody)
+  // without it reading or writing a single row of their real account.
+  if (path === '/demo') {
+    return <Screen><Demo /></Screen>
   }
 
   // Password recovery beats every other branch, including a live session. The
@@ -229,13 +240,19 @@ export default function App() {
     // /?invite=<token> (worker invite links texted by owners).
     const params = new URLSearchParams(window.location.search)
     const wantsAuth =
-      window.location.pathname.replace(/\/+$/, '') === '/login' ||
+      path === '/login' ||
       params.has('signup') ||
       params.has('invite')
-    if (!wantsAuth) {
-      return <Screen><Landing /></Screen>
-    }
-    return <Screen><Login /></Screen>
+    if (wantsAuth) return <Screen><Login /></Screen>
+    // The landing page belongs at the ROOT and nowhere else. It used to be the
+    // catch-all, which meant vercel.json's SPA rewrite turned every unknown
+    // path — every typo, every stale link, every crawler guess — into a
+    // full marketing page answering HTTP 200. That "soft 404" gets junk URLs
+    // indexed as real pages and splits the site's ranking across infinite
+    // addresses. Anything unrecognised now gets an honest not-found screen
+    // carrying <meta name="robots" content="noindex">.
+    if (path === '/') return <Screen><Landing /></Screen>
+    return <Screen><NotFound /></Screen>
   }
   // Signed in, and the URL still carries a worker invite. The branch above only
   // runs when logged OUT, so before this the token was silently discarded and

@@ -70,3 +70,48 @@ test('a worker invite link reaches the login screen, not the landing page', asyn
   render(<App />)
   expect(await screen.findByText(/Contractor job tracking/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
+
+// --- Routing: the landing page belongs at the ROOT and nowhere else ---------
+// Before 2026-08-17 the landing page was App's catch-all, so vercel.json's SPA
+// rewrite turned every unknown path into a 200-with-marketing-page "soft 404".
+// These three pin the fix. If the first one ever goes green while asserting
+// landing copy, the SEO regression is back.
+
+test('an unknown path gets a real not-found page, NOT the landing page', async () => {
+  goTo('/some-old-link-that-no-longer-exists')
+  render(<App />)
+  expect(await screen.findByText(/That page isn't here/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(screen.queryByText(/Know what every job really makes/i)).not.toBeInTheDocument()
+})
+
+test('the not-found page tells search engines not to index it', async () => {
+  // The noindex tag is the half of the fix that search engines actually read;
+  // the human-facing copy is the half a person reads. Both have to be there.
+  goTo('/nope-not-a-page')
+  render(<App />)
+  await screen.findByText(/That page isn't here/i, {}, ROUTE_LOAD)
+  // A <meta> tag in <head> is not user-visible UI, so Testing Library has no
+  // query for it. The noindex tag is the entire point of this test, so reaching
+  // for it directly is the only way to assert it exists.
+  // eslint-disable-next-line testing-library/no-node-access
+  const tag = document.head.querySelector('meta[name="robots"]')
+  expect(tag).not.toBeNull()
+  expect(tag.getAttribute('content')).toMatch(/noindex/)
+})
+
+test('/demo renders the public walkthrough without touching an account', async () => {
+  goTo('/demo')
+  render(<App />)
+  expect(await screen.findByText(/Have a poke around/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  // The demo must be visibly a sample, so nobody mistakes it for their own data.
+  expect(screen.getByText(/SAMPLE/)).toBeInTheDocument()
+})
+
+test('a trailing slash still reaches the root landing page', async () => {
+  // '/'.replace(/\/+$/,'') is '' — without the `|| '/'` fallback in App.js the
+  // root itself would fall through to the not-found branch. That would have
+  // taken the entire marketing site down, so it gets its own test.
+  goTo('/')
+  render(<App />)
+  expect(await screen.findByText(/Know what every job really makes/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+})

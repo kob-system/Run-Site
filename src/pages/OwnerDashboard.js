@@ -2974,11 +2974,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>This shows up on your estimates and invoices.</p>
               <div className="input-group">
                 <label htmlFor="set-company">Company name</label>
-                <input id="set-company" type="text" value={settingsForm.company_name} onChange={e => setSettingsForm(f => ({ ...f, company_name: e.target.value }))} placeholder="First Class Property Services" />
+                <input id="set-company" type="text" value={settingsForm.company_name} onChange={e => setSettingsForm(f => ({ ...f, company_name: e.target.value }))} placeholder="Reynolds Contracting" />
               </div>
               <div className="input-group">
                 <label htmlFor="set-name">Your name</label>
-                <input id="set-name" type="text" value={settingsForm.full_name} onChange={e => setSettingsForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Josh Smith" />
+                <input id="set-name" type="text" value={settingsForm.full_name} onChange={e => setSettingsForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Mike Reynolds" />
               </div>
               <div className="input-group">
                 <label htmlFor="set-email">Email</label>
