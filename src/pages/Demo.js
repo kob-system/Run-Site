@@ -158,6 +158,21 @@ export default function Demo() {
   const threadRef = useRef(null)
 
   useEffect(() => { trackOnce(EV.LANDING_CTA, { where: 'demo-open' }) }, [])
+  // /demo sits in sitemap.xml at priority 0.9, so it needs its own title and
+  // description rather than inheriting index.html's generic pair — otherwise
+  // the highest-priority page in the sitemap is indistinguishable from the
+  // home page in a search result, and shares its link preview.
+  useEffect(() => {
+    const prevTitle = document.title
+    document.title = 'Try JobTally free — the live demo, no signup'
+    const desc = document.querySelector('meta[name="description"]')
+    const prevDesc = desc ? desc.content : null
+    if (desc) desc.content = 'Tap through a real contractor account: what you are owed, live job profit, and an assistant you talk to. No signup, no card.'
+    return () => {
+      document.title = prevTitle
+      if (desc && prevDesc !== null) desc.content = prevDesc
+    }
+  }, [])
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight
   }, [thread, pending])
