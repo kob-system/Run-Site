@@ -50,6 +50,18 @@ const FEATURES = [
   },
 ]
 
+// Was its own full-width section ("Open the app, see your money") sitting right
+// under What it does — the same kind of claim, about the same product, in a
+// different layout, which is most of why this page felt like it repeated itself.
+// It's a feature. It goes in the feature list.
+const HOME_FEATURE = {
+  img: '/landing/home-owed.png',
+  alt: 'JobTally home screen showing money owed to you and the guided setup checklist',
+  kicker: 'Your home screen',
+  title: 'Open it and the first thing you see is what you’re owed',
+  body:
+    "Active jobs, open estimates and your projected profit sit right underneath it. And you're never left guessing what to do first — a setup guide walks you through your first job, your crew, your first estimate and your first invoice, ticking each step off by itself as you go.",
+}
 const INCLUDED = [
   'Crew GPS time clock',
   'Crew pay totals',
@@ -186,55 +198,27 @@ export default function Landing() {
           </div>
         </div>
       </section>
-
-      {/* Introduction — a face and the honest origin, before anyone is asked
-          for anything. Same file and same placement rule as /remodelers: it
-          sits ABOVE the walkthrough, because the intro's closing line points
-          down at it. 13 MB, so preload="none" — a guy standing on a job site
-          on cell data downloads nothing until he actually presses play. */}
-      <section className="ld-intro" id="intro">
+      {/* Features — alternating rows, real screenshots */}
+      <section className="ld-features">
         <div className="ld-inner">
-          <h2>Introduction video</h2>
-          <p className="ld-kicker">John Paul Kobrossi — the builder of JobTally</p>
-          <div className="ld-video-frame">
-            <video
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/intro-poster.jpg"
-              src="/landing/JobTally-Intro.mp4"
-              onPlay={onIntroPlay}
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-          <div className="ld-video-after">
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start your 30-day free trial</a>
-            <div className="ld-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
-          </div>
+          <h2>What it does</h2>
+          <p className="ld-kicker">Five things, done properly. Sign up and it works.</p>
+          {[...FEATURES, HOME_FEATURE].map((f, i) => (
+            <div className={'ld-row' + (i % 2 ? ' ld-row-flip' : '')} key={f.title}>
+              <div className="ld-row-copy">
+                <div className="ld-row-kicker">{f.kicker}</div>
+                <h3>{f.title}</h3>
+                <p>{f.body}</p>
+              </div>
+              <div className="ld-row-shot">
+                <div className="ld-phone ld-phone-sm">
+                  <img src={f.img} alt={f.alt} loading="lazy" width="390" height="844" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </section>
-
-      {/* Watch-it-run video — click-to-play, nothing loads until they hit play */}
-      <section className="ld-video" id="video">
-        <div className="ld-inner">
-          <h2>See it run — 3-minute walkthrough</h2>
-          <p className="ld-kicker">Watch a real job go from clock-in to profit. No sign-up needed.</p>
-          <div className="ld-video-frame">
-            <video
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/pitch-poster.jpg"
-              src="/landing/JobTally-Pitch.mp4"
-              onPlay={onPitchPlay}
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-        </div>
-      </section>
-
       {/* Why this exists — origin story / trust band */}
       <section className="ld-story">
         <div className="ld-inner ld-story-inner">
@@ -267,64 +251,33 @@ export default function Landing() {
           </a>
         </div>
       </section>
-
-      {/* Features — alternating rows, real screenshots */}
-      <section className="ld-features">
+      {/* Introduction — a face and the honest origin, before anyone is asked
+          for anything. Same file and same placement rule as /remodelers: it
+          sits ABOVE the walkthrough, because the intro's closing line points
+          down at it. 13 MB, so preload="none" — a guy standing on a job site
+          on cell data downloads nothing until he actually presses play. */}
+      <section className="ld-intro" id="intro">
         <div className="ld-inner">
-          <h2>What it does</h2>
-          <p className="ld-kicker">Four things, done properly. Sign up and it works.</p>
-          {FEATURES.map((f, i) => (
-            <div className={'ld-row' + (i % 2 ? ' ld-row-flip' : '')} key={f.title}>
-              <div className="ld-row-copy">
-                <div className="ld-row-kicker">{f.kicker}</div>
-                <h3>{f.title}</h3>
-                <p>{f.body}</p>
-              </div>
-              <div className="ld-row-shot">
-                <div className="ld-phone ld-phone-sm">
-                  <img src={f.img} alt={f.alt} loading="lazy" width="390" height="844" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Home screen / guided setup */}
-      <section className="ld-home">
-        <div className="ld-inner ld-home-grid">
-          <div className="ld-row-shot">
-            <div className="ld-phone ld-phone-sm">
-              <img src="/landing/home-owed.png" alt="JobTally home screen showing money owed to you and the guided setup checklist" loading="lazy" width="390" height="844" />
-            </div>
+          <h2>Introduction video</h2>
+          <p className="ld-kicker">John Paul Kobrossi — the builder of JobTally</p>
+          <div className="ld-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/intro-poster.jpg"
+              src="/landing/JobTally-Intro.mp4"
+              onPlay={onIntroPlay}
+            >
+              Your browser can't play this video.
+            </video>
           </div>
-          <div className="ld-home-copy">
-            <h2>Open the app, see your money.</h2>
-            <p>
-              The home screen leads with the number that matters: <strong>what you're owed</strong>.
-              Active jobs, open estimates, and your projected profit sit right under it.
-            </p>
-            <p>
-              And you're never left guessing what to do first — a <strong>setup guide</strong> walks
-              you through your first job, your crew, your first estimate and invoice, checking
-              each step off automatically as you go.
-            </p>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('home')}>Start your 30-day free trial</a>
+          <div className="ld-video-after">
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start your 30-day free trial</a>
+            <div className="ld-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
           </div>
         </div>
       </section>
-
-      {/* Everything included */}
-      <section className="ld-included">
-        <div className="ld-inner">
-          <h2>Everything's included. Nothing's gated.</h2>
-          <p className="ld-kicker">One plan, every feature, unlimited crew. No per-seat charges, no add-ons.</p>
-          <ul className="ld-inc-grid">
-            {INCLUDED.map((item) => <li key={item}>{item}</li>)}
-          </ul>
-        </div>
-      </section>
-
       {/* How it works */}
       <section className="ld-how">
         <div className="ld-inner">
@@ -348,7 +301,6 @@ export default function Landing() {
           </div>
         </div>
       </section>
-
       {/* Social proof — real, approved quotes only. Renders nothing until there
           are some, because a fake testimonial is worse than no testimonial. */}
       {quotes.length > 0 && (
@@ -375,7 +327,25 @@ export default function Landing() {
         </section>
       )}
 
-      {/* Pricing */}
+      {/* Watch-it-run video — click-to-play, nothing loads until they hit play */}
+      <section className="ld-video" id="video">
+        <div className="ld-inner">
+          <h2>See it run — 3-minute walkthrough</h2>
+          <p className="ld-kicker">Watch a real job go from clock-in to profit. No sign-up needed.</p>
+          <div className="ld-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/pitch-poster.jpg"
+              src="/landing/JobTally-Pitch.mp4"
+              onPlay={onPitchPlay}
+            >
+              Your browser can't play this video.
+            </video>
+          </div>
+        </div>
+      </section>
       <section className="ld-pricing">
         <div className="ld-inner">
           <h2>One price. Everything. No games.</h2>
@@ -388,6 +358,16 @@ export default function Landing() {
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
+            {/* The old "Everything's included. Nothing's gated." section was a
+                third full-width pass over the feature list, three screens above
+                the price. It answers one question — what do I get for $150 —
+                so it belongs where that question gets asked. */}
+            <div className="ld-price-inc">
+              <div className="ld-price-inc-head">Everything, for that one price</div>
+              <ul className="ld-inc-grid">
+                {INCLUDED.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
             <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start your 30-day free trial</a>
             <p className="ld-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
@@ -395,7 +375,6 @@ export default function Landing() {
           </div>
         </div>
       </section>
-
       {/* FAQ */}
       <section className="ld-faq">
         <div className="ld-inner">
@@ -410,7 +389,6 @@ export default function Landing() {
           </div>
         </div>
       </section>
-
       {/* Final CTA */}
       <section className="ld-final">
         <h2>Know your number before the job's over.</h2>

@@ -33,7 +33,7 @@ const speakPref = () => {
 // bracketed control lines we feed the model but never show. Long replies get cut
 // at a sentence boundary — iOS Safari mangles very long utterances anyway, and a
 // contractor wants the answer, not a paragraph read at him.
-function speakable(text) {
+function speakable(text, full) {
   if (!text) return ''
   let t = String(text)
     .replace(/\[[^\]]*\]/g, ' ')
@@ -42,7 +42,7 @@ function speakable(text) {
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  if (t.length > 320) {
+  if (!full && t.length > 320) {
     const cut = t.slice(0, 320)
     const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '))
     t = stop > 120 ? cut.slice(0, stop + 1) : cut + '…'
@@ -118,9 +118,18 @@ async function authHeader() {
   return tok ? { Authorization: `Bearer ${tok}` } : {}
 }
 
-export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
+// `open` + `onOpenChange` make this a CONTROLLED panel — the owner's bottom nav
+// owns the ✨ button now, because talking to it is meant to read as a place you
+// go, not a helper hovering over the screen you're already on. Left uncontrolled
+// (the crew side) it keeps its own floating button and behaves exactly as before.
+export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange }) {
   const isOwner = role !== 'worker'
-  const [open, setOpen] = useState(false)
+  const controlled = typeof openProp === 'boolean'
+  const [openState, setOpenState] = useState(false)
+  const open = controlled ? openProp : openState
+  const setOpen = useCallback((v) => {
+    if (controlled) { if (onOpenChange) onOpenChange(v) } else setOpenState(v)
+  }, [controlled, onOpenChange])
   const [tab, setTab] = useState('chat')
   const [msgs, setMsgs] = useState([
     {
@@ -158,9 +167,12 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
 
   // Speak a reply. Barge-in first: whatever is still playing is cancelled, so a
   // fast second question never stacks up behind the last answer.
-  const say = useCallback((text) => {
+  // `full` skips the length trim. Trimming a chatty ANSWER is a kindness;
+  // trimming the read-back of what is about to SAVE is not — a four-action
+  // batch cut after the second one means he confirms two things he never heard.
+  const say = useCallback((text, full) => {
     if (!SS || speakMode === 'off' || !voiceTurnRef.current) return
-    const t = speakable(text)
+    const t = speakable(text, full)
     if (!t) return
     try {
       SS.cancel()
@@ -204,10 +216,27 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       const data = await r.json().catch(() => ({}))
       if (!r.ok) { pushMsg({ role: 'assistant', text: data.error || 'Something went wrong.' }); return }
       if (data.type === 'confirm') {
-        setPending({ tool: data.tool, args: data.args, summary: data.summary })
+        setPending({
+          tool: data.tool,
+          args: data.args,
+          // Several writes can ride on one card. Older server builds send only
+          // tool/args, so fall back to a one-item list rather than assuming.
+          actions: Array.isArray(data.actions) && data.actions.length
+            ? data.actions
+            : [{ tool: data.tool, args: data.args, summary: data.summary }],
+          summary: data.summary,
+        })
         // Read the proposal out loud with the ask attached — otherwise a
         // hands-free user hears what's about to happen and no way to stop it.
-        say(`About to: ${data.summary}. Tap confirm to save it, or cancel.`)
+        // Spoken read-back. A hands-free user has to hear everything that is
+        // about to save — a batch counted out loud, not run together, so he can
+        // tell three things from four before he taps.
+        const list = Array.isArray(data.actions) ? data.actions : []
+        say(list.length > 1
+          ? `About to do ${list.length} things. ` +
+            list.map((a, i) => `${i + 1}. ${a.summary}.`).join(' ') +
+            ' Tap confirm to save all of it, or cancel.'
+          : `About to: ${data.summary}. Tap confirm to save it, or cancel.`, true)
         // The confirm card is its own UI, not a bubble — but the model still
         // has to SEE that it already proposed this, or the next turn re-asks
         // for fields it just collected (or re-proposes a cancelled write).
@@ -241,12 +270,21 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
       const r = await fetch('/api/assistant-execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-        body: JSON.stringify({ tool: p.tool, args: p.args, tz: new Date().getTimezoneOffset() }),
+        // Send both shapes: `actions` is what the server runs, tool/args keeps
+        // an older deployed function working if the bundle is ahead of it.
+        body: JSON.stringify({
+          actions: (p.actions || []).map((a) => ({ tool: a.tool, args: a.args })),
+          tool: p.tool,
+          args: p.args,
+          tz: new Date().getTimezoneOffset(),
+        }),
       })
       const data = await r.json().catch(() => ({}))
       const outcome = r.ok ? (data.message || 'Done ✓') : (data.error || "Couldn't do that.")
       pushMsg({ role: 'assistant', text: outcome })
-      say(outcome)
+      // Full length again: when a batch stops halfway, what saved and what
+      // didn't is the single most important thing he can hear.
+      say(outcome, true)
       if (r.ok) {
         if (typeof onDataChanged === 'function') onDataChanged() // refresh dashboard money after a confirmed write
         if (activity) loadActivity()
@@ -412,6 +450,9 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
   }
 
   if (!open) {
+    // Controlled: the parent's nav is the button, so don't stack a second one
+    // on top of it.
+    if (controlled) return null
     return (
       <button
         onClick={() => setOpen(true)}
@@ -428,7 +469,10 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 950, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.4)' }} onClick={() => setOpen(false)}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: '#F7F8FA', borderTopLeftRadius: 18, borderTopRightRadius: 18, height: '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* As a destination it takes the whole screen — a sheet with the old
+          dashboard peeking out above it still reads as "a helper on top of the
+          real app," which is the opposite of the point. */}
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#F7F8FA', borderTopLeftRadius: controlled ? 0 : 18, borderTopRightRadius: controlled ? 0 : 18, height: controlled ? '100%' : '82vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* header */}
         <div style={{ background: NAVY, color: 'white', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -470,8 +514,19 @@ export default function AssistantPanel({ onDataChanged, role = 'owner' }) {
               )}
               {pending && (
                 <div style={{ alignSelf: 'flex-start', maxWidth: '92%', background: '#FFF4ED', border: `1px solid ${ORANGE}`, borderRadius: 14, padding: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: ORANGE, marginBottom: 4, letterSpacing: 0.3 }}>ABOUT TO:</div>
-                  <div style={{ fontSize: 14, color: NAVY, marginBottom: 10 }}>{pending.summary}</div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: ORANGE, marginBottom: 4, letterSpacing: 0.3 }}>
+                    {pending.actions && pending.actions.length > 1 ? `ABOUT TO DO ${pending.actions.length} THINGS:` : 'ABOUT TO:'}
+                  </div>
+                  {/* A batch gets one line per action, not one run-on sentence.
+                      This card is the last thing read before it saves, so what
+                      is about to happen has to be countable at a glance. */}
+                  {pending.actions && pending.actions.length > 1 ? (
+                    <ol style={{ fontSize: 14, color: NAVY, margin: '0 0 10px', paddingLeft: 20, lineHeight: 1.45 }}>
+                      {pending.actions.map((a, i) => <li key={i} style={{ marginBottom: 3 }}>{a.summary}</li>)}
+                    </ol>
+                  ) : (
+                    <div style={{ fontSize: 14, color: NAVY, marginBottom: 10 }}>{pending.summary}</div>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={confirmAction} disabled={busy} style={{ flex: 1, padding: '9px', border: 'none', borderRadius: 9, background: ORANGE, color: 'white', fontWeight: 700, cursor: 'pointer' }}>Confirm</button>
                     <button onClick={cancelAction} disabled={busy} style={{ flex: 1, padding: '9px', border: '1px solid #d1d5db', borderRadius: 9, background: 'white', color: NAVY, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>

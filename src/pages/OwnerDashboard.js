@@ -41,6 +41,32 @@ const localToday = () => {
 // Now it's ONE row of four tabs, and each tab stacks its sections down the page
 // (collapsible, each with a count) — the pattern Square, Notion, and iOS
 // Settings all landed on: one axis of navigation, then scroll.
+// Every table that holds something the owner put in, in the order a person
+// would look for it. Add a table here the day you add one to the app —
+// an export that misses a section is the one thing worse than no export.
+const EXPORT_TABLES = [
+  ['projects', 'Jobs'],
+  ['receipts', 'Receipts'],
+  ['time_entries', 'Crew hours'],
+  ['mileage_entries', 'Mileage'],
+  ['estimates', 'Estimates'],
+  ['invoices', 'Invoices'],
+  ['change_orders', 'Extras & change orders'],
+  ['schedule_entries', 'Schedule'],
+  ['daily_logs', 'Daily notes'],
+  ['job_photos', 'Photos'],
+  ['job_documents', 'Documents'],
+  ['permits', 'Permits & inspections'],
+  ['material_items', 'Shopping lists'],
+  ['punch_items', 'Fix-it lists'],
+  ['warranties', 'Callbacks & warranty work'],
+  ['compliance_items', 'Insurance & licenses'],
+  ['time_off_requests', 'Time off'],
+  ['paychecks', 'Crew pay'],
+  ['project_workers', 'Who was on which job'],
+  ['worker_invites', 'Crew invites'],
+  ['profiles', 'People (you and your crew)'],
+]
 const PROJECT_TABS = [
   { key: 'work', label: 'Work' },
   { key: 'plan', label: 'Plan' },
@@ -74,7 +100,9 @@ const NAV_BUCKET = {
   jobs: 'jobs', calendar: 'jobs',
   money: 'money', estimates: 'money', invoices: 'money', clients: 'money', insights: 'money', reports: 'money',
   crew: 'crew', workers: 'crew', payroll: 'crew', crewweek: 'crew',
-  more: 'more', compliance: 'more', warranties: 'more', settings: 'more',
+  // "More" lost its nav slot to Ask and now hangs off Home, so everything
+  // inside it lights Home instead of a button that no longer exists.
+  more: 'home', compliance: 'home', warranties: 'home', settings: 'home',
 }
 const HubCard = ({ icon, title, sub, onClick }) => (
   <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 'var(--tap)' }} onClick={onClick} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}>
@@ -259,6 +287,7 @@ function JobPhoto({ path, alt, style, onClick, signedUrl }) {
 
 export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [activeTab, setActiveTab] = useState('home')
+  const [assistantOpen, setAssistantOpen] = useState(false)
   const [projects, setProjects] = useState([])
   const [removingSample, setRemovingSample] = useState(false) // demo-job cleanup in flight
   // Social proof. The ask only ever fires after a REAL job closes in the black —
@@ -1702,6 +1731,68 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     showToast('QuickBooks customers exported ✓')
   }
 
+  // "Download everything I have" — the whole account, one file.
+  //
+  // No owner_id / project_id filters anywhere in here, on purpose. Every table
+  // already carries owner-scoped RLS, so a plain select returns exactly the rows
+  // this owner is allowed to see and nothing else. Scoping it a second time by
+  // hand would only create a way for the two rules to disagree — and an export
+  // that quietly drops a table is worse than no export, because it looks
+  // complete. RLS is the app's own definition of "your data"; this uses it.
+  const exportEverything = async () => {
+    setLoading(true)
+    try {
+      const rows = []
+      rows.push(['JOBTALLY — EVERYTHING ON YOUR ACCOUNT'])
+      rows.push(['Company', profile.company_name || ''])
+      rows.push(['Account', profile.email || ''])
+      rows.push(['Generated', new Date().toLocaleString()])
+      rows.push([])
+      rows.push(['This is every record on your account, one section per kind.'])
+      rows.push(['Photos and uploaded documents are listed with their web links; the image files themselves are not inside this file.'])
+      rows.push([])
+
+      let failed = 0
+      for (const [table, label] of EXPORT_TABLES) {
+        let data
+        try {
+          data = await fetchAllRows((from, to) => supabase.from(table).select('*').range(from, to))
+        } catch (e) {
+          // Never let one bad table silently shrink the export — say so in the
+          // file itself, where the owner (or their accountant) will see it.
+          rows.push([`=== ${label.toUpperCase()} ===`])
+          rows.push([`Could not be read — email support@getjobtally.com and we'll send this part.`])
+          rows.push([])
+          failed++
+          continue
+        }
+        rows.push([`=== ${label.toUpperCase()} ===`, `${(data || []).length} record${(data || []).length === 1 ? '' : 's'}`])
+        if (!data || !data.length) {
+          rows.push(['(none)'])
+          rows.push([])
+          continue
+        }
+        // Union of every key present, so a row with an extra column can't shift
+        // every following cell one place to the left.
+        const cols = []
+        data.forEach(r => Object.keys(r).forEach(k => { if (!cols.includes(k)) cols.push(k) }))
+        rows.push(cols)
+        data.forEach(r => rows.push(cols.map(c => {
+          const v = r[c]
+          if (v == null) return ''
+          return typeof v === 'object' ? JSON.stringify(v) : String(v)
+        })))
+        rows.push([])
+      }
+
+      downloadCsv(rows, `jobtally-my-data-${todayLocal()}.csv`)
+      showToast(failed ? `Downloaded — ${failed} part(s) unavailable` : 'Downloaded ✓', failed ? 'error' : undefined)
+    } catch (e) {
+      showToast('Could not build the file — try again', 'error')
+    }
+    setLoading(false)
+  }
+
   // A full, accountant-ready summary for the year: income from completed jobs,
   // deductible expenses broken out by category, labor, mileage, and sales tax.
   const exportTaxPack = async () => {
@@ -2773,6 +2864,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
         {activeTab === 'more' && (
           <div>
+            <BackBtn label="Home" onClick={() => setActiveTab('home')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
             <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
             <HubCard icon="🔧" title="Callbacks & warranty work" sub="Post-job follow-ups and fixes under warranty" onClick={() => setActiveTab('warranties')} />
@@ -2805,6 +2897,35 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <h3 style={{ marginBottom: '4px' }}>Subscription & billing</h3>
               <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>Manage your plan, payment method, and invoices.</p>
               <button className="btn-secondary" onClick={() => { window.location.assign('?billing') }} style={{ width: '100%' }}>Manage subscription & plan</button>
+            </div>
+            {/* Your data. An owner putting every receipt and every hour of his
+                business into someone else's hands is entitled to a straight
+                answer about where it goes — and to walk out with all of it.
+                Written plainly on purpose: this is the part people actually
+                read before they trust you. */}
+            <div className="card">
+              <h3 style={{ marginBottom: '4px' }}>Your data</h3>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>Where it's kept, and how to take it with you.</p>
+              <ul style={{ fontSize: '13px', color: '#4B5563', lineHeight: '1.55', margin: '0 0 14px', paddingLeft: '18px' }}>
+                <li style={{ marginBottom: '6px' }}>Everything you enter — jobs, receipts, hours, photos, invoices — is stored on servers in the <b>United States</b>.</li>
+                <li style={{ marginBottom: '6px' }}><b>No other company can see any of it.</b> The database checks who's asking on every single request, so one business can never read another's jobs, clients, crew or files.</li>
+                <li style={{ marginBottom: '6px' }}>Receipt photos are read by Claude to pull out the store and the total, so you don't have to type them. That's the only thing the picture is used for.</li>
+                <li style={{ marginBottom: '6px' }}>Card numbers are handled by <b>Stripe</b> and never touch JobTally.</li>
+                <li style={{ marginBottom: '6px' }}><b>We don't sell your data, to anyone, ever.</b></li>
+                <li>Cancelling doesn't erase anything — your records stay put.</li>
+              </ul>
+              <button className="btn-secondary" onClick={exportEverything} disabled={loading} style={{ width: '100%', margin: 0 }}>
+                {loading ? 'Gathering…' : '⬇ Download everything I have'}
+              </button>
+              <p style={{ fontSize: '12px', color: '#888', margin: '8px 2px 0', lineHeight: '1.5' }}>
+                One file, opens in Excel — every job, receipt, hour, invoice and estimate on your account. It's yours whether you stay or go.
+              </p>
+              <p style={{ fontSize: '12px', color: '#888', margin: '10px 2px 0', lineHeight: '1.5' }}>
+                Want it all erased instead? Email <a href="mailto:support@getjobtally.com" style={{ color: '#E07B2A', fontWeight: 600 }}>support@getjobtally.com</a> and we'll wipe the account.
+              </p>
+              <p style={{ fontSize: '12px', color: '#888', margin: '10px 2px 0' }}>
+                Full details: <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: '#E07B2A', fontWeight: 600 }}>Privacy Policy</a>
+              </p>
             </div>
             <div className="card">
               <h3 style={{ marginBottom: '4px' }}>Account</h3>
@@ -3060,6 +3181,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 </div>
               </div>
             ))}
+            {/* The old More bucket, rehomed. It's the least-visited corner of
+                the app (insurance, warranty, settings), so the bottom of Home
+                is a fairer place for it than a permanent nav slot. */}
+            <p style={sectionLabel}>Everything else</p>
+            <HubCard icon="⋯" title="More tools" sub="Insurance & licenses, callbacks, settings & billing" onClick={() => setActiveTab('more')} />
           </div>
         )}
 
@@ -3717,11 +3843,25 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
-      <AssistantPanel onDataChanged={fetchProjects} />
+      <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} onDataChanged={fetchProjects} />
       <InstallPrompt />
 
+      {/* Ask sits in the MIDDLE, raised out of the bar, because talking to it is
+          now the front door and not a shortcut. It costs no nav slot — the old
+          "More" bucket moved onto the Home screen as a hub card, where the
+          things in it (insurance, warranty, settings) actually belong. */}
       <div className="bottom-nav">
-        {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs'], ['money', '💵', 'Money'], ['crew', '👷', 'Crew'], ['more', '⋯', 'More']].map(([key, icon, label]) => (
+        {[['home', '🏠', 'Home'], ['jobs', '🔨', 'Jobs']].map(([key, icon, label]) => (
+          <button key={key} className={(NAV_BUCKET[activeTab] || 'home') === key ? 'active' : ''} onClick={() => setActiveTab(key)} aria-label={label}>
+            <span style={{ fontSize: '20px', lineHeight: '1' }}>{icon}</span>
+            <span>{label}</span>
+          </button>
+        ))}
+        <button className="nav-ask" onClick={() => setAssistantOpen(true)} aria-label="Ask JobTally">
+          <span className="nav-ask-orb">✨</span>
+          <span>Ask</span>
+        </button>
+        {[['money', '💵', 'Money'], ['crew', '👷', 'Crew']].map(([key, icon, label]) => (
           <button key={key} className={(NAV_BUCKET[activeTab] || 'home') === key ? 'active' : ''} onClick={() => setActiveTab(key)} aria-label={label}>
             <span style={{ fontSize: '20px', lineHeight: '1' }}>{icon}</span>
             <span>{label}</span>
