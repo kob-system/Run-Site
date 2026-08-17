@@ -341,7 +341,7 @@ export default function App() {
     //
     // The paywall used to be HERE: no subscription, no dashboard. It now sits at
     // the SECOND job instead (OwnerDashboard's New-job button + the RLS policies
-    // in FIX-DATABASE-25). Everyone gets in and can run one real job forever;
+    // in FIX-DATABASE-30). Everyone gets in and can run one real job forever;
     // paying is what buys the second one.
     //
     // Why the wall moved: a contractor won't pay $150/mo for something he's

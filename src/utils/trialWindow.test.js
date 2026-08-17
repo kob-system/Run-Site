@@ -1,6 +1,6 @@
 import { canStartJob, isOnFreeTier, FREE_ACTIVE_JOBS } from './trialWindow'
 
-// These assertions mirror the RLS policies in FIX-DATABASE-25 one-for-one.
+// These assertions mirror the RLS policies in FIX-DATABASE-30 one-for-one.
 // If one side changes without the other, an owner gets a button that throws —
 // so this file exists to make that drift fail here instead of in his truck.
 //
@@ -44,7 +44,7 @@ describe('free tier — one active job, forever', () => {
 
   it('keeps the free allowance at exactly one job', () => {
     // A bare constant check, on purpose: if someone bumps this to 2 they must
-    // also change active_real_jobs()'s thresholds in FIX-DATABASE-25.
+    // also change active_real_jobs()'s thresholds in FIX-DATABASE-30.
     expect(FREE_ACTIVE_JOBS).toBe(1)
   })
 

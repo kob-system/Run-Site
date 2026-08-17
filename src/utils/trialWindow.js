@@ -27,7 +27,7 @@
 // numbers, and a real job runs 2–6 weeks, so a 30-day clock expired mid-job on
 // exactly the person it was supposed to convince.
 //
-// ⚠️ MUST STAY IN LOCKSTEP WITH FIX-DATABASE-25 (the RLS policies on
+// ⚠️ MUST STAY IN LOCKSTEP WITH FIX-DATABASE-30 (the RLS policies on
 // public.projects). The client decides what to render; the DB decides what it
 // will accept. If these disagree, the user gets a button that throws.
 //

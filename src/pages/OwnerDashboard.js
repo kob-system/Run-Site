@@ -2083,7 +2083,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   //
   // `activeProjects` is already the exact set the DB counts: real jobs (sample
   // excluded) that haven't reached stage 'end'. That match is deliberate — the
-  // RLS policy in FIX-DATABASE-25 is the real gate, and if this disagreed with
+  // RLS policy in FIX-DATABASE-30 is the real gate, and if this disagreed with
   // it the owner would get a button that throws.
   //
   // Not gated when billing isn't enforced, so a dev/comp environment behaves.
