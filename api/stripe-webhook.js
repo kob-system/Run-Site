@@ -8,6 +8,7 @@
 //      redelivered event short-circuits, so we never double-apply.
 // No Stripe SDK: signature verified with node:crypto, REST via fetch.
 import crypto from 'crypto'
+import { alertOwner } from './_alert'
 
 export const config = { api: { bodyParser: false } }
 
@@ -261,6 +262,20 @@ export default async function handler(req, res) {
     return res.json({ received: true })
   } catch (err) {
     console.error('stripe-webhook handler error:', event.type, err)
+    // This is the highest-stakes failure in the app: Stripe took the money and
+    // the subscription row did NOT get written, so a customer who just paid has
+    // no access. Stripe will retry, and the upserts are idempotent, so this
+    // usually self-heals — but JP has to know it happened, because the version
+    // that does NOT self-heal looks identical from the outside.
+    // Awaited, unlike every other alert: the function is about to return and a
+    // Vercel lambda can be frozen the instant it does, killing an unawaited
+    // send. _alert.js cannot throw, so this can't mask the 500.
+    await alertOwner('stripe-webhook', `Subscription write FAILED for ${event.type}`, {
+      event: event.type,
+      event_id: event.id,
+      error: (err && err.message) || String(err),
+      impact: 'A customer may have paid and NOT have access. Stripe will retry; check Vercel logs and the subscriptions table.',
+    })
     return res.status(500).end() // 500 => Stripe retries (work was NOT recorded)
   }
 }

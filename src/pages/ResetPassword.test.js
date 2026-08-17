@@ -124,7 +124,7 @@ test('the used token is stripped from the address bar, and the confirmation surv
   // signs you in for real and the auth listener fires — used to blow the
   // confirmation away and render marketing copy instead.
   rerender(<App />)
-  await waitFor(() => expect(screen.getByText(/Password updated/i)).toBeInTheDocument())
+  expect(await screen.findByText(/Password updated/i)).toBeInTheDocument()
   expect(screen.queryByText(/Know what every job really makes/i)).not.toBeInTheDocument()
 })
 

@@ -66,6 +66,20 @@ const EXPORT_TABLES = [
   ['project_workers', 'Who was on which job'],
   ['worker_invites', 'Crew invites'],
   ['profiles', 'People (you and your crew)'],
+  // The assistant's own audit trail — every change it made for them, and who
+  // asked for it. Both of its policies are self-scoped (owner_scope or
+  // actor_id = auth.uid()), so a plain select is already their rows only.
+  ['assistant_actions', 'Things the assistant did for you'],
+  // ⚠️ THE ONE TABLE THAT NEEDS ITS OWN FILTER, and the reason the blanket
+  // "RLS already scopes this" rule below is not quite universal.
+  // testimonials carries a deliberate second SELECT policy —
+  // `testimonials_select_approved: using (approved = true)`, granted to
+  // authenticated as well as anon, so the marketing site can show quotes. That
+  // means a plain `select *` here returns every APPROVED testimonial from every
+  // other JobTally customer, and they'd land in this owner's "everything on
+  // your account" file with other contractors' names attached. The explicit
+  // owner_id filter is not redundant belt-and-braces — it is load-bearing.
+  ['testimonials', 'Your review', 'owner_id'],
 ]
 const PROJECT_TABS = [
   { key: 'work', label: 'Work' },
@@ -337,6 +351,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [inlineError, setInlineError] = useState('')
   const [settingsForm, setSettingsForm] = useState({ company_name: profile.company_name || '', full_name: profile.full_name || '' })
   const [settingsSaving, setSettingsSaving] = useState(false)
+  // Account deletion is two-step on purpose — see the card at the bottom of
+  // Settings. deleteOpen reveals the confirmation, deleteConfirm must match the
+  // account's own email before the button enables.
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState('')
+  const [deleting, setDeleting] = useState(false)
   const [reportYear, setReportYear] = useState(new Date().getFullYear())
   const [jobForm, setJobForm] = useState({ name: '', client_name: '', client_phone: '', client_email: '', client_address: '', materials_budget: '', labor_budget: '', profit_target: '' })
   const [receiptForm, setReceiptForm] = useState({ description: '', store: '', amount: '', tax: '', category: 'materials', photo_url: '', purchase_date: '' })
@@ -428,6 +448,35 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       showToast('Could not save. Check your connection and try again.', 'error')
     } finally {
       setSettingsSaving(false)
+    }
+  }
+
+  // Erase the account for real. The server re-checks everything this screen
+  // checks (it never trusts the client with a destructive call), so the button
+  // state here is a courtesy, not the gate.
+  const deleteAccount = async () => {
+    setDeleting(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/delete-account', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session && session.access_token}`,
+        },
+        body: JSON.stringify({ confirmEmail: deleteConfirm.trim() }),
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok || !out.ok) throw new Error(out.error || 'Delete failed')
+      // The login no longer exists, so there is nothing to sign out of and no
+      // screen left to render. Clear the local session and go to the front
+      // door — anything else leaves the app querying as a deleted user and
+      // throwing 401s at somebody who just left on good terms.
+      await supabase.auth.signOut().catch(() => {})
+      window.location.assign('/?deleted=1')
+    } catch (e) {
+      showToast(e.message || 'Could not delete your account. Try again.', 'error')
+      setDeleting(false)
     }
   }
 
@@ -1733,12 +1782,20 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
 
   // "Download everything I have" — the whole account, one file.
   //
-  // No owner_id / project_id filters anywhere in here, on purpose. Every table
-  // already carries owner-scoped RLS, so a plain select returns exactly the rows
+  // Almost no owner_id / project_id filters in here, on purpose. Nearly every
+  // table carries owner-scoped RLS, so a plain select returns exactly the rows
   // this owner is allowed to see and nothing else. Scoping it a second time by
   // hand would only create a way for the two rules to disagree — and an export
   // that quietly drops a table is worse than no export, because it looks
   // complete. RLS is the app's own definition of "your data"; this uses it.
+  //
+  // THE EXCEPTION, and it matters: "what RLS lets you read" and "your data" are
+  // not always the same set. A table with a deliberate public-read policy —
+  // testimonials, whose approved rows are visible to everyone so the marketing
+  // site can quote them — would pour other customers' rows into this file. Any
+  // table like that carries an explicit filter column as its third entry in
+  // EXPORT_TABLES. Before adding a table here, read its policies and ask
+  // whether SELECT is scoped to this owner or wider than them.
   const exportEverything = async () => {
     setLoading(true)
     try {
@@ -1749,14 +1806,19 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       rows.push(['Generated', new Date().toLocaleString()])
       rows.push([])
       rows.push(['This is every record on your account, one section per kind.'])
-      rows.push(['Photos and uploaded documents are listed with their web links; the image files themselves are not inside this file.'])
+      rows.push(['Photos and documents have a "download_link" column. Those links open the real file, and they expire 7 days after this file was made — re-download this export any time to get fresh ones.'])
       rows.push([])
 
       let failed = 0
-      for (const [table, label] of EXPORT_TABLES) {
+      for (const [table, label, ownerCol] of EXPORT_TABLES) {
         let data
         try {
-          data = await fetchAllRows((from, to) => supabase.from(table).select('*').range(from, to))
+          data = await fetchAllRows((from, to) => {
+            const q = supabase.from(table).select('*')
+            // Only set on tables whose SELECT policy is wider than this owner —
+            // see the note on EXPORT_TABLES.
+            return (ownerCol ? q.eq(ownerCol, profile.id) : q).range(from, to)
+          })
         } catch (e) {
           // Never let one bad table silently shrink the export — say so in the
           // file itself, where the owner (or their accountant) will see it.
@@ -1772,12 +1834,44 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
           rows.push([])
           continue
         }
+        // Turn the stored file reference into something the owner can actually
+        // open. photo_url / file_url hold a PATH inside the private `receipts`
+        // bucket, not a URL — the bucket stopped being public in
+        // FIX-DATABASE-4. Exporting the raw column handed people a string that
+        // looks like a link, isn't one, and 404s: the export claimed to give
+        // them their photos and gave them nothing. Sign them instead.
+        // 7 days is Supabase's practical ceiling for a signed URL and it's the
+        // right trade here — long enough to hand the file to an accountant,
+        // short enough that a CSV emailed around isn't a permanent public key
+        // to every receipt photo in the business.
+        const linkCol = table === 'job_documents' ? 'file_url' : table === 'job_photos' ? 'photo_url' : null
+        const links = new Map()
+        if (linkCol) {
+          // Rows written before the bucket went private still hold a full URL;
+          // those are already openable and must not be re-signed as if they
+          // were paths.
+          const paths = data.map(r => r[linkCol]).filter(u => u && !/^https?:\/\//.test(u))
+          if (paths.length) {
+            try {
+              const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 604800)
+              ;(signed || []).forEach(s => { if (s && s.path && s.signedUrl) links.set(s.path, s.signedUrl) })
+            } catch { /* fall through — the path column is still exported below */ }
+          }
+        }
+
         // Union of every key present, so a row with an extra column can't shift
         // every following cell one place to the left.
         const cols = []
         data.forEach(r => Object.keys(r).forEach(k => { if (!cols.includes(k)) cols.push(k) }))
+        if (linkCol) cols.push('download_link')
         rows.push(cols)
         data.forEach(r => rows.push(cols.map(c => {
+          if (c === 'download_link') {
+            const raw = r[linkCol]
+            if (!raw) return ''
+            if (/^https?:\/\//.test(raw)) return raw
+            return links.get(raw) || 'link unavailable — email support@getjobtally.com'
+          }
           const v = r[c]
           if (v == null) return ''
           return typeof v === 'object' ? JSON.stringify(v) : String(v)
@@ -2920,12 +3014,63 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               <p style={{ fontSize: '12px', color: '#888', margin: '8px 2px 0', lineHeight: '1.5' }}>
                 One file, opens in Excel — every job, receipt, hour, invoice and estimate on your account. It's yours whether you stay or go.
               </p>
-              <p style={{ fontSize: '12px', color: '#888', margin: '10px 2px 0', lineHeight: '1.5' }}>
-                Want it all erased instead? Email <a href="mailto:support@getjobtally.com" style={{ color: '#E07B2A', fontWeight: 600 }}>support@getjobtally.com</a> and we'll wipe the account.
-              </p>
               <p style={{ fontSize: '12px', color: '#888', margin: '10px 2px 0' }}>
                 Full details: <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: '#E07B2A', fontWeight: 600 }}>Privacy Policy</a>
               </p>
+            </div>
+            {/* Delete account. Deliberately its own card at the very bottom, and
+                deliberately not styled like the buttons above it — the download
+                is something you want people to find, this is something you want
+                people to mean. Two steps: reveal, then type your own email.
+                Nothing here is undoable, so the copy says so in the plainest
+                words available rather than hiding behind "this action cannot be
+                reversed." */}
+            <div className="card" style={{ borderColor: '#f1d4d4' }}>
+              <h3 style={{ marginBottom: '4px' }}>Delete my account</h3>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', lineHeight: '1.55' }}>
+                Erases your account and everything in it — every job, receipt, hour, photo, estimate and
+                invoice. It cannot be undone and we cannot get it back for you. <b>Download your data first
+                if you might want it.</b>
+              </p>
+              {!deleteOpen ? (
+                <button
+                  className="btn-secondary"
+                  onClick={() => setDeleteOpen(true)}
+                  style={{ width: '100%', color: '#B42318', borderColor: '#f1d4d4' }}
+                >
+                  Delete my account
+                </button>
+              ) : (
+                <div>
+                  <div className="input-group">
+                    <label htmlFor="del-confirm">Type <b>{profile.email}</b> to confirm</label>
+                    <input
+                      id="del-confirm"
+                      type="email"
+                      autoComplete="off"
+                      value={deleteConfirm}
+                      onChange={e => setDeleteConfirm(e.target.value)}
+                      placeholder={profile.email || 'your@email.com'}
+                    />
+                  </div>
+                  <button
+                    className="btn-secondary"
+                    onClick={deleteAccount}
+                    disabled={deleting || deleteConfirm.trim().toLowerCase() !== String(profile.email || '').toLowerCase()}
+                    style={{ width: '100%', background: '#B42318', color: '#fff', borderColor: '#B42318' }}
+                  >
+                    {deleting ? 'Deleting…' : 'Permanently delete everything'}
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => { setDeleteOpen(false); setDeleteConfirm('') }}
+                    disabled={deleting}
+                    style={{ width: '100%', marginTop: 8 }}
+                  >
+                    Keep my account
+                  </button>
+                </div>
+              )}
             </div>
             <div className="card">
               <h3 style={{ marginBottom: '4px' }}>Account</h3>

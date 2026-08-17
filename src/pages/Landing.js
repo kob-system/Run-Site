@@ -63,6 +63,7 @@ const HOME_FEATURE = {
     "Active jobs, open estimates and your projected profit sit right underneath it. And you're never left guessing what to do first — a setup guide walks you through your first job, your crew, your first estimate and your first invoice, ticking each step off by itself as you go.",
 }
 const INCLUDED = [
+  'Talk to it instead of tapping',
   'Crew GPS time clock',
   'Crew pay totals',
   'Estimates & invoices',
@@ -91,8 +92,12 @@ const FAQS = [
     a: 'About five minutes. When you first sign in, a setup guide walks you through your first job, your crew, your first estimate and invoice — each step checks itself off as you go.',
   },
   {
+    q: 'Do I really just talk to it?',
+    a: 'Yes. Hold the mic and say it the way you\'d say it to a foreman — "Dave was on the Miller deck six hours," "how much am I making on the Klein job" — and it does it and reads the answer back. It always shows you what it\'s about to save before it saves, so it can\'t put something in your books you didn\'t agree to. Your crew can use it too, for clocking in and logging receipts.',
+  },
+  {
     q: 'What if I want out?',
-    a: 'Cancel anytime, no contract. Your data stays yours — you can export everything to a spreadsheet whenever you want, even after you cancel your subscription.',
+    a: 'Cancel anytime, no contract. Your data stays yours — you can export everything to a spreadsheet whenever you want, even after you cancel your subscription. And if you want it all gone, there\'s a delete button in Settings that erases the whole account.',
   },
 ]
 
@@ -217,6 +222,51 @@ export default function Landing() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+      {/* The assistant. This is the one thing in JobTally that no competitor
+          has, it has been live in production since June, and until now the
+          landing page did not mention it once — a visitor could read this
+          entire page and never learn the app can be talked to.
+          No screenshot on purpose: a still frame of a chat panel is the least
+          convincing possible way to sell "you can just say it out loud." The
+          spoken sentences ARE the demo, so they're the whole section. Kept to
+          one tight band because the page's last pass was specifically about
+          not describing the product four times. */}
+      <section className="ld-say">
+        <div className="ld-inner">
+          <div className="ld-say-kicker">The part nobody else has</div>
+          <h2>Or don't tap anything. Just say it.</h2>
+          <p className="ld-say-lede">
+            Hold the mic and talk like you'd talk to a foreman. It does the work, reads the
+            answer back out loud, and shows you exactly what it's about to save before it
+            saves it. Built for a truck, a job site, and hands that aren't clean.
+          </p>
+          <div className="ld-say-list">
+            {[
+              {
+                said: '"Put Dave and Tony on the Miller deck, six hours each, and I drove fifteen miles each way."',
+                did: 'Two time entries and a mileage trip — one confirmation, all at once.',
+              },
+              {
+                said: '"How much am I actually making on the Klein bathroom?"',
+                did: 'Reads you the contract, what’s gone out in labor and materials, and what’s left.',
+              },
+              {
+                said: '"New job, Delgado basement, twenty-two thousand."',
+                did: 'Walks you through it one question at a time and creates the job.',
+              },
+            ].map((x) => (
+              <div className="ld-say-item" key={x.said}>
+                <div className="ld-say-said"><span aria-hidden="true">🎤</span> {x.said}</div>
+                <div className="ld-say-did">{x.did}</div>
+              </div>
+            ))}
+          </div>
+          <p className="ld-say-foot">
+            Your crew gets it too — they can clock in, log a receipt, or ask for a day off
+            without learning a single screen.
+          </p>
         </div>
       </section>
       {/* Why this exists — origin story / trust band */}

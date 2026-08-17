@@ -3,6 +3,14 @@ import ReactDOM from 'react-dom/client'
 import './index.css'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
+import { installGlobalErrorReporting } from './utils/reportError'
+
+// Installed before the first render so a crash during initial mount is still
+// reported. Covers what an ErrorBoundary structurally can't see: throws from
+// event handlers, timers and async callbacks, plus unhandled promise
+// rejections — the failures that leave the screen looking fine while Save
+// quietly does nothing.
+installGlobalErrorReporting()
 
 // Top-level boundary: App.js's own body (auth wiring, the billing gate, the
 // loading branches) renders OUTSIDE the per-screen <Screen> boundaries, so an
