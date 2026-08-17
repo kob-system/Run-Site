@@ -14,6 +14,19 @@
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
+  "_comment_csp": [
+    "script-src keeps 'unsafe-inline' DELIBERATELY, reviewed 2026-08-17. public/index.html",
+    "carries a load-bearing inline script (the beforeinstallprompt catcher — Chrome fires that",
+    "event before the React bundle parses, so it MUST be caught in the head; see",
+    "src/utils/installPrompt.js) plus four application/ld+json blocks that carry the site's",
+    "structured data. Dropping 'unsafe-inline' silently kills the Put-it-on-your-phone button",
+    "and the rich search results. A nonce is not available (Vercel serves these as static",
+    "files, so there is no per-request server render to inject one), and hashes would have to",
+    "be recomputed by hand on every edit — a footgun that breaks the site the first time",
+    "someone forgets. The exposure this leaves is XSS-only, and the app has no XSS sink: no",
+    "dangerouslySetInnerHTML anywhere, no eval, no innerHTML, and React escapes all",
+    "interpolation. Revisit if any of those three facts stops being true."
+  ],
   "headers": [
     {
       "source": "/(.*)",
