@@ -147,7 +147,21 @@
          parsed. A listener added inside a React effect frequently misses it,
          and then the "Add it to my phone" button has nothing to fire and never
          appears. So we stash it here, in the document head, and let the app
-         pick it up whenever it's ready (see src/utils/installPrompt.js). -->
+         pick it up whenever it's ready (see src/utils/installPrompt.js).
+
+         ⚠️ THIS SCRIPT IS WHY THE CSP KEEPS script-src 'unsafe-inline'.
+         Reviewed 2026-08-17. This block, plus the four application/ld+json
+         blocks above that carry the site's structured data, are inline by
+         necessity — this one because Chrome fires beforeinstallprompt before
+         the React bundle parses, so it cannot live in the bundle. Tightening
+         script-src silently kills the Put-it-on-your-phone button and the rich
+         search results, with no error anywhere. A nonce isn't available (Vercel
+         serves this as a static file, so there's no per-request render to
+         inject one) and hashes would need recomputing by hand on every edit —
+         a footgun that breaks the site the first time someone forgets. What
+         that leaves exposed is XSS only, and the app has no XSS sink: no
+         dangerouslySetInnerHTML anywhere, no eval, no innerHTML, and React
+         escapes every interpolation. Revisit if any of those stops being true. -->
     <script>
       (function () {
         window.__jtInstallEvent = null;
