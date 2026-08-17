@@ -324,11 +324,11 @@ export default function Login() {
           )}
 
           {stepKey === 'name' && (
-            <div className="input-group"><label htmlFor="su-name">Full Name</label><input ref={activeRef} id="su-name" type="text" autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="Josh Smith" required /></div>
+            <div className="input-group"><label htmlFor="su-name">Full Name</label><input ref={activeRef} id="su-name" type="text" autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="Mike Reynolds" required /></div>
           )}
 
           {stepKey === 'company' && (
-            <div className="input-group"><label htmlFor="su-company">Company Name</label><input ref={activeRef} id="su-company" type="text" autoComplete="organization" value={company} onChange={e => setCompany(e.target.value)} placeholder="First Class Property Services" required /></div>
+            <div className="input-group"><label htmlFor="su-company">Company Name</label><input ref={activeRef} id="su-company" type="text" autoComplete="organization" value={company} onChange={e => setCompany(e.target.value)} placeholder="Reynolds Contracting" required /></div>
           )}
 
           {stepKey === 'ownerEmail' && (

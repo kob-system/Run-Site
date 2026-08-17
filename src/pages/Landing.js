@@ -179,6 +179,14 @@ export default function Landing() {
               </span>
               New here? Start with the 2-minute introduction
             </a>
+            {/* The demo sits right under the primary CTA because it converts
+                the visitor who is NOT ready to hand over a card yet — which,
+                on a page whose trial asks for one up front, is most of them.
+                Watching a video is passive; tapping through the actual app is
+                the thing that makes someone believe it. */}
+            <a className="ld-demo-link" href="/demo" onClick={cta('hero-demo')}>
+              Or try it yourself — no signup, no card
+            </a>
             <ul className="ld-trust">
               <li>Set up in ~5 minutes</li>
               <li>Works on any phone</li>

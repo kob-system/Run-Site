@@ -193,3 +193,9 @@
 @media (min-width: 760px) {
   .ld-say-said { font-size: 17.5px; }
 }
+
+/* "Or try it yourself" — the demo link under the hero CTA. Understated on
+   purpose: it must be findable by the visitor who isn't ready to give a card,
+   without competing with the trial button for the visitor who is. */
+.ld-demo-link { display: inline-block; margin-top: 12px; color: rgba(255,255,255,0.75); font-size: 15px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.ld-demo-link:hover { color: var(--orange); }

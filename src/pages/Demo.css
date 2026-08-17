@@ -1,0 +1,115 @@
+/* /demo — interactive walkthrough.
+   Deliberately borrows the landing page's tokens (navy/orange from index.css)
+   so the demo looks like the same product, but keeps its own class prefix (dm-)
+   so nothing here can ever collide with the real dashboard's styles. */
+
+.dm { background: var(--navy); color: #fff; min-height: 100vh; line-height: 1.55; }
+
+.dm-top { position: sticky; top: 0; z-index: 50; background: var(--navy); display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.dm-logo { color: var(--orange); font-size: 20px; font-weight: 800; text-decoration: none; }
+.dm-signin { color: rgba(255,255,255,0.75); font-size: 14px; font-weight: 600; text-decoration: none; padding: 8px 10px; }
+.dm-cta-sm { background: var(--orange); color: #fff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 10px 14px; border-radius: 8px; min-height: 40px; display: inline-flex; align-items: center; }
+
+.dm-head { max-width: 720px; margin: 0 auto; padding: 40px 20px 8px; text-align: center; }
+.dm-kicker { color: var(--orange); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; margin: 0 0 10px; }
+.dm-head h1 { font-size: 30px; line-height: 1.15; margin: 0 0 10px; }
+.dm-lede { color: rgba(255,255,255,0.78); font-size: 16px; margin: 0; }
+
+.dm-stage { max-width: 1020px; margin: 0 auto; padding: 28px 20px 40px; display: grid; grid-template-columns: 1fr; gap: 32px; align-items: start; justify-items: center; }
+@media (min-width: 900px) {
+  .dm-stage { grid-template-columns: 360px 1fr; gap: 48px; justify-items: stretch; }
+}
+
+/* Phone frame. Fixed height so the tab bar sits at the bottom like a real app
+   and the body scrolls inside it, rather than the whole page growing. */
+.dm-phone { width: 100%; max-width: 360px; background: #0d1520; border: 10px solid #0d1520; border-radius: 34px; box-shadow: 0 18px 50px rgba(0,0,0,0.45); overflow: hidden; }
+.dm-screen { background: #f4f6f9; color: #1C2B3A; border-radius: 24px; overflow: hidden; height: 620px; display: flex; flex-direction: column; }
+
+.dm-appbar { background: var(--navy); color: #fff; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.dm-appbar-name { font-weight: 700; font-size: 15px; }
+.dm-appbar-tag { font-size: 10px; font-weight: 800; letter-spacing: .1em; background: var(--orange); color: #fff; padding: 3px 7px; border-radius: 5px; }
+
+.dm-body { flex: 1; overflow-y: auto; padding: 14px; -webkit-overflow-scrolling: touch; }
+.dm-body-ask { display: flex; flex-direction: column; padding: 0; }
+
+.dm-owed { background: var(--navy); color: #fff; border-radius: 14px; padding: 16px; text-align: center; }
+.dm-owed-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,0.65); font-weight: 700; }
+.dm-owed-value { font-size: 34px; font-weight: 800; line-height: 1.1; margin-top: 2px; }
+.dm-owed-sub { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 2px; }
+
+.dm-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.dm-stats > div { background: #fff; border: 1px solid #e3e8ef; border-radius: 12px; padding: 10px; text-align: center; }
+.dm-stats b { display: block; font-size: 19px; font-weight: 800; }
+.dm-stats span { font-size: 11px; color: #6B7280; }
+
+.dm-section-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: #6B7280; margin: 16px 0 8px; }
+
+.dm-jobcard { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid #e3e8ef; border-radius: 12px; padding: 12px; margin-bottom: 8px; cursor: pointer; font: inherit; color: inherit; }
+.dm-jobcard:hover { border-color: var(--orange); }
+.dm-jobcard-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.dm-jobcard-name { font-weight: 700; font-size: 14px; }
+.dm-jobcard-profit { font-weight: 800; font-size: 15px; color: #16A34A; white-space: nowrap; }
+.dm-jobcard-sub { display: flex; justify-content: space-between; font-size: 12px; color: #6B7280; margin-top: 3px; }
+.dm-neg { color: #DC2626 !important; }
+
+.dm-hint { font-size: 12px; color: #94a3b8; text-align: center; margin: 14px 0 4px; }
+
+.dm-back { background: none; border: none; color: #2F73B8; font-weight: 700; font-size: 14px; padding: 0 0 8px; cursor: pointer; font-family: inherit; }
+.dm-jobhead h3 { margin: 0; font-size: 17px; }
+.dm-jobhead p { margin: 2px 0 12px; font-size: 13px; color: #6B7280; }
+
+.dm-profit { background: #fff; border: 1px solid #e3e8ef; border-radius: 14px; padding: 14px; text-align: center; }
+.dm-profit-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #6B7280; font-weight: 700; }
+.dm-profit-value { font-size: 30px; font-weight: 800; color: #16A34A; line-height: 1.15; }
+.dm-profit-sub { font-size: 12px; color: #6B7280; }
+
+.dm-line { background: #fff; border: 1px solid #e3e8ef; border-radius: 12px; padding: 12px; margin-top: 10px; }
+.dm-line-plain { color: #4B5563; }
+.dm-line-top { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; }
+.dm-line-top i { font-style: normal; color: #94a3b8; font-weight: 600; }
+.dm-bar { height: 8px; background: #eef1f5; border-radius: 5px; overflow: hidden; margin-top: 8px; }
+.dm-bar-fill { height: 100%; border-radius: 5px; transition: width .45s ease; }
+.dm-bar-over { background: #DC2626; }
+
+.dm-flag { background: #fbf1ee; border-left: 3px solid #c0492b; color: #7a2e1c; font-size: 12.5px; border-radius: 8px; padding: 10px 12px; margin-top: 10px; line-height: 1.5; }
+
+/* Ask */
+.dm-thread { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.dm-empty { text-align: center; color: #94a3b8; font-size: 13px; margin: auto 0; }
+.dm-empty-mic { font-size: 34px; margin-bottom: 8px; }
+.dm-msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; font-size: 13.5px; line-height: 1.5; }
+.dm-msg-you { align-self: flex-end; background: var(--navy); color: #fff; border-bottom-right-radius: 4px; }
+.dm-msg-app { align-self: flex-start; background: #fff; border: 1px solid #e3e8ef; border-bottom-left-radius: 4px; }
+.dm-thinking { color: #94a3b8; font-style: italic; }
+
+.dm-confirm { align-self: flex-start; width: 92%; background: #fff; border: 2px solid var(--orange); border-radius: 14px; padding: 12px; }
+.dm-confirm-h { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--orange); }
+.dm-confirm ul { margin: 8px 0 10px; padding-left: 18px; font-size: 13px; line-height: 1.55; }
+.dm-confirm-btns { display: flex; gap: 8px; }
+.dm-btn { flex: 1; background: var(--orange); color: #fff; border: none; border-radius: 9px; padding: 11px; font-weight: 700; font-size: 14px; cursor: pointer; font-family: inherit; min-height: 44px; }
+.dm-btn-ghost { flex: 0 0 78px; background: #fff; color: #6B7280; border: 1px solid #dfe4ea; border-radius: 9px; padding: 11px; font-weight: 700; font-size: 14px; cursor: pointer; font-family: inherit; min-height: 44px; }
+.dm-confirm-state { font-size: 13px; font-weight: 700; color: #16A34A; }
+
+.dm-suggest { flex-shrink: 0; border-top: 1px solid #e3e8ef; background: #fff; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.dm-chip { text-align: left; background: #f4f6f9; border: 1px solid #e3e8ef; border-radius: 10px; padding: 9px 11px; font-size: 12.5px; line-height: 1.4; cursor: pointer; font-family: inherit; color: #1C2B3A; min-height: 44px; }
+.dm-chip:hover:not(:disabled) { border-color: var(--orange); }
+.dm-chip:disabled { opacity: .5; cursor: default; }
+.dm-chip-used { color: #94a3b8; }
+
+.dm-tabs { flex-shrink: 0; display: grid; grid-template-columns: repeat(3, 1fr); background: #fff; border-top: 1px solid #e3e8ef; }
+.dm-tab { background: none; border: none; padding: 13px 0; font-size: 13px; font-weight: 700; color: #94a3b8; cursor: pointer; font-family: inherit; min-height: 46px; border-top: 3px solid transparent; }
+.dm-tab-on { color: var(--orange); border-top-color: var(--orange); }
+
+/* Side rail */
+.dm-side { max-width: 460px; }
+.dm-side h2 { font-size: 21px; margin: 0 0 12px; }
+.dm-steps { margin: 0 0 22px; padding-left: 20px; color: rgba(255,255,255,0.8); font-size: 15px; line-height: 1.65; }
+.dm-steps li { margin-bottom: 9px; }
+.dm-steps b { color: #fff; }
+.dm-cta { display: inline-flex; align-items: center; justify-content: center; background: var(--orange); color: #fff; font-size: 17px; font-weight: 700; text-decoration: none; padding: 15px 28px; border-radius: 10px; min-height: 48px; }
+.dm-cta:hover { background: var(--orange-dark); }
+.dm-fine { font-size: 13px; color: rgba(255,255,255,0.6); margin: 10px 0 0; }
+.dm-fine a { color: var(--orange); font-weight: 700; }
+
+.dm-foot { text-align: center; padding: 0 20px 44px; }
+.dm-foot a { color: rgba(255,255,255,0.65); font-size: 14px; text-decoration: none; }
