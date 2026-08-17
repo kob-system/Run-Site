@@ -93,6 +93,25 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, error: 'Invalid email' })
   }
 
+  // Per-RECIPIENT cap, and the per-IP cap above cannot substitute for it.
+  // The abuse this endpoint actually enables isn't volume, it's targeting:
+  // anyone can make getjobtally.com send mail to an address they chose, and
+  // rotating IPs (trivial — any proxy pool) resets the per-IP bucket while
+  // hammering one victim's inbox. Two a day per address means the worst
+  // available attack is two emails, no matter how many IPs are thrown at it.
+  // That protects the victim and, more selfishly, protects the sending
+  // reputation of the domain every JobTally transactional email rides on.
+  // Keyed by the lowercased address so casing tricks don't mint a new bucket.
+  const addrKey = crypto.createHash('sha256').update('lead-addr:' + addr.toLowerCase()).digest('hex')
+  const addrUuid = `${addrKey.slice(0, 8)}-${addrKey.slice(8, 12)}-${addrKey.slice(12, 16)}-${addrKey.slice(16, 20)}-${addrKey.slice(20, 32)}`
+  if (!(await allowedRate(addrUuid, 'lead-addr', 2, 86400))) {
+    // Deliberately reported as success. Telling a caller "that address is over
+    // its limit" turns this into an oracle for whether someone already
+    // requested their numbers, and a real visitor who double-taps Send should
+    // not be shown an error for it.
+    return res.json({ success: true })
+  }
+
   const r = results || {}
   const contract = money(r.contract)
   const labor = money(r.labor)

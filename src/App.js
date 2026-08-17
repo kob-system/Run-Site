@@ -4,6 +4,7 @@ import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import { track, trackOnce, setAnalyticsUser, EV } from './utils/analytics'
 import { seedSampleJob } from './utils/sampleJob'
 import { legacyFreeDaysLeft } from './utils/trialWindow'
+import { setErrorContext } from './utils/reportError'
 import { isRecoveryUrl } from './utils/recoveryUrl'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
@@ -95,24 +96,13 @@ export default function App() {
     captureAttribution()
   }, [])
 
-  // Global safety net for errors that escape React's render tree — unhandled
-  // promise rejections (failed fetches, async handlers) and uncaught runtime
-  // errors. Logged here; structured so a telemetry sink could report them later
-  // without touching every call site. The ErrorBoundary handles render errors.
-  useEffect(() => {
-    const onError = (event) => {
-      console.error('Global error:', event.error || event.message)
-    }
-    const onRejection = (event) => {
-      console.error('Unhandled promise rejection:', event.reason)
-    }
-    window.addEventListener('error', onError)
-    window.addEventListener('unhandledrejection', onRejection)
-    return () => {
-      window.removeEventListener('error', onError)
-      window.removeEventListener('unhandledrejection', onRejection)
-    }
-  }, [])
+  // NOTE: the global 'error' / 'unhandledrejection' safety net used to live here
+  // as a console.error-only handler. It moved to installGlobalErrorReporting()
+  // in src/index.js (2026-08-17) so that it (a) actually emails JP instead of
+  // logging into a browser nobody is watching, and (b) is installed BEFORE the
+  // first render, which this effect could not be — a crash during initial mount
+  // fired before the listener existed and went unreported. Do not re-add it
+  // here; two listeners means two reports for one bug.
 
   const fetchProfile = async (user) => {
     setLoadError(false)
@@ -185,6 +175,11 @@ export default function App() {
       if (data && data.role === 'owner') await seedSampleJob(supabase, data)
 
       setProfile(data)
+
+      // So a crash email names a customer JP can call, not just a stack trace.
+      // Id and role only — never the email or the name; the id is enough to
+      // find them in Supabase and keeps customer PII out of an alert inbox.
+      setErrorContext(data && data.id, data && data.role)
 
       if (data) trackOnce(EV.APP_OPENED, { role: data.role })
 

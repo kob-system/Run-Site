@@ -1,9 +1,9 @@
 import React from 'react'
+import { reportError } from '../utils/reportError'
 
 // App-wide error boundary. A single render error anywhere below this used to
 // white-screen the whole paid app; now it shows a clean recovery screen with a
-// Reload instead. Structured so telemetry could report the error later — the
-// componentDidCatch hook is the hook point.
+// Reload instead — and, since 2026-08-17, it also tells JP it happened.
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props)
@@ -15,9 +15,12 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    // Best-effort log. A telemetry sink (Sentry/LogRocket/etc.) can hook in here
-    // later without touching the render path.
     console.error('Render error caught by ErrorBoundary:', error, info)
+    // Tell JP. Fire-and-forget and internally incapable of throwing — a
+    // reporter that can fail here would turn a recoverable screen into a loop.
+    reportError('react-render', error, {
+      component: String((info && info.componentStack) || '').trim().split('\n')[0] || '',
+    })
   }
 
   render() {
