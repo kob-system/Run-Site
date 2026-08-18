@@ -445,6 +445,28 @@ export default function Landing() {
               </div>
             ))}
           </div>
+          {/* The full FAQ and the trust page are real URLs a stranger can read
+              before signing up — and the ones a skeptical contractor goes
+              looking for. Buried in the footer they were effectively hidden. */}
+          <p className="ld-faq-more">
+            <a href="/faq/">Every question, answered in full</a> · <a href="/your-data/">What happens to your data</a>
+          </p>
+        </div>
+      </section>
+      {/* Free calculator — the give-before-you-ask page. It lived only as an
+          anchor two thirds down /remodelers (one partner's flyer page), so the
+          home page never sent anyone to the one thing a contractor will use
+          before he trusts us. */}
+      <section className="ld-calc-strip">
+        <div className="ld-inner">
+          <h2>Not ready to sign up? Run your last job through it.</h2>
+          <p>
+            Contract price, hours, materials, overhead — thirty seconds and you'll see what that
+            job really made. Free, no signup, no card.
+          </p>
+          <a className="ld-cta" href="/calculator" onClick={cta('calculator')}>
+            Open the free profit calculator
+          </a>
         </div>
       </section>
       {/* Final CTA */}
@@ -461,7 +483,7 @@ export default function Landing() {
       </section>
 
       <footer className="ld-footer">
-        <a href="/login">Sign in</a>·<a href="/remodelers">For remodelers</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
+        <a href="/login">Sign in</a>·<a href="/faq/">FAQ</a>·<a href="/calculator">Profit calculator</a>·<a href="/your-data/">Your data</a>·<a href="/remodelers">For remodelers</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
         <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
       </footer>
     </div>

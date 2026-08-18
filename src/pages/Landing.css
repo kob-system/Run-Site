@@ -145,6 +145,16 @@
 .ld-faq-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; }
 .ld-faq-item h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
 .ld-faq-item p { font-size: 15px; color: var(--text-secondary); }
+.ld-faq-more { max-width: 720px; margin: 18px auto 0; text-align: center; font-size: 15px; }
+.ld-faq-more a { color: var(--orange); font-weight: 600; text-decoration: none; }
+.ld-faq-more a:hover { text-decoration: underline; }
+
+/* Free-calculator strip — the give-before-you-ask offer for a visitor who is
+   not signing up today. Deliberately quieter than the final CTA under it so it
+   reads as an alternative, not a competing ask. */
+.ld-calc-strip { background: var(--orange-tint); text-align: center; }
+.ld-calc-strip h2 { font-size: clamp(20px, 3.5vw, 26px); font-weight: 800; max-width: 620px; margin: 0 auto; }
+.ld-calc-strip p { font-size: 15px; color: var(--text-secondary); max-width: 520px; margin: 12px auto 0; }
 
 /* Final CTA + footer */
 .ld-final { background: var(--navy); color: #fff; text-align: center; }
