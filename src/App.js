@@ -25,6 +25,9 @@ const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
 // Public, self-contained, and lazily loaded like every other screen — the demo's
 // sample data and CSS must never ride in the bundle a paying customer downloads.
 const Demo = React.lazy(() => import('./pages/Demo'))
+// Same reasoning: a marketing page must never ride in the bundle a paying
+// customer downloads.
+const Calculator = React.lazy(() => import('./pages/Calculator'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
 const ResetPassword = React.lazy(() => import('./pages/ResetPassword'))
@@ -222,6 +225,12 @@ export default function App() {
   // without it reading or writing a single row of their real account.
   if (path === '/demo') {
     return <Screen><Demo /></Screen>
+  }
+  // /calculator is the free job-profit calculator on its own URL. Public and
+  // logged-out-safe like the two above: it computes entirely in the browser and
+  // only touches Supabase if a visitor asks for their numbers by email.
+  if (path === '/calculator') {
+    return <Screen><Calculator /></Screen>
   }
 
   // Password recovery beats every other branch, including a live session. The
