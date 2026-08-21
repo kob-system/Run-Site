@@ -888,7 +888,7 @@ export default function WorkerDashboard({ profile }) {
             {projects.length === 0 && !currentEntry && clockReady && (
               <div className="empty-state">
                 <p style={{ fontWeight: '700', color: '#1C2B3A', marginBottom: '4px' }}>You’re on the crew ✓</p>
-                <p>Your boss picks which job you’re on — once he does, your Clock In button turns on right here. Nothing else for you to do.</p>
+                <p>Your boss picks which job you’re on. Once he does, your Clock In button turns on right here. Nothing else for you to do.</p>
               </div>
             )}
 

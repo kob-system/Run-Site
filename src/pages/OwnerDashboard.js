@@ -1007,7 +1007,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const inviteMessage = (name, link) => {
     const who = (name || '').trim().split(/s+/)[0]
     return (
-      `${who ? who + ' - ' : ''}use this to clock in and out from your phone. ` +
+      `${who ? who + ', ' : ''}use this to clock in and out from your phone. ` +
       `You'll see your own hours and what they add up to, so you get paid for ` +
       `exactly what you worked. One tap, no password, nothing to download:
 ${link}`
@@ -2827,7 +2827,7 @@ ${link}`
                   ) : (
                     <>
                       <h3 style={{ marginBottom: '4px', fontSize: '15px' }}>Link ready for {inviteName} 🎉</h3>
-                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. One tap and he’s on your crew — no password, nothing to download. If you’ve only got one job running he lands right on the clock; otherwise tap <b>Assign</b> on his card first.</p>
+                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. One tap and he’s on your crew, no password, nothing to download. If you’ve only got one job running he lands right on the clock. Otherwise tap <b>Assign</b> on his card first.</p>
                       <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button type="button" onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
@@ -3648,7 +3648,7 @@ ${link}`
                 ) : (
                   <>
                     <h3 style={{ marginBottom: '4px' }}>Link ready for {inviteName} 🎉</h3>
-                    <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. He taps it once and he’s on your crew — no password to make up, nothing to download. We’ll write the text for you.</p>
+                    <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. He taps it once and he’s on your crew. No password to make up, nothing to download, and we’ll write the text for you.</p>
                     <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
@@ -3659,7 +3659,7 @@ ${link}`
               </div>
             )}
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
-              Add a worker with an invite link above — he taps it once and he’s on, no password. If you’ve only got one job running he’s put on it automatically; with more than one, tap <b>Assign</b> on his card to say which, and that’s what lets him clock in.
+              Add a worker with an invite link above. He taps it once and he’s on, no password. If you’ve only got one job running he’s put on it automatically. With more than one, tap <b>Assign</b> on his card to say which, and that’s what lets him clock in.
             </p>
             {/* Who has a link and hasn't used it yet. This is the "did Mike
                 ever sign up?" answer, and the re-send button that goes with it

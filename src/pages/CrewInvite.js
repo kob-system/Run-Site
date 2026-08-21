@@ -109,7 +109,7 @@ export default function CrewInvite({ token, onJoined, onUseForm }) {
         otpError = retry.error
       }
       if (otpError) {
-        setError("Almost — that didn't take. Tap the link your boss sent you one more time.")
+        setError("Almost. That didn't take, so tap the link your boss sent you one more time.")
         setJoining(false)
         return
       }
@@ -201,7 +201,7 @@ export default function CrewInvite({ token, onJoined, onUseForm }) {
         <p style={{ color: '#4B5563', fontSize: '15px', margin: 0 }}>
           {returning
             ? 'Tap below and you’re straight back into your hours. Same as always, no password.'
-            : 'This is how you clock in and out from your own phone — and how you check what you’re owed without asking anybody.'}
+            : 'This is how you clock in and out from your own phone, and how you check what you’re owed without asking anybody.'}
         </p>
 
         {hasVideo && (
@@ -242,8 +242,8 @@ export default function CrewInvite({ token, onJoined, onUseForm }) {
         </div>
 
         <p style={{ color: '#6B7280', fontSize: '12.5px', margin: '16px 2px 0', lineHeight: 1.45, textAlign: 'center' }}>
-          Nothing to download. No password to make up. It&rsquo;s free for you, forever &mdash;
-          your boss pays for it.
+          Nothing to download. No password to make up. It&rsquo;s free for you, forever. Your boss
+          pays for it.
         </p>
 
         {/* The escape hatch. Rare, but a worker who needs one and finds no door
@@ -264,7 +264,7 @@ export default function CrewInvite({ token, onJoined, onUseForm }) {
       <div style={bar}>
         <div style={barInner}>
           {error && <div className="alert-danger" style={{ marginBottom: '8px' }}>{error}</div>}
-          {cta(returning ? 'Get me back in' : firstName ? `Yep, that’s me — let’s go` : 'Join the crew')}
+          {cta(returning ? 'Get me back in' : firstName ? `Yep, that’s me. Let’s go` : 'Join the crew')}
         </div>
       </div>
     </div>
