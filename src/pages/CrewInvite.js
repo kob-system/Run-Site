@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { track, EV } from '../utils/analytics'
+import { saveCrewKey } from '../utils/crewKey'
 
 // THE SCREEN EVERY CREW MEMBER IS GUARANTEED TO SEE.
 //
@@ -21,7 +22,7 @@ import { track, EV } from '../utils/analytics'
 // Then it asks for one tap. api/join-invite.js does the rest server-side; the
 // owner already typed his name when he made the link, so there is nothing left
 // for the worker to type.
-export default function CrewInvite({ token, onJoined, onUseForm }) {
+export default function CrewInvite({ token, onJoined, onUseForm, onDeadToken }) {
   // undefined = still resolving, null = lookup failed outright.
   const [invite, setInvite] = useState(undefined)
   const [joining, setJoining] = useState(false)
@@ -64,6 +65,16 @@ export default function CrewInvite({ token, onJoined, onUseForm }) {
       } catch { /* no video, no problem */ }
     })()
   }, [])
+
+  // A token that came from storage rather than the URL has to be thrown away
+  // once the server says it's dead, or the worker's home-screen icon opens on
+  // "this link has expired" every single time, forever, with no way back to the
+  // rest of the site. Only fires on a DEFINITIVE answer: invite === null means
+  // the lookup itself failed, which is usually just a bad signal, and deleting
+  // his only credential over a dropped request would be the worse bug.
+  useEffect(() => {
+    if (invite && !invite.valid && !invite.rejoinable && onDeadToken) onDeadToken()
+  }, [invite, onDeadToken])
 
   const join = async () => {
     setJoining(true)
@@ -113,7 +124,18 @@ export default function CrewInvite({ token, onJoined, onUseForm }) {
         setJoining(false)
         return
       }
-      if (!data.returning) track(EV.SIGNUP_COMPLETED, { role: 'worker', via: 'one_tap_invite' })
+      // Keep his token on his own phone. With no password this link is the only
+      // thing that can sign him in again, and "go find the text your boss sent
+      // six weeks ago" is not a recovery path a crew member completes.
+      saveCrewKey(token)
+      if (!data.returning) {
+        track(EV.SIGNUP_COMPLETED, { role: 'worker', via: 'one_tap_invite' })
+        // Brand new, so the next screen he sees is the home-screen step rather
+        // than the dashboard. Set here and not in App.js because this is the
+        // only place that knows the difference between a first join and a
+        // returning worker tapping his link again on a phone he already set up.
+        try { localStorage.setItem('jt_crew_firstrun', '1') } catch { /* private mode */ }
+      }
       // Success is a re-render into WorkerDashboard, driven by the auth state
       // change. Deliberately leave `joining` true so the button stays in its
       // working state for the split second before this screen unmounts.

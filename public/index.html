@@ -9,6 +9,17 @@
     <meta name="keywords" content="job costing app, contractor profit tracking, crew time tracking app, construction job costing, receipt scanning app for contractors, contractor app" />
     <link rel="canonical" href="https://www.getjobtally.com/" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
+    <!-- iPhone home-screen behaviour. Without these, "Add to Home Screen" makes
+         a plain Safari bookmark: it opens with the address bar and the tab
+         strip, which reads as a web page and not as the app the crew was told
+         they were getting. With them it launches full screen off the icon,
+         which is the entire point of asking a worker to install it.
+         The apple-mobile-web-app-title is what sits under the icon; without it
+         iOS uses the <title>, and ours is a 60-character SEO string. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="JobTally" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta property="og:title" content="JobTally — know what every job really makes" />
     <meta property="og:description" content="Crew GPS clock-in and clock-out, receipt scanning, live per-job profit, estimates and invoices — from the phone in your pocket. One job free, forever — no card." />
     <meta property="og:image" content="https://www.getjobtally.com/og-card.png" />

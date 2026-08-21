@@ -18,7 +18,8 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": ".",
+  "_start_url_note": "Absolute, not '.'. A relative start_url resolves against wherever the manifest was fetched from, so a crew member who installed while sitting on /?invite=<token> could get an icon pointed at a spent link. '/' always lands on the root, which knows how to route a worker with a saved crew key straight back to his clock.",
+  "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
   "theme_color": "#1C2B3A",

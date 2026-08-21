@@ -55,6 +55,10 @@ const mockFetch = (url, opts) => {
 beforeEach(() => {
   inviteReply = { valid: true, workerName: 'Mike Reyes', companyName: 'First Class Property Services' }
   global.fetch = jest.fn(mockFetch)
+  // A saved crew key changes what the ROOT renders, so it has to be cleared
+  // between tests or the landing-page assertions start failing for a reason
+  // that has nothing to do with what they're testing.
+  localStorage.clear()
 })
 
 // jsdom's location can't be assigned, but history.pushState moves it fine.
@@ -106,6 +110,33 @@ test('a dead invite link still gives the worker a way in', async () => {
   render(<App />)
   expect(await screen.findByText(/link has expired/i, {}, ROUTE_LOAD)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /already have a login/i })).toBeInTheDocument()
+})
+
+// --- The passwordless crew member's way back in ----------------------------
+// A crew account has no password and no reachable email, so a saved invite token
+// is the only thing that can re-authenticate one. These two pin the behaviour
+// that makes a home-screen icon worth installing: tapping it when the session
+// has expired lands on "welcome back", not on marketing copy aimed at his boss.
+
+test('a saved crew key turns the root into a one-tap way back in', async () => {
+  localStorage.setItem('jt_crew_key', 'saved-token')
+  inviteReply = { valid: false, rejoinable: true, workerName: 'Mike Reyes', companyName: 'First Class Property Services' }
+  goTo('/')
+  render(<App />)
+  expect(await screen.findByText(/still on the/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /get me back in/i })).toBeInTheDocument()
+  expect(screen.queryByText(/Know what every job really makes/i)).not.toBeInTheDocument()
+})
+
+test('a revoked crew key is thrown away instead of stranding him', async () => {
+  // Otherwise his home-screen icon opens on "expired" forever, with no route
+  // back to the rest of the site.
+  localStorage.setItem('jt_crew_key', 'revoked-token')
+  inviteReply = { valid: false, rejoinable: false, revoked: true }
+  goTo('/')
+  render(<App />)
+  expect(await screen.findByText(/Know what every job really makes/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(localStorage.getItem('jt_crew_key')).toBeNull()
 })
 
 // --- Routing: the landing page belongs at the ROOT and nowhere else ---------
