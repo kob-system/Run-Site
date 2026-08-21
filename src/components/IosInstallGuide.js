@@ -191,8 +191,8 @@ function StepConfirm() {
 const STEPS = [
   { n: 1, Art: StepDots, title: 'Tap the •••', body: <>Bottom <strong>right</strong> corner of Safari, next to the web address.</> },
   { n: 2, Art: StepShare, title: 'Tap “Share”', body: <>It's in the menu that slides up.</> },
-  { n: 3, Art: StepAddToHome, title: 'Tap “Add to Home Screen”', body: <><strong>Scroll down</strong> — it's below the row of apps. Still don't see it? Tap <strong>More</strong> at the bottom of the list.</> },
-  { n: 4, Art: StepConfirm, title: 'Tap “Add”', body: <>Top right corner. That's it — JobTally is on your phone.</> },
+  { n: 3, Art: StepAddToHome, title: 'Tap “Add to Home Screen”', body: <><strong>Scroll down</strong>, it's below the row of apps. Still don't see it? Tap <strong>More</strong> at the bottom of the list.</> },
+  { n: 4, Art: StepConfirm, title: 'Tap “Add”', body: <>Top right corner. That's it, JobTally is on your phone.</> },
 ]
 
 export default function IosInstallGuide() {
@@ -215,7 +215,7 @@ export default function IosInstallGuide() {
       <div style={{ fontSize: 12.5, color: '#9ca3af', lineHeight: 1.5 }}>
         <strong>Older iPhone?</strong> If you see the Share arrow right in the bottom bar, tap that
         and skip to step 3. On an iPad, Share sits at the <strong>top</strong>. And if there's no
-        ••• at all, you're in Facebook or Instagram's built-in browser — tap their ••• and choose{' '}
+        ••• at all, you're in Facebook or Instagram's built-in browser. Tap their ••• and choose{' '}
         <strong>Open in Safari</strong> first.
       </div>
     </div>

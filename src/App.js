@@ -6,6 +6,7 @@ import { seedSampleJob } from './utils/sampleJob'
 import { legacyFreeDaysLeft, FREE_ACTIVE_JOBS } from './utils/trialWindow'
 import { setErrorContext } from './utils/reportError'
 import { isRecoveryUrl } from './utils/recoveryUrl'
+import { readCrewKey, clearCrewKey } from './utils/crewKey'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
@@ -30,6 +31,11 @@ const Demo = React.lazy(() => import('./pages/Demo'))
 const Calculator = React.lazy(() => import('./pages/Calculator'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
+// The crew's front door. Split out like every other screen — an owner signing
+// in should never download the worker-invite pitch.
+const CrewInvite = React.lazy(() => import('./pages/CrewInvite'))
+// The home-screen step, shown once to a brand-new crew member.
+const CrewInstall = React.lazy(() => import('./components/CrewInstall'))
 const ResetPassword = React.lazy(() => import('./pages/ResetPassword'))
 
 // Single Suspense fallback for every code-split screen, so each return site can
@@ -58,6 +64,20 @@ export default function App() {
   // every render would kick the user off the "Password updated" confirmation and
   // onto the landing page the instant they succeeded.
   const [recovering] = useState(isRecoveryUrl)
+  // Escape hatch off the one-tap crew screen: "Not Mike? / I already have a
+  // login" falls back to the old email+password form, invite token and all.
+  // Kept as state rather than a URL flag so a refresh returns to one-tap,
+  // which is the path we actually want people on.
+  const [inviteWantsForm, setInviteWantsForm] = useState(false)
+  // A passwordless crew member's saved invite token (utils/crewKey.js). Read
+  // once at mount: it's how a worker who tapped his home-screen icon gets back
+  // in without a password, an email, or his boss.
+  const [crewKey, setCrewKey] = useState(readCrewKey)
+  // Set by CrewInvite the moment a brand-new worker joins. Owned as state so
+  // finishing the step re-renders straight into the dashboard.
+  const [crewFirstRun, setCrewFirstRun] = useState(() => {
+    try { return localStorage.getItem('jt_crew_firstrun') === '1' } catch { return false }
+  })
 
   useEffect(() => {
     // onAuthStateChange fires INITIAL_SESSION immediately with the stored session
@@ -248,6 +268,42 @@ export default function App() {
     // entries already in the wild — /?signup=1 (marketing CTAs) and
     // /?invite=<token> (worker invite links texted by owners).
     const params = new URLSearchParams(window.location.search)
+    // A worker-invite link gets the crew screen, not the login form: it is the
+    // one screen every crew member is guaranteed to see, and it's where the app
+    // finally gets pitched to the person being asked to use it. One tap and
+    // api/join-invite.js builds the account — no name, no email, no password.
+    //
+    // A saved crew key takes the same road. That is the point of the whole
+    // home-screen push: a worker taps his icon, the session has expired, and
+    // instead of the contractor marketing page he gets "Welcome back, Mike" and
+    // one button. Scoped to the bare root so /demo, /pricing and the rest of the
+    // public site still work normally for someone who happens to have a key.
+    const resumeToken =
+      inviteToken ||
+      (path === '/' && crewKey && !params.has('signup') ? crewKey : null)
+    if (resumeToken && !inviteWantsForm) {
+      return (
+        <Screen>
+          <CrewInvite
+            token={resumeToken}
+            onJoined={() => {
+              // Strip the token the instant we commit to signing in, so the
+              // new session doesn't land on the signed-in handoff screen below.
+              const url = new URL(window.location.href)
+              url.searchParams.delete('invite')
+              window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+              setInviteToken(null)
+            }}
+            onUseForm={() => setInviteWantsForm(true)}
+            onDeadToken={() => {
+              // Only a SAVED key gets dropped. A dead token in the URL is the
+              // boss's problem to re-send, and the screen already says so.
+              if (!inviteToken) { clearCrewKey(); setCrewKey(null) }
+            }}
+          />
+        </Screen>
+      )
+    }
     const wantsAuth =
       path === '/login' ||
       params.has('signup') ||
@@ -293,7 +349,26 @@ export default function App() {
   if (new URLSearchParams(window.location.search).has('metrics')) {
     return <Screen><FounderMetrics /></Screen>
   }
-  if (profile?.role === 'worker') return <Screen><WorkerDashboard profile={profile} /></Screen>
+  if (profile?.role === 'worker') {
+    // One screen, once, at the only moment he is going to say yes to it: he has
+    // just tapped a button and something good happened. Left to the dashboard's
+    // floating nudge, a crew member skips it and then re-finds a URL every
+    // morning until he quits using it. Skipping is one tap, deliberately.
+    if (crewFirstRun) {
+      return (
+        <Screen>
+          <CrewInstall
+            workerName={profile.full_name}
+            onDone={() => {
+              try { localStorage.removeItem('jt_crew_firstrun') } catch { /* private mode */ }
+              setCrewFirstRun(false)
+            }}
+          />
+        </Screen>
+      )
+    }
+    return <Screen><WorkerDashboard profile={profile} /></Screen>
+  }
   if (profile) {
     const enforced = process.env.REACT_APP_BILLING_ENFORCED === 'true'
     const wantsBilling =

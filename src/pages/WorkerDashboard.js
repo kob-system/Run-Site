@@ -880,8 +880,16 @@ export default function WorkerDashboard({ profile }) {
               </p>
             </div>
 
+            {/* The first thing a new crew member sees when his boss has two
+                jobs running (with one, join-invite.js puts him on it and this
+                never shows). The old copy read like his signup had failed and
+                he'd done something wrong. He hasn't — he's on the crew and the
+                remaining step is his boss's, so say that. */}
             {projects.length === 0 && !currentEntry && clockReady && (
-              <div className="empty-state"><p>No jobs assigned yet. Ask your boss to assign you to a job.</p></div>
+              <div className="empty-state">
+                <p style={{ fontWeight: '700', color: '#1C2B3A', marginBottom: '4px' }}>You’re on the crew ✓</p>
+                <p>Your boss picks which job you’re on. Once he does, your Clock In button turns on right here. Nothing else for you to do.</p>
+              </div>
             )}
 
             {projects.length > 0 && (
