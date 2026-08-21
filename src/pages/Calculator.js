@@ -102,9 +102,9 @@ export default function Calculator() {
       <section className="rl-final">
         <h2>Know the number while you can still do something about it.</h2>
         <p>Setup takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('final')}>Start your 30-day free trial</a>
+        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('final')}>Start free — no card</a>
         <div className="rl-cta-note">
-          $0 charged today &mdash; 30 days free, cancel anytime. Or{' '}
+          No card, ever, on one job. Or{' '}
           <a href="/demo" onClick={cta('demo')}>tap through the demo first</a>.
         </div>
       </section>

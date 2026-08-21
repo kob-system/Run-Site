@@ -3,7 +3,7 @@ import { supabase } from './supabaseClient'
 import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import { track, trackOnce, setAnalyticsUser, EV } from './utils/analytics'
 import { seedSampleJob } from './utils/sampleJob'
-import { legacyFreeDaysLeft } from './utils/trialWindow'
+import { legacyFreeDaysLeft, FREE_ACTIVE_JOBS } from './utils/trialWindow'
 import { setErrorContext } from './utils/reportError'
 import { isRecoveryUrl } from './utils/recoveryUrl'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -336,7 +336,22 @@ export default function App() {
     // utils/trialWindow.js). The DB enforces the identical rule on writes
     // (public.has_app_access, FIX-DATABASE-24) — the client decides what to
     // render, the DB decides what it will accept.
-    const hasAccess = active || legacyFreeDaysLeft(profile) !== null
+    // FREE FOREVER, ONE ACTIVE JOB (2026-08-11) — this is why nobody is stopped
+    // at the door any more.
+    //
+    // The paywall used to be HERE: no subscription, no dashboard. It now sits at
+    // the SECOND job instead (OwnerDashboard's New-job button + the RLS policies
+    // in FIX-DATABASE-30). Everyone gets in and can run one real job forever;
+    // paying is what buys the second one.
+    //
+    // Why the wall moved: a contractor won't pay $150/mo for something he's
+    // never watched work on his own numbers — trying it IS the sale. And a real
+    // job runs 2–6 weeks, so a 30-day clock ran out mid-job on exactly the guy
+    // it was meant to convince.
+    //
+    // The 30-day card trial is untouched and still the better deal (unlimited
+    // jobs), so `active` stays first — this only changes who gets turned away.
+    const hasAccess = active || legacyFreeDaysLeft(profile) !== null || FREE_ACTIVE_JOBS > 0
 
     // Only when enforcement is ON: wait for the subscription read before
     // deciding, so we never flash the dashboard and then yank it to a paywall.

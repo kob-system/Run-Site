@@ -156,13 +156,13 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
           // load — the card trial replaced the no-card window, so this is a
           // welcome screen, not a cutoff. A RETURNING owner (`status` exists but
           // isn't active) really is cut off, and gets the old heading.
-          ? (status ? 'Start your subscription to continue' : 'Start your 30-day free trial')
+          ? (status ? 'Pick up where you left off' : 'Start free — no card')
           : 'Your subscription'}
       </h3>
       {activeSub ? (
         <p style={{ color: '#667085', marginTop: 0 }}>
           {status === 'trialing'
-            ? 'You’re on your free trial'
+            ? 'You’re on the free plan'
             : status === 'past_due'
             ? 'Your last payment didn’t go through — update your card to avoid interruption'
             : 'Your subscription is active'}
@@ -173,17 +173,21 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
         </p>
       ) : status ? (
         // A prior sub row exists but it's not active (canceled / unpaid /
-        // expired) — a RETURNING owner, not a new account. The 30-day free trial
-        // is for new accounts only, so don't promise it again here.
+        // expired) — a RETURNING owner, not a new account. Since 2026-08-11 this
+        // is NOT a lockout: they drop to the free plan and keep running one job.
+        // Saying "restore full access" at someone who still has access reads as
+        // a scare tactic, and they'll find out it's untrue in about ten seconds.
         <p style={{ color: '#667085', marginTop: 0 }}>
-          Your subscription isn’t active. Resubscribe below to restore full access — billing starts today
-          (the free trial is for new accounts only). Your data is safe and you can cancel anytime from Manage billing.
+          You’re on the <strong>free plan</strong> — one job at a time, for as long as you want, and all your
+          data is right where you left it. Subscribe below to run as many jobs at once as you like. Billing
+          starts today (the one job free, forever is for new accounts only) and you can cancel anytime.
         </p>
       ) : (
         <p style={{ color: '#667085', marginTop: 0 }}>
-          <strong>30 days free</strong>, <strong>$0 charged today</strong>. You put a card on Stripe's secure checkout so
-          the app doesn't shut off on you mid-job. Billing starts on day 31. Cancel before then from Manage billing and
-          you're never charged.
+          <strong>One job is free, forever</strong>, with <strong>no card</strong>. A subscription is what lets you run more
+          than one job at the same time. Billing starts the day you subscribe, through Stripe's secure checkout.
+          Cancel anytime from Manage billing and you drop straight back to the
+          <strong> free plan: one job at a time, forever</strong>. Nothing is ever deleted and nothing shuts off mid-job.
         </p>
       )}
 

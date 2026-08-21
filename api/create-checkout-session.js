@@ -82,9 +82,8 @@ export default async function handler(req, res) {
     // Look up this owner's existing subscription row (if any). It decides three
     // things: reuse the Stripe customer on a re-subscribe (no duplicate
     // customer); block a duplicate checkout when a plan is already live; and
-    // grant the 30-day trial ONLY to an owner who has never subscribed before.
+    // and block a duplicate checkout when a plan is already live.
     let existingCustomer = null
-    let hadPriorSub = false
     let rows
     try {
       rows = await sbGet(
@@ -102,7 +101,6 @@ export default async function handler(req, res) {
     const row = rows && rows[0]
     if (row) {
       if (row.stripe_customer_id) existingCustomer = row.stripe_customer_id
-      if (row.stripe_subscription_id) hadPriorSub = true
       // 'comp' is a grandfathered/free grant — block checkout too, so a comp'd
       // owner can't start a paid subscription that the webhook would upsert on
       // top of (and silently overwrite) their comp status.
@@ -124,16 +122,30 @@ export default async function handler(req, res) {
       success_url: `${APP_URL}/?billing=success`,
       cancel_url: `${APP_URL}/?billing=cancel`,
     }
-    // First-time subscribers get a 30-day free trial. An owner who has had a
-    // subscription before (cancelled or lapsed) re-subscribes with no new trial,
-    // so the trial can't be farmed by cancel-and-resubscribe.
-    // 30, not 7, because a contractor's job runs 2-6 weeks — a 7-day trial ended
-    // before the app could ever show them what a finished job made.
-    // This IS the trial now: the app-side no-card window is retired, so a new
-    // owner hits the paywall on first load and their 30 free days come from
-    // Stripe holding a card and charging $0 until day 31. Nothing else grants
-    // access (see src/utils/trialWindow.js + public.has_app_access).
-    if (!hadPriorSub) params['subscription_data[trial_period_days]'] = '30'
+    // NO TRIAL. Removed 2026-08-20 on JP's call: the free tier IS the trial now.
+    //
+    // The old shape was a 30-day card trial — enter a card at signup, get billed
+    // on day 31. That is gone because "one active job, free, forever" replaces it
+    // and is a better offer in every direction: no card at the door, no clock
+    // that can expire mid-job, and the contractor gets to watch the app work on
+    // his OWN numbers before he ever pays. Trying it IS the sale.
+    //
+    // So by the time anyone reaches this checkout they have already had the
+    // product for free, for as long as they wanted, and are here because they
+    // want to run a SECOND job at the same time. Handing them another 30 free
+    // days at that point delays real revenue by a month and muddies the pitch
+    // ("free forever" and "30 days free" cannot both be the headline).
+    //
+    // Stacking both was considered and rejected — it meant a customer could be
+    // 60+ days in before a single dollar moved.
+    //
+    // The prior-subscription flag this used to need is gone with it. Reusing the
+    // stored stripe_customer_id (above) is what still prevents duplicate Stripe
+    // customers on a re-subscribe; that is unrelated to trials.
+    //
+    // ⚠️ If you ever re-add a trial here, the landing page, /pricing, /faq and
+    // their JSON-LD FAQ schema all have to change back with it. They currently
+    // promise "no card, one job free forever" and nothing about a trial.
     if (ref) {
       // On the subscription so it persists for the life of the plan (used for
       // recurring commission), and on the session for immediate visibility.
