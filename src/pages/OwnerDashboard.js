@@ -385,6 +385,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [inviteName, setInviteName] = useState('')
   const [inviteLink, setInviteLink] = useState('')
   const [inviteCopied, setInviteCopied] = useState(false)
+  // Live (unclaimed, unrevoked) invite links. Without this the owner had no
+  // idea who he'd sent a link to and who had actually joined — the link was
+  // shown once and then gone forever, so "did Mike ever sign up?" had no
+  // answer and re-sending meant making a second link for the same guy.
+  const [openInvites, setOpenInvites] = useState([])
   // Worker time-off requests (owner approves / denies)
   const [timeOff, setTimeOff] = useState([])
   const [punchInput, setPunchInput] = useState('')
@@ -509,6 +514,24 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       showToast('Failed to load workers', 'error')
     }
   }, [profile.id])
+
+  // Every invite this owner has made that nobody has claimed yet. RLS scopes
+  // the read to him, so no owner filter is needed here.
+  const fetchOpenInvites = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('worker_invites')
+        .select('id, token, worker_name, created_at')
+        .is('used_at', null)
+        .is('revoked_at', null)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setOpenInvites(data || [])
+    } catch {
+      // Non-fatal: the list just doesn't render. Never block the Workers tab.
+      setOpenInvites([])
+    }
+  }, [])
 
   // Which workers are assigned to at least one job. A worker can't clock in
   // until they're assigned, so the Workers tab flags anyone with zero jobs.
@@ -755,8 +778,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   }, [profile.id])
 
   useEffect(() => {
-    Promise.all([fetchProjects(), fetchWorkers(), fetchTimeOff(), fetchAssignments()]).finally(() => setInitialLoading(false))
-  }, [fetchProjects, fetchWorkers, fetchTimeOff, fetchAssignments])
+    Promise.all([fetchProjects(), fetchWorkers(), fetchTimeOff(), fetchAssignments(), fetchOpenInvites()]).finally(() => setInitialLoading(false))
+  }, [fetchProjects, fetchWorkers, fetchTimeOff, fetchAssignments, fetchOpenInvites])
 
   useEffect(() => {
     if (workers.length) fetchWorkerStats(workers)
@@ -949,9 +972,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     }
   }
 
-  // Generate a one-time invite link the owner texts to a new hire. The
-  // worker opens `/?invite=<token>`, sets a password, and is auto-linked
-  // to this owner — no typing the boss's email, no orphaned accounts.
+  // Generate the invite link the owner texts to a new hire. The worker opens
+  // `/?invite=<token>`, taps one button, and is on the crew — the account is
+  // built server-side from this row (api/join-invite.js), so he never types a
+  // name, an email, or a password. That's why the name field here matters: what
+  // the owner puts in is what the worker's account is called.
   const createInvite = async () => {
     if (!inviteName.trim()) { setInlineError('Enter the worker’s name first.'); return }
     setLoading(true)
@@ -967,6 +992,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       track(EV.WORKER_INVITED)
       setInviteLink(`${window.location.origin}/?invite=${token}`)
       setInviteCopied(false)
+      fetchOpenInvites()
     } catch (e) {
       setInlineError('Could not create the invite. Try again.')
     } finally {
@@ -974,15 +1000,59 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     }
   }
 
-  const copyInvite = async () => {
+  // What actually gets texted. A bare URL is the owner's problem to explain,
+  // and he explains it as "sign up for the app" — which is the sentence the
+  // crew says no to. So we write the text for him, in the words that work:
+  // not what the app is, what the worker gets out of tapping it.
+  const inviteMessage = (name, link) => {
+    const who = (name || '').trim().split(/s+/)[0]
+    return (
+      `${who ? who + ' - ' : ''}use this to clock in and out from your phone. ` +
+      `You'll see your own hours and what they add up to, so you get paid for ` +
+      `exactly what you worked. One tap, no password, nothing to download:
+${link}`
+    )
+  }
+
+  const copyInvite = async (name = inviteName, link = inviteLink) => {
+    const text = inviteMessage(name, link)
+    // On a phone this opens the share sheet straight into Messages, which is
+    // the actual job: get the link into a text to that guy. Falls back to the
+    // clipboard on desktop, and to the on-screen link if both are blocked.
+    if (navigator.share) {
+      try {
+        await navigator.share({ text })
+        setInviteCopied(true)
+        return
+      } catch {
+        // Share sheet dismissed or unavailable — fall through to clipboard.
+      }
+    }
     try {
-      await navigator.clipboard.writeText(inviteLink)
+      await navigator.clipboard.writeText(text)
       setInviteCopied(true)
-      showToast('Invite link copied ✓')
+      showToast('Message copied — paste it into a text ✓')
     } catch {
       // Clipboard blocked (older mobile browser) — the link is shown on
       // screen for a manual long-press copy; flag it as "ready" anyway.
       setInviteCopied(true)
+    }
+  }
+
+  // Kill a link. Matters more than it used to: a claimed invite is also the
+  // passwordless worker's way back in, so this is the only way to cut off a
+  // link that ended up on the wrong phone.
+  const revokeInvite = async (inv) => {
+    try {
+      const { error } = await supabase
+        .from('worker_invites')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('id', inv.id)
+      if (error) throw error
+      setOpenInvites(prev => prev.filter(i => i.id !== inv.id))
+      showToast('Link turned off ✓')
+    } catch {
+      showToast('Could not turn that link off', 'error')
     }
   }
 
@@ -2757,10 +2827,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                   ) : (
                     <>
                       <h3 style={{ marginBottom: '4px', fontSize: '15px' }}>Link ready for {inviteName} 🎉</h3>
-                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text this to {inviteName}. They tap it, set a password, and they’re on your crew — then tap <b>Assign</b> on their card to put them on a job so they can clock in.</p>
-                      <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', wordBreak: 'break-all', marginBottom: '10px' }}>{inviteLink}</div>
+                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. One tap and he’s on your crew — no password, nothing to download. If you’ve only got one job running he lands right on the clock; otherwise tap <b>Assign</b> on his card first.</p>
+                      <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button type="button" onClick={copyInvite} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Copied ✓' : 'Copy link'}</button>
+                        <button type="button" onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
                         <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
                       </div>
                     </>
@@ -3553,7 +3623,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
             {workersError && (
               <div className="alert-danger" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <span>Some crew data couldn't load.</span>
-                <button onClick={() => { fetchWorkerStats(workers); fetchAssignments(); fetchTimeOff() }} style={{ background: 'none', border: '1px solid #DC2626', color: '#DC2626', borderRadius: '8px', padding: '6px 12px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>Retry</button>
+                <button onClick={() => { fetchWorkerStats(workers); fetchAssignments(); fetchTimeOff(); fetchOpenInvites() }} style={{ background: 'none', border: '1px solid #DC2626', color: '#DC2626', borderRadius: '8px', padding: '6px 12px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>Retry</button>
               </div>
             )}
             {!showInvite && (
@@ -3578,10 +3648,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
                 ) : (
                   <>
                     <h3 style={{ marginBottom: '4px' }}>Link ready for {inviteName} 🎉</h3>
-                    <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text this link to {inviteName}. They tap it, set a password, and they’re on your crew automatically.</p>
-                    <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', wordBreak: 'break-all', marginBottom: '10px' }}>{inviteLink}</div>
+                    <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. He taps it once and he’s on your crew — no password to make up, nothing to download. We’ll write the text for you.</p>
+                    <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={copyInvite} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Copied ✓' : 'Copy link'}</button>
+                      <button onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
                       <button onClick={resetInvite} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
                     </div>
                   </>
@@ -3589,8 +3659,33 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               </div>
             )}
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
-              Add a worker with an invite link above, or they can sign up themselves and enter your email. Once they're on, tap <b>Assign</b> to put them on a job — that's what lets them clock in.
+              Add a worker with an invite link above — he taps it once and he’s on, no password. If you’ve only got one job running he’s put on it automatically; with more than one, tap <b>Assign</b> on his card to say which, and that’s what lets him clock in.
             </p>
+            {/* Who has a link and hasn't used it yet. This is the "did Mike
+                ever sign up?" answer, and the re-send button that goes with it
+                — chasing a crew member used to mean making him a second link. */}
+            {openInvites.length > 0 && (
+              <div className="card" style={{ marginBottom: '12px', border: '1px solid #F0C9A8' }}>
+                <h3 style={{ marginBottom: '2px' }}>Sent, not joined yet</h3>
+                <p style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>These links keep working until they’re used. Re-send one, or turn it off.</p>
+                {openInvites.map(inv => (
+                  <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid #f0f0f0' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '14px' }}>{inv.worker_name || 'Unnamed'}</div>
+                      <div style={{ fontSize: '12px', color: '#888' }}>Sent {new Date(inv.created_at).toLocaleDateString()}</div>
+                    </div>
+                    <button
+                      onClick={() => copyInvite(inv.worker_name, `${window.location.origin}/?invite=${inv.token}`)}
+                      style={{ background: '#E07B2A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}
+                    >Send again</button>
+                    <button
+                      onClick={() => revokeInvite(inv)}
+                      style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '8px 10px', fontSize: '13px', cursor: 'pointer' }}
+                    >Turn off</button>
+                  </div>
+                ))}
+              </div>
+            )}
             {timeOff.filter(r => r.status === 'pending').length > 0 && (
               <div className="card" style={{ marginBottom: '12px', border: '1px solid #F0C9A8' }}>
                 <h3 style={{ marginBottom: '8px' }}>Time-off requests</h3>

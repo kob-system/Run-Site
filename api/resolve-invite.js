@@ -1,7 +1,17 @@
 // Resolve an owner-generated worker-invite token to the owner it links
-// to, for the signup screen. The worker is NOT logged in yet, so this
+// to, for the crew-invite screen. The worker is NOT logged in yet, so this
 // runs with the service-role key (bypasses RLS), mirroring find-owner.js.
-// Returns only what the signup screen needs — never leaks other fields.
+// Returns only what that screen needs — never leaks other fields.
+//
+// Three states, not two, since one-tap join (api/join-invite.js) made a spent
+// link keep working:
+//   valid      — never claimed. Tapping it creates the account.
+//   rejoinable — already claimed by a worker who is still on this crew.
+//                Tapping it signs that same worker back in. This is the
+//                no-password recovery path, so it must NOT read "dead link".
+//   neither    — revoked by the owner, or claimed by someone since removed.
+// `valid` keeps its old meaning exactly, because Login.js still gates the
+// email+password fallback form on it.
 import { rateOk } from './_ratelimit'
 
 export default async function handler(req, res) {
@@ -21,11 +31,15 @@ export default async function handler(req, res) {
     const base = process.env.REACT_APP_SUPABASE_URL
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-    // Look up an UNUSED invite by token.
+    // Look the invite up in ANY state — "already used" is the re-entry case
+    // now, not a failure, and only the row itself can tell us which.
+    // select=* on purpose: naming revoked_at is a 400 until FIX-DATABASE-31
+    // has been applied, which would take every live invite link down in the
+    // gap between deploying and running the SQL. Undefined reads as "not
+    // revoked", so this works identically before and after the migration.
     const inviteUrl = `${base}/rest/v1/worker_invites` +
       `?token=eq.${encodeURIComponent(token)}` +
-      `&used_at=is.null` +
-      `&select=owner_id,worker_name`
+      `&select=*`
 
     const inviteResp = await fetch(inviteUrl, {
       headers: { apikey: key, Authorization: `Bearer ${key}` }
@@ -35,6 +49,29 @@ export default async function handler(req, res) {
     if (!invites.length) return res.json({ valid: false })
 
     const invite = invites[0]
+
+    // Revoked is a hard stop in every flow — the owner killed this link.
+    if (invite.revoked_at) return res.json({ valid: false, revoked: true })
+
+    // Spent links are rejoinable only while the worker they made is still on
+    // this owner's crew. Once he's removed the link is inert: it must not
+    // resurrect an unlinked account or mint a second one.
+    let rejoinable = false
+    let claimedName = ''
+    if (invite.used_by) {
+      const claimedResp = await fetch(
+        `${base}/rest/v1/profiles?id=eq.${invite.used_by}` +
+        `&owner_id=eq.${invite.owner_id}&select=full_name`,
+        { headers: { apikey: key, Authorization: `Bearer ${key}` } }
+      )
+      const claimed = claimedResp.ok ? await claimedResp.json() : []
+      rejoinable = claimed.length > 0
+      claimedName = (claimed[0] && claimed[0].full_name) || ''
+    }
+
+    // Burned by the OLD email+password flow (used_at set, used_by never was):
+    // that person has real credentials, so there is nothing to rejoin.
+    if (invite.used_at && !rejoinable) return res.json({ valid: false })
 
     // Fetch the owner's company name so the signup screen can say who
     // invited them ("First Class invited you").
@@ -48,9 +85,11 @@ export default async function handler(req, res) {
     const owner = owners[0] || {}
 
     res.json({
-      valid: true,
+      // Unclaimed AND not revoked. Login.js's fallback form keys off this.
+      valid: !invite.used_at,
+      rejoinable,
       ownerId: invite.owner_id,
-      workerName: invite.worker_name || '',
+      workerName: claimedName || invite.worker_name || '',
       companyName: owner.company_name || owner.full_name || 'your boss'
     })
   } catch (err) {

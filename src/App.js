@@ -30,6 +30,9 @@ const Demo = React.lazy(() => import('./pages/Demo'))
 const Calculator = React.lazy(() => import('./pages/Calculator'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
+// The crew's front door. Split out like every other screen — an owner signing
+// in should never download the worker-invite pitch.
+const CrewInvite = React.lazy(() => import('./pages/CrewInvite'))
 const ResetPassword = React.lazy(() => import('./pages/ResetPassword'))
 
 // Single Suspense fallback for every code-split screen, so each return site can
@@ -58,6 +61,11 @@ export default function App() {
   // every render would kick the user off the "Password updated" confirmation and
   // onto the landing page the instant they succeeded.
   const [recovering] = useState(isRecoveryUrl)
+  // Escape hatch off the one-tap crew screen: "Not Mike? / I already have a
+  // login" falls back to the old email+password form, invite token and all.
+  // Kept as state rather than a URL flag so a refresh returns to one-tap,
+  // which is the path we actually want people on.
+  const [inviteWantsForm, setInviteWantsForm] = useState(false)
 
   useEffect(() => {
     // onAuthStateChange fires INITIAL_SESSION immediately with the stored session
@@ -248,6 +256,28 @@ export default function App() {
     // entries already in the wild — /?signup=1 (marketing CTAs) and
     // /?invite=<token> (worker invite links texted by owners).
     const params = new URLSearchParams(window.location.search)
+    // A worker-invite link gets the crew screen, not the login form: it is the
+    // one screen every crew member is guaranteed to see, and it's where the app
+    // finally gets pitched to the person being asked to use it. One tap and
+    // api/join-invite.js builds the account — no name, no email, no password.
+    if (inviteToken && !inviteWantsForm) {
+      return (
+        <Screen>
+          <CrewInvite
+            token={inviteToken}
+            onJoined={() => {
+              // Strip the token the instant we commit to signing in, so the
+              // new session doesn't land on the signed-in handoff screen below.
+              const url = new URL(window.location.href)
+              url.searchParams.delete('invite')
+              window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+              setInviteToken(null)
+            }}
+            onUseForm={() => setInviteWantsForm(true)}
+          />
+        </Screen>
+      )
+    }
     const wantsAuth =
       path === '/login' ||
       params.has('signup') ||
