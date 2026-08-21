@@ -1,6 +1,6 @@
 // Single source of truth for the trial model on the client.
 //
-// THE MODEL (as of 2026-07-24): 30-day free trial, CARD REQUIRED at signup.
+// THE MODEL (as of 2026-07-24): one job free, forever, CARD REQUIRED at signup.
 // A new owner goes to Stripe Checkout, enters a card, and Stripe returns the
 // subscription as status='trialing' with current_period_end 30 days out. No
 // charge lands until the trial ends; they can cancel any time before that from

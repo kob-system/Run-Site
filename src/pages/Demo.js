@@ -374,9 +374,9 @@ export default function Demo() {
             <li><b>Ask</b> — say it instead of tapping it. It shows you what it's about to save, then saves it. <b>Watch the Job numbers move after you confirm.</b></li>
           </ol>
           <a className="dm-cta" href="/login?signup=1" onClick={() => track(EV.LANDING_CTA, { where: 'demo-side' })}>
-            Start your 30-day free trial
+            Start free — no card
           </a>
-          <p className="dm-fine">$0 charged today. Then $150/mo, everything included, unlimited crew.</p>
+          <p className="dm-fine">No card. One job free forever, then $150/mo for more at once — everything included, unlimited crew.</p>
           <p className="dm-fine">
             Rather see a person walk you through it? <a href="/#video">Watch the 2-minute introduction</a>.
           </p>

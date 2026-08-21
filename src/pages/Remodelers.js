@@ -7,7 +7,7 @@ import './Remodelers.css'
 // Public marketing page at /remodelers — remodelers & GCs running a 2–10 man
 // crew. Rendered before any auth check (App.js), so it works logged-out.
 // The CTA points at the REAL signup: /login opens the auth screen, ?signup=1
-// flips it to Create Account. New owners get the existing 30-day free trial,
+// flips it to Create Account. New owners get the existing one job free, forever,
 // which DOES take a card up front (see api/create-checkout-session.js — the
 // old no-card window is retired). No invented trials, no invented pricing.
 const SIGNUP_URL = '/login?signup=1'
@@ -113,10 +113,10 @@ export default function Remodelers() {
           what's left for you — from the phone already in your pocket. Built for remodelers
           and GCs with a 2–10 man crew.
         </p>
-        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start your 30-day free trial</a>
+        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free — no card</a>
         {/* Says card-required UP FRONT on purpose. The Stripe screen comes right
             after sign-up, and a card nobody warned them about is the drop point. */}
-        <div className="rl-cta-note">30 days free — $0 charged today. Card up front so it doesn't shut off on you mid-job. Then $150/mo, everything included. Cancel anytime.</div>
+        <div className="rl-cta-note">One job free, forever — no card. Card up front so it doesn't shut off on you mid-job. Then $150/mo, everything included. Cancel anytime.</div>
         {/* Flyer traffic arrives ON A PHONE, in a truck. This is the one page
             where "there's nothing to download" lands hardest — and where a guy
             who isn't ready to sign up today can still leave with the icon on
@@ -166,7 +166,7 @@ export default function Remodelers() {
             </video>
           </div>
           <div className="rl-video-after">
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start your 30-day free trial</a>
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start free — no card</a>
             <div className="rl-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
           </div>
         </div>
@@ -196,7 +196,7 @@ export default function Remodelers() {
             </video>
           </div>
           <div className="rl-video-after">
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('video')}>Start your 30-day free trial</a>
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('video')}>Start free — no card</a>
             <div className="rl-cta-note">Then follow the four steps below — you'll be running by tomorrow morning.</div>
           </div>
         </div>
@@ -214,7 +214,7 @@ export default function Remodelers() {
               <div>
                 <h3>Make your account</h3>
                 <p>
-                  Tap <strong>Start your 30-day free trial</strong>. Your name, your company name,
+                  Tap <strong>Start free — no card</strong>. Your name, your company name,
                   email and a password. That's the whole form — about two minutes.
                 </p>
               </div>
@@ -222,11 +222,11 @@ export default function Remodelers() {
             <li className="rl-step">
               <span className="rl-step-num">2</span>
               <div>
-                <h3>Put a card on file</h3>
+                <h3>Set up your first job</h3>
                 <p>
-                  <strong>$0 is charged today.</strong> The card just holds your spot so the app
-                  doesn't shut off on you in the middle of a job. 30 days free, then $150/mo —
-                  cancel anytime before day 30 and you're never billed.
+                  <strong>No card. No countdown.</strong> Your first job is free for as long as you
+                  want it, so nothing ever shuts off on you in the middle of a job. You only pay
+                  the $150/mo when you want a second job open at the same time.
                 </p>
               </div>
             </li>
@@ -258,7 +258,7 @@ export default function Remodelers() {
             That's the whole thing in about ten seconds — and that's when it clicks.
           </div>
           <div className="rl-how-cta">
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('how')}>Start your 30-day free trial</a>
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('how')}>Start free — no card</a>
           </div>
         </div>
       </section>
@@ -318,11 +318,11 @@ export default function Remodelers() {
             <ul>
               <li>Unlimited crew — no per-seat charges</li>
               <li>Every feature included, nothing gated</li>
-              <li>30 days free up front — $0 charged today, card on file</li>
+              <li>One job free, forever — no card to start</li>
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start your 30-day free trial</a>
+            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free — no card</a>
             <p className="rl-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
             </p>
@@ -334,8 +334,8 @@ export default function Remodelers() {
       <section className="rl-final">
         <h2>Know your number before the job's over.</h2>
         <p>Set up takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('final')}>Start your 30-day free trial</a>
-        <div className="rl-cta-note">Sign up, put a card on file, and nothing is charged for 30 days.</div>
+        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('final')}>Start free — no card</a>
+        <div className="rl-cta-note">Sign up and run your first job free. No card.</div>
       </section>
 
       <footer className="rl-footer">

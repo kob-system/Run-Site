@@ -3216,8 +3216,17 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
               if (daysLeft === null) return null
               const urgent = daysLeft <= 2
               // Say the charge out loud. An owner who forgot a card is on file
-              // and gets billed on day 31 is a chargeback and a bad review; one
-              // who was told the date every time they opened the app is not.
+              // and gets billed is a chargeback and a bad review; one who was
+              // told the date every time they opened the app is not.
+              //
+              // ⚠️ 2026-08-20: new checkouts NO LONGER create a trial — the free
+              // tier (one active job, forever) replaced it, and
+              // api/create-checkout-session.js no longer sends trial_period_days.
+              // This banner is deliberately kept anyway: subscriptions created
+              // BEFORE today can still be status='trialing' in Stripe, and
+              // legacyFreeDaysLeft() still covers grandfathered no-card accounts.
+              // Deleting it would silently stop warning those people before their
+              // first charge. It self-retires once both groups age out.
               const label = isCardTrial
                 ? `Free trial — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left, then billing starts`
                 : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your free trial`

@@ -9,7 +9,7 @@ import InstallButton from '../components/InstallButton'
 // visitors; logged-in users never hit it. Screenshots in /landing/* are
 // REAL app screens from the demo company (Summit Remodeling) — nothing
 // mocked up. CTAs point at the real signup: /login?signup=1 opens the
-// Create Account form. New owners get a 30-day free trial that DOES take a
+// Create Account form. New owners get a one job free, forever that DOES take a
 // card up front (Stripe trial_period_days=30, see api/create-checkout-session
 // — the old app-side no-card window is retired). Never write "no card
 // required" here: no invented trials, no invented pricing.
@@ -81,7 +81,7 @@ const INCLUDED = [
 const FAQS = [
   {
     q: 'Do I need a credit card to try it?',
-    a: 'You put a card in at signup, but you are not charged for 30 days — JobTally bills $0 during the trial, and if you cancel before day 31 you pay nothing. After that it’s $150/mo — every feature, unlimited crew.',
+    a: 'There is no card at signup. You run one job free, for as long as you want. When you need a second job open at the same time it is $150/mo — every feature, unlimited crew.',
   },
   {
     q: 'What does my crew have to do?',
@@ -171,8 +171,8 @@ export default function Landing() {
               from the phone already in your pocket. Built for contractors running a
               2–10 man crew.
             </p>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start your 30-day free trial</a>
-            <div className="ld-cta-note">Free for 30 days — $0 charged today. Then $150/mo, everything included.</div>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free — no card</a>
+            <div className="ld-cta-note">One job, free forever — no card. $150/mo when you want two at once.</div>
             <a className="ld-intro-link" href="#intro">
               <span className="ld-play" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
@@ -331,7 +331,7 @@ export default function Landing() {
             </video>
           </div>
           <div className="ld-video-after">
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start your 30-day free trial</a>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start free — no card</a>
             <div className="ld-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
           </div>
         </div>
@@ -412,7 +412,7 @@ export default function Landing() {
             <ul>
               <li>Unlimited crew — no per-seat charges</li>
               <li>Every feature included, nothing gated</li>
-              <li>30 days free up front — $0 charged today</li>
+              <li>One job free, forever — no card</li>
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime — your data stays yours, export it whenever</li>
             </ul>
@@ -426,7 +426,7 @@ export default function Landing() {
                 {INCLUDED.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start your 30-day free trial</a>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free — no card</a>
             <p className="ld-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
             </p>
@@ -473,7 +473,7 @@ export default function Landing() {
       <section className="ld-final">
         <h2>Know your number before the job's over.</h2>
         <p>Setup takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="ld-cta" href={SIGNUP_URL} onClick={cta('final')}>Start your 30-day free trial</a>
+        <a className="ld-cta" href={SIGNUP_URL} onClick={cta('final')}>Start free — no card</a>
         <a className="ld-intro-link ld-intro-link-onnavy" href="#intro">
           <span className="ld-play" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
