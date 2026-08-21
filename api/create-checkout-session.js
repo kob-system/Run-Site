@@ -13,7 +13,7 @@ const PRICES = {
   monthly: process.env.STRIPE_PRICE_MONTHLY,
   yearly: process.env.STRIPE_PRICE_YEARLY,
 }
-const APP_URL = process.env.APP_URL || 'https://runsite-pearl.vercel.app'
+const APP_URL = process.env.APP_URL || 'https://www.getjobtally.com'
 
 async function getUser(req) {
   const auth = req.headers.authorization || ''

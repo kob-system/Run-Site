@@ -11,7 +11,7 @@ import crypto from 'crypto'
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const FROM = process.env.RESEND_FROM || 'JobTally <noreply@getjobtally.com>'
-const APP_URL = process.env.APP_URL || 'https://getjobtally.com'
+const APP_URL = process.env.APP_URL || 'https://www.getjobtally.com'
 // Every calculator lead also pings the owner. Without this a lead lands in the
 // `leads` table and nobody is told — the row is only found if someone remembers
 // to go look, which in practice means the lead goes cold. Env-overridable so the
