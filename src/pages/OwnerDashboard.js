@@ -383,6 +383,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Owner-initiated worker invites (copy link, text it to the hire)
   const [showInvite, setShowInvite] = useState(false)
   const [inviteName, setInviteName] = useState('')
+  // Pay rate collected on the invite itself. Without it a worker joins at
+  // $0.00/hr, his hours cost nothing, and every job reads more profitable
+  // than it is — silently. The column already exists (FIX-DATABASE-26); the
+  // invite form was the only place never wired to it.
+  const [inviteRate, setInviteRate] = useState('')
   const [inviteLink, setInviteLink] = useState('')
   const [inviteCopied, setInviteCopied] = useState(false)
   // Live (unclaimed, unrevoked) invite links. Without this the owner had no
@@ -979,6 +984,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // the owner puts in is what the worker's account is called.
   const createInvite = async () => {
     if (!inviteName.trim()) { setInlineError('Enter the worker’s name first.'); return }
+    // Same 0–500 window api/join-invite.js enforces server-side. Checking it
+    // here too means the owner is told at the form, not after he has already
+    // texted a link that quietly drops the rate.
+    const rate = inviteRate.trim() === '' ? null : Number(inviteRate)
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 500)) {
+      setInlineError('Hourly rate has to be a number between 0 and 500.')
+      return
+    }
     setLoading(true)
     setInlineError('')
     try {
@@ -986,7 +999,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         ? crypto.randomUUID()
         : Date.now().toString(36) + Math.random().toString(36).slice(2)
       const { error } = await supabase.from('worker_invites').insert({
-        owner_id: profile.id, token, worker_name: inviteName.trim()
+        owner_id: profile.id, token, worker_name: inviteName.trim(),
+        ...(rate === null ? {} : { hourly_rate: rate })
       })
       if (error) throw error
       track(EV.WORKER_INVITED)
@@ -1057,7 +1071,7 @@ ${link}`
   }
 
   const resetInvite = () => {
-    setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('')
+    setShowInvite(false); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false); setInlineError('')
   }
 
   // Owner approves or denies a worker's time-off request.
@@ -2806,7 +2820,7 @@ ${link}`
                 <label>Worker</label>
                 <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — ${formatCurrency(w.hourly_rate)}/hr` : ''}</option>)}</select>
                 {!showInvite && (
-                  <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
+                  <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
                     {workers.length === 0 ? '+ Invite a worker to send them a link' : 'Don’t see them? + Invite a new worker'}
                   </button>
                 )}
@@ -2819,9 +2833,15 @@ ${link}`
                         <label htmlFor="time-invite-name">New worker’s name</label>
                         <input id="time-invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
                       </div>
+                      <div className="input-group" style={{ marginBottom: '8px' }}>
+                        <label htmlFor="time-invite-rate">What you pay him an hour</label>
+                        <input id="time-invite-rate" type="number" inputMode="decimal" min="0" max="500" step="0.25" value={inviteRate} onChange={e => setInviteRate(e.target.value)} placeholder="25" />
+                        <p style={{ fontSize: '12px', color: '#888', margin: '4px 0 0' }}>Leave it blank if you don’t know yet, but his hours will cost $0 until you set it on his card.</p>
+                      </div>
+                      {inlineError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{inlineError}</div>}
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button type="button" onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
-                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
                       </div>
                     </>
                   ) : (
@@ -2831,7 +2851,7 @@ ${link}`
                       <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button type="button" onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
-                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
                       </div>
                     </>
                   )}
@@ -3638,6 +3658,11 @@ ${link}`
                     <div className="input-group">
                       <label htmlFor="invite-name">Worker’s name</label>
                       <input id="invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
+                    </div>
+                    <div className="input-group">
+                      <label htmlFor="invite-rate">What you pay him an hour</label>
+                      <input id="invite-rate" type="number" inputMode="decimal" min="0" max="500" step="0.25" value={inviteRate} onChange={e => setInviteRate(e.target.value)} placeholder="25" />
+                      <p style={{ fontSize: '13px', color: '#888', margin: '4px 0 0' }}>Leave it blank if you don’t know yet, but his hours will cost $0 until you set it on his card.</p>
                     </div>
                     {inlineError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{inlineError}</div>}
                     <div style={{ display: 'flex', gap: '8px' }}>
