@@ -48,8 +48,8 @@ where proname in ('active_real_jobs', 'can_open_new_project');
 --
 -- It is 149 lines and it is the authoritative version. Copying it by hand
 -- into this file would create a second copy that drifts from the original,
--- which is a mistake this project has already made once with the Josh
--- referral PDF.
+-- which is a mistake this project has already made once, with a rendered PDF
+-- that drifted from its source.
 --
 -- After it runs, verify from anywhere with no login at all:
 --
@@ -99,7 +99,7 @@ join public.profiles p on p.id = a.user_id;
 -- 3. Leave that Chrome profile signed in. Sal reads that page every Sunday at
 --    15:05 and never needs the password again.
 --
--- 4. If subs_active is above zero, Josh is owed 30% of collected revenue,
---    life of the customer, and has been owed it for a while. His referral
---    agreement PDF was finished 2026-08-22 and never sent.
+-- 4. If subs_active is above zero, check the referral position in the private
+--    brain (work/ks-digital/LEDGER.md). There is a partner arrangement that
+--    may already be owed money, and its paperwork is still unsent.
 -- ============================================================
