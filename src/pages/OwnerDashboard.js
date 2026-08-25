@@ -591,24 +591,22 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         .not('clocked_out_at', 'is', null)
         .range(from, to))
 
+      // Crews get paid weekly, so the week is the number the owner acts on — a
+      // month-to-date figure tells him nothing about Friday, and this card was
+      // the only place in the whole app still running on a calendar month.
+      // Sunday start, local midnight, the SAME convention as weekStartKey() and
+      // the worker's own "This week" card. Two week definitions in one app show
+      // up as two numbers that never agree.
       const now = new Date()
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-      // Crews get paid weekly, so the week is the number the owner actually
-      // acts on — a month-to-date figure tells him nothing about Friday.
-      // Sunday start, local midnight, matching weekStartKey() and the worker's
-      // own "This week" card, so the two screens can never disagree.
       const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString()
 
       const stats = {}
       workerIds.forEach(id => {
         const entries = (data || []).filter(e => e.worker_id === id)
-        const monthEntries = entries.filter(e => e.clocked_in_at >= monthStart)
         const weekEntries = entries.filter(e => e.clocked_in_at >= weekStart)
         stats[id] = {
           totalMinutes: entries.reduce((s, e) => s + (e.total_minutes || 0), 0),
           totalCost: entries.reduce((s, e) => s + (e.labor_cost || 0), 0),
-          monthMinutes: monthEntries.reduce((s, e) => s + (e.total_minutes || 0), 0),
-          monthCost: monthEntries.reduce((s, e) => s + (e.labor_cost || 0), 0),
           weekMinutes: weekEntries.reduce((s, e) => s + (e.total_minutes || 0), 0),
           weekCost: weekEntries.reduce((s, e) => s + (e.labor_cost || 0), 0),
         }
@@ -3862,28 +3860,23 @@ ${link}`
                       {w.hourly_rate > 0
                         ? <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{formatCurrency(w.hourly_rate)}/hr</p>
                         : <button onClick={() => { setShowEditRate(w); setEditRate(''); setInlineError('') }} style={{ marginTop: '4px', background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '4px 10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>⚠️ Set hourly rate — their pay reads $0 until you do</button>}
-                      {/* This week leads, because that is the number that turns
-                          into a paycheck on Friday. Month sits beside it, and
-                          all-time drops to one quiet line — it was never a
-                          number anyone acts on. */}
+                      {/* This card was the ONLY place in the app running on a
+                          calendar month, so it never matched the number he was
+                          about to pay. Crew Pay is weekly, the worker's own
+                          history card is weekly, this is weekly now too. */}
                       {stats && (
-                        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
-                          <div style={{ display: 'flex', gap: '16px' }}>
-                            <div>
-                              <p style={{ fontSize: '11px', color: '#E07B2A', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px', fontWeight: '700' }}>This Week</p>
-                              <p style={{ fontSize: '19px', fontWeight: '800', color: '#1C2B3A' }}>{formatTime(stats.weekMinutes)}</p>
-                              <p style={{ fontSize: '13px', color: '#DC2626', fontWeight: '700' }}>{formatCurrency(stats.weekCost)}</p>
-                            </div>
-                            <div style={{ width: '1px', background: '#f0f0f0' }} />
-                            <div>
-                              <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>This Month</p>
-                              <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatTime(stats.monthMinutes)}</p>
-                              <p style={{ fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{formatCurrency(stats.monthCost)}</p>
-                            </div>
+                        <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                          <div>
+                            <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>This Week</p>
+                            <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatTime(stats.weekMinutes)}</p>
+                            <p style={{ fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{formatCurrency(stats.weekCost)}</p>
                           </div>
-                          <p style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '8px' }}>
-                            All time: {formatTime(stats.totalMinutes)} · {formatCurrency(stats.totalCost)}
-                          </p>
+                          <div style={{ width: '1px', background: '#f0f0f0' }} />
+                          <div>
+                            <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>All Time</p>
+                            <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatTime(stats.totalMinutes)}</p>
+                            <p style={{ fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{formatCurrency(stats.totalCost)}</p>
+                          </div>
                         </div>
                       )}
                     </div>
