@@ -30,6 +30,7 @@
 // the blast radius is one worker's own timesheet, and the owner can kill it
 // from the Workers tab (worker_invites.revoked_at) if a phone walks off.
 import { rateOk } from './_ratelimit'
+import { adoptLegacyInvite } from './_adoptLegacyInvite'
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -126,6 +127,14 @@ export default async function handler(req, res) {
     const invite = (await lookup.json())[0]
     if (!invite) return res.json({ ok: false, reason: 'invalid' })
     if (invite.revoked_at) return res.json({ ok: false, reason: 'revoked' })
+
+    // Heal an invite burned by the OLD email+password flow (used_at set,
+    // used_by NULL) by identifying the worker it made and backfilling used_by.
+    // Josh's entire existing crew is in that state, and without this they fall
+    // through to `reason: 'used'` and get sent to a login page they have no
+    // password for. See api/_adoptLegacyInvite.js.
+    const adopted = await adoptLegacyInvite(invite)
+    if (adopted) invite.used_by = adopted.id
 
     // ---- Re-entry: this link has already made an account, so sign that same
     // worker back in. Guarded on the profile still existing AND still being
