@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react'
+import React, { useState, useEffect, useRef, Suspense } from 'react'
 import { supabase } from './supabaseClient'
 import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import { track, trackOnce, setAnalyticsUser, EV } from './utils/analytics'
@@ -38,13 +38,75 @@ const CrewInvite = React.lazy(() => import('./pages/CrewInvite'))
 const CrewInstall = React.lazy(() => import('./components/CrewInstall'))
 const ResetPassword = React.lazy(() => import('./pages/ResetPassword'))
 
+// The first thing anyone sees, every single time the app opens — both while the
+// session resolves and while a code-split screen downloads. It used to be grey
+// "Loading JobTally..." on white, which reads like a page that failed rather
+// than one that is arriving. Same navy and same orange as the crew screen and
+// the dashboard, so the wait looks like part of the app.
+const Booting = () => (
+  <div style={{
+    minHeight: '100vh', background: '#1C2B3A', display: 'flex',
+    flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '18px'
+  }}>
+    <div style={{ fontSize: '30px', fontWeight: '800', letterSpacing: '-0.02em', color: 'white' }}>
+      Job<span style={{ color: '#E07B2A' }}>Tally</span>
+    </div>
+    <div style={{
+      width: '28px', height: '28px', borderRadius: '50%',
+      border: '3px solid rgba(255,255,255,0.18)', borderTopColor: '#E07B2A',
+      animation: 'jtspin 0.8s linear infinite'
+    }} />
+    <style>{'@keyframes jtspin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){*{animation:none!important}}'}</style>
+  </div>
+)
+
 // Single Suspense fallback for every code-split screen, so each return site can
 // just wrap its element in <Screen>…</Screen> instead of repeating the boilerplate.
 const Screen = ({ children }) => (
   <ErrorBoundary>
-    <Suspense fallback={<div className="loading">Loading JobTally...</div>}>{children}</Suspense>
+    <Suspense fallback={<Booting />}>{children}</Suspense>
   </ErrorBoundary>
 )
+
+// FIND THE INVITE TOKEN WHEREVER IT ENDED UP.
+//
+// This link's whole journey is a text message opened on a jobsite phone, and
+// things happen to a URL on that trip. Chat apps re-linkify it, previews rewrite
+// it, someone forwards a screenshot of it and retypes it by hand. The canonical
+// form is `/?invite=<uuid>`, and if the token is missing the app shows the
+// marketing landing page — which from the crew's seat is "I tapped the link and
+// it just brings me to the website", which is exactly what Josh's man reported
+// on 2026-08-25.
+//
+// So look in every place a token can plausibly survive, in order of how the
+// owner's Workers tab actually generates it:
+//   /?invite=TOKEN     the real one
+//   /#invite=TOKEN     apps that mangle the ? into a fragment
+//   /join/TOKEN        a short path, so a link can be read aloud or retyped
+//   /i/TOKEN           shorter still
+// Shape-checked before it is trusted: the owner mints UUIDs (crypto.randomUUID),
+// so anything that is not token-shaped is somebody else's URL and is ignored
+// rather than sent to the server as a lookup.
+const TOKEN_SHAPE = /^[A-Za-z0-9-]{8,64}$/
+function readInviteToken() {
+  try {
+    // The canonical param is taken AS-IS, deliberately. It is the form the
+    // Workers tab generates and the form every link already in the wild uses, so
+    // adding a shape check here could only ever reject a real worker's real
+    // link. The server is the thing that decides whether a token is good.
+    const qs = new URLSearchParams(window.location.search).get('invite')
+    if (qs) return qs
+
+    // A fragment never reaches the server, so this costs nothing to support.
+    const hash = window.location.hash.replace(/^#/, '')
+    const hs = new URLSearchParams(hash.includes('=') ? hash : '').get('invite')
+    if (hs && TOKEN_SHAPE.test(hs)) return hs
+
+    const m = window.location.pathname.match(/^\/(?:join|i)\/([A-Za-z0-9-]{8,64})\/?$/)
+    if (m) return m[1]
+  } catch { /* a malformed URL is just no token */ }
+  return null
+}
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -56,9 +118,7 @@ export default function App() {
   // Read once at mount, then owned by state — dismissing the handoff strips it
   // from the URL, and re-reading the querystring on every render would keep
   // resurrecting a token the visitor already declined.
-  const [inviteToken, setInviteToken] = useState(
-    () => new URLSearchParams(window.location.search).get('invite')
-  )
+  const [inviteToken, setInviteToken] = useState(readInviteToken)
   // Same deal for password recovery: the reset screen strips the spent one-time
   // token out of the address bar as soon as it's redeemed, so re-reading the URL
   // every render would kick the user off the "Password updated" confirmation and
@@ -78,6 +138,12 @@ export default function App() {
   const [crewFirstRun, setCrewFirstRun] = useState(() => {
     try { return localStorage.getItem('jt_crew_firstrun') === '1' } catch { return false }
   })
+  // Has a profile read actually been attempted for the current session? The
+  // last-resort "We couldn't load your account" screen is only honest AFTER
+  // one has finished — before that, an empty profile just means "not fetched
+  // yet". A ref, not state, so it is true synchronously and can never be a
+  // render behind the thing it is guarding.
+  const profileTriedRef = useRef(false)
 
   useEffect(() => {
     // onAuthStateChange fires INITIAL_SESSION immediately with the stored session
@@ -90,6 +156,22 @@ export default function App() {
       // subscription don't change, so refetching each time is wasted work.
       if (event === 'TOKEN_REFRESHED') return
       if (session) {
+        // BACK TO LOADING, and this is the whole fix for the ugliest half-second
+        // in the app.
+        //
+        // On a cold visit INITIAL_SESSION fires with null, which sets loading
+        // false and renders the login form — correct. The moment you sign in,
+        // SIGNED_IN fires: session becomes truthy while profile is still null
+        // and loading is ALREADY false. For the one tick before fetchProfile
+        // resolves, the render below skipped the loading branch, skipped the
+        // logged-out branch, and fell all the way through to the last-resort
+        // recovery screen: "We couldn't load your account. Back to login."
+        //
+        // Nothing was wrong. The profile was in flight. But the first thing a
+        // brand new signup saw was an error telling them to go back, and only a
+        // refresh cleared it — which is exactly the report from JP on
+        // 2026-08-25. Flipping loading back on closes the window entirely.
+        setLoading(true)
         // Defer out of the auth callback: invoking supabase (fetchProfile) while
         // still inside onAuthStateChange can deadlock the client's internal auth
         // lock. setTimeout(…,0) runs it on the next tick, after the lock releases.
@@ -133,6 +215,12 @@ export default function App() {
 
   const fetchProfile = async (user) => {
     setLoadError(false)
+    // Belt and braces behind the setLoading(true) above. The last-resort
+    // "We couldn't load your account" screen is only honest AFTER a real
+    // attempt has finished; before that, an empty profile just means "not
+    // fetched yet". A ref, not state, so it is true synchronously and cannot
+    // itself be a render behind.
+    profileTriedRef.current = true
     // Attach every subsequent event to this account. Set before any awaits so
     // an event fired during the profile read isn't recorded as anonymous.
     setAnalyticsUser(user.id)
@@ -261,7 +349,7 @@ export default function App() {
     return <Screen><ResetPassword /></Screen>
   }
 
-  if (loading) return <div className="loading">Loading JobTally...</div>
+  if (loading) return <Booting />
   if (!session) {
     // Logged-out visitors at the root get the public landing page, not a
     // cold login form. Auth still owns: /login, plus the two query-param
@@ -286,6 +374,11 @@ export default function App() {
         <Screen>
           <CrewInvite
             token={resumeToken}
+            // True only when the token came off THIS phone's storage rather than
+            // a URL — i.e. he tapped his home-screen icon and the session had
+            // lapsed. CrewInvite spends it for him instead of asking for a tap
+            // that has no decision behind it.
+            autoResume={!inviteToken && !!crewKey}
             onJoined={() => {
               // Strip the token the instant we commit to signing in, so the
               // new session doesn't land on the signed-in handoff screen below.
@@ -451,6 +544,12 @@ export default function App() {
   // reset, or a failed/incomplete signup. This used to dead-end on a permanent
   // "Loading..." with no escape. Show a recovery screen that sends them back to
   // the login screen instead.
+  //
+  // But ONLY once a read has actually been attempted. Reaching this before that
+  // is what put "We couldn't load your account. Back to login." in front of
+  // every fresh sign-in for a tick. Keep waiting instead — the real attempt is
+  // already scheduled, and it will land or set loadError above.
+  if (!profileTriedRef.current) return <Booting />
   return (
     <div className="loading recovery">
       <p>We couldn't load your account.</p>
