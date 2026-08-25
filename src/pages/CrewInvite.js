@@ -182,7 +182,24 @@ export default function CrewInvite({ token, onJoined, onUseForm, onDeadToken }) 
           <p style={{ color: '#4B5563', fontSize: '15px', lineHeight: 1.5 }}>
             Text your boss and ask him to send you a new one. It takes him about five seconds.
           </p>
-          <button style={primary} onClick={onUseForm}>I already have a login</button>
+          {/* "I already have a login" used to be the PRIMARY button here, and
+              for a crew member it is a trap: he has no password, so one tap put
+              him on a login screen he could not pass, with nothing on it
+              explaining why. That is the screen in the photo Josh sent on
+              2026-08-25. The way out of a dead link is his boss, so that is what
+              the loud button says now; the sign-in door stays, quietly, for the
+              rare worker who really does have an email and a password. */}
+          <a
+            href={`sms:?&body=${encodeURIComponent('My JobTally link stopped working. Can you send me a new one?')}`}
+            style={{ ...primary, display: 'block', textAlign: 'center', textDecoration: 'none', boxSizing: 'border-box' }}
+          >
+            Text my boss
+          </a>
+          <p style={{ textAlign: 'center', marginTop: '14px', borderTop: '1px solid #F1F5F9', paddingTop: '12px' }}>
+            <button type="button" style={quiet} onClick={onUseForm}>
+              I have an email and password
+            </button>
+          </p>
         </div>
       </div>
     )

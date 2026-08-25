@@ -371,6 +371,16 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [timeForm, setTimeForm] = useState({ worker_id: '', work_date: '', start_time: '', end_time: '' })
   const [payroll, setPayroll] = useState([])
   const [paychecks, setPaychecks] = useState([])
+  // Money paid out on a job to somebody who never clocks in — a sub, a day
+  // helper, a guy with a dump truck. It is labor by any honest reading, so it
+  // belongs on the pay screen next to the crew, not buried in receipts. Stored
+  // as a receipt with category 'subcontractor' on purpose: no new table means no
+  // migration standing between this shipping and Josh using it, and it lands in
+  // the year-end deduction export for free.
+  const [payouts, setPayouts] = useState([])
+  const [payoutsLoaded, setPayoutsLoaded] = useState(false)
+  const [showNewPayout, setShowNewPayout] = useState(false)
+  const [payoutForm, setPayoutForm] = useState({ project_id: '', paid_to: '', description: '', amount: '', paid_on: '' })
   // Getting-paid + field features
   const [coByProject, setCoByProject] = useState({}) // approved change-order $ per project id
   const [dailyLogs, setDailyLogs] = useState([])
@@ -383,6 +393,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Owner-initiated worker invites (copy link, text it to the hire)
   const [showInvite, setShowInvite] = useState(false)
   const [inviteName, setInviteName] = useState('')
+  // Pay rate collected on the invite itself. Without it a worker joins at
+  // $0.00/hr, his hours cost nothing, and every job reads more profitable
+  // than it is — silently. The column already exists (FIX-DATABASE-26); the
+  // invite form was the only place never wired to it.
+  const [inviteRate, setInviteRate] = useState('')
   const [inviteLink, setInviteLink] = useState('')
   const [inviteCopied, setInviteCopied] = useState(false)
   // Live (unclaimed, unrevoked) invite links. Without this the owner had no
@@ -576,18 +591,24 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         .not('clocked_out_at', 'is', null)
         .range(from, to))
 
+      // Crews get paid weekly, so the week is the number the owner acts on — a
+      // month-to-date figure tells him nothing about Friday, and this card was
+      // the only place in the whole app still running on a calendar month.
+      // Sunday start, local midnight, the SAME convention as weekStartKey() and
+      // the worker's own "This week" card. Two week definitions in one app show
+      // up as two numbers that never agree.
       const now = new Date()
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString()
 
       const stats = {}
       workerIds.forEach(id => {
         const entries = (data || []).filter(e => e.worker_id === id)
-        const monthEntries = entries.filter(e => e.clocked_in_at >= monthStart)
+        const weekEntries = entries.filter(e => e.clocked_in_at >= weekStart)
         stats[id] = {
           totalMinutes: entries.reduce((s, e) => s + (e.total_minutes || 0), 0),
           totalCost: entries.reduce((s, e) => s + (e.labor_cost || 0), 0),
-          monthMinutes: monthEntries.reduce((s, e) => s + (e.total_minutes || 0), 0),
-          monthCost: monthEntries.reduce((s, e) => s + (e.labor_cost || 0), 0),
+          weekMinutes: weekEntries.reduce((s, e) => s + (e.total_minutes || 0), 0),
+          weekCost: weekEntries.reduce((s, e) => s + (e.labor_cost || 0), 0),
         }
       })
       setWorkerStats(stats)
@@ -646,6 +667,66 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     }
   }, [workers, profile.id])
 
+  // Every sub/helper payout this owner has recorded, newest first, with the job
+  // it was on. Scoped by owner_id AND category so a materials run never shows up
+  // on the pay screen pretending to be labor.
+  const fetchPayouts = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from('receipts')
+        .select('id, project_id, store, description, amount, purchase_date, created_at')
+        .eq('owner_id', profile.id)
+        .eq('category', 'subcontractor')
+        .order('purchase_date', { ascending: false })
+      if (error) throw error
+      setPayouts(data || [])
+    } catch (e) {
+      console.error('Payouts fetch failed:', e)
+      showToast('Could not load payouts. Check your connection and try again.', 'error')
+    } finally { setPayoutsLoaded(true) }
+  }, [profile.id])
+
+  const addPayout = async () => {
+    if (!payoutForm.project_id) return setInlineError('Pick the job it was paid on')
+    const amount = parseFloat(payoutForm.amount)
+    if (!Number.isFinite(amount) || amount <= 0) return setInlineError('Enter an amount')
+    setLoading(true)
+    setInlineError('')
+    try {
+      const { error } = await supabase.from('receipts').insert({
+        project_id: payoutForm.project_id,
+        owner_id: profile.id,
+        store: payoutForm.paid_to || 'Sub / helper',
+        description: payoutForm.description,
+        amount,
+        tax_amount: 0,
+        category: 'subcontractor',
+        // Same rule as receipts: the day the money left, in the OWNER's
+        // timezone, because that is what buckets it into a tax year.
+        purchase_date: payoutForm.paid_on || localToday()
+      })
+      if (error) throw error
+      setShowNewPayout(false)
+      setPayoutForm({ project_id: '', paid_to: '', description: '', amount: '', paid_on: '' })
+      await fetchPayouts()
+      await fetchSpend(projects)
+      showToast('Payout recorded ✓')
+    } catch (e) {
+      setInlineError('Failed to save the payout. Try again.')
+    }
+    setLoading(false)
+  }
+
+  const deletePayout = async (row) => {
+    if (!window.confirm(`Delete the ${formatCurrency(row.amount)} paid to ${row.store || 'this sub'}? It comes back off the job's cost.`)) return
+    try {
+      const { error } = await supabase.from('receipts').delete().eq('id', row.id)
+      if (error) throw error
+      await fetchPayouts()
+      await fetchSpend(projects)
+      showToast('Payout deleted ✓')
+    } catch { showToast('Failed to delete the payout', 'error') }
+  }
+
   const recordPaycheck = async (row) => {
     setLoading(true)
     try {
@@ -686,6 +767,11 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         if (!spend[r.project_id]) spend[r.project_id] = { materials: 0, labor: 0, other: 0 }
         const cost = (r.amount || 0) + (r.tax_amount || 0)
         if (r.category === 'materials') spend[r.project_id].materials += cost
+        // A sub or a day helper is labor on that job, full stop. Filing it
+        // under "other" made every job with a sub on it read as though its
+        // labor line was just the clocked crew, which is the number the owner
+        // uses to decide whether he made money.
+        else if (r.category === 'subcontractor') spend[r.project_id].labor += cost
         else spend[r.project_id].other += cost
       })
       ;(times || []).forEach(t => {
@@ -799,6 +885,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   useEffect(() => {
     if (activeTab === 'payroll' && workers.length) fetchPayroll()
   }, [activeTab, workers, fetchPayroll])
+
+  // Payouts do NOT wait on workers.length. An owner whose whole crew is subs
+  // has zero workers and still needs this screen to work.
+  useEffect(() => {
+    if (activeTab === 'payroll') fetchPayouts()
+  }, [activeTab, fetchPayouts])
 
   // Refetch on every visit AND on every arrow — the week you're looking at is
   // the query, so paging weeks is a fetch, not a filter.
@@ -979,6 +1071,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // the owner puts in is what the worker's account is called.
   const createInvite = async () => {
     if (!inviteName.trim()) { setInlineError('Enter the worker’s name first.'); return }
+    // Same 0–500 window api/join-invite.js enforces server-side. Checking it
+    // here too means the owner is told at the form, not after he has already
+    // texted a link that quietly drops the rate.
+    const rate = inviteRate.trim() === '' ? null : Number(inviteRate)
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 500)) {
+      setInlineError('Hourly rate has to be a number between 0 and 500.')
+      return
+    }
     setLoading(true)
     setInlineError('')
     try {
@@ -986,7 +1086,8 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         ? crypto.randomUUID()
         : Date.now().toString(36) + Math.random().toString(36).slice(2)
       const { error } = await supabase.from('worker_invites').insert({
-        owner_id: profile.id, token, worker_name: inviteName.trim()
+        owner_id: profile.id, token, worker_name: inviteName.trim(),
+        ...(rate === null ? {} : { hourly_rate: rate })
       })
       if (error) throw error
       track(EV.WORKER_INVITED)
@@ -1057,7 +1158,7 @@ ${link}`
   }
 
   const resetInvite = () => {
-    setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('')
+    setShowInvite(false); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false); setInlineError('')
   }
 
   // Owner approves or denies a worker's time-off request.
@@ -2782,6 +2883,31 @@ ${link}`
 
         {scheduleModal}
 
+        {showNewPayout && (
+          <div className="modal-overlay" onClick={() => { setShowNewPayout(false); setInlineError('') }}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Record a payout</h2>
+              <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>
+                Money you paid out on a job to someone who does not clock in. It lands on that job as labor.
+              </p>
+              <div className="input-group">
+                <label>Job</label>
+                <select value={payoutForm.project_id} onChange={e => setPayoutForm({ ...payoutForm, project_id: e.target.value })}>
+                  <option value="">Select job</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="input-group"><label>Paid to</label><input value={payoutForm.paid_to} onChange={e => setPayoutForm({ ...payoutForm, paid_to: e.target.value })} placeholder="Mike's Drywall" /></div>
+              <div className="input-group"><label>What for (optional)</label><input value={payoutForm.description} onChange={e => setPayoutForm({ ...payoutForm, description: e.target.value })} placeholder="Hung and taped the basement" /></div>
+              <div className="input-group"><label>Amount</label><input type="number" step="0.01" inputMode="decimal" value={payoutForm.amount} onChange={e => setPayoutForm({ ...payoutForm, amount: e.target.value })} placeholder="850" /></div>
+              <div className="input-group"><label>Date paid</label><input type="date" value={payoutForm.paid_on} onChange={e => setPayoutForm({ ...payoutForm, paid_on: e.target.value })} /></div>
+              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+              <button className="btn-primary" onClick={addPayout} disabled={loading}>{loading ? 'Saving…' : 'Save payout'}</button>
+              <button className="btn-secondary" onClick={() => { setShowNewPayout(false); setInlineError('') }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
         {showNewMileage && (
           <div className="modal-overlay" onClick={() => { setShowNewMileage(false); setInlineError('') }}>
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
@@ -2806,7 +2932,7 @@ ${link}`
                 <label>Worker</label>
                 <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — ${formatCurrency(w.hourly_rate)}/hr` : ''}</option>)}</select>
                 {!showInvite && (
-                  <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
+                  <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
                     {workers.length === 0 ? '+ Invite a worker to send them a link' : 'Don’t see them? + Invite a new worker'}
                   </button>
                 )}
@@ -2819,9 +2945,15 @@ ${link}`
                         <label htmlFor="time-invite-name">New worker’s name</label>
                         <input id="time-invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
                       </div>
+                      <div className="input-group" style={{ marginBottom: '8px' }}>
+                        <label htmlFor="time-invite-rate">What you pay him an hour</label>
+                        <input id="time-invite-rate" type="number" inputMode="decimal" min="0" max="500" step="0.25" value={inviteRate} onChange={e => setInviteRate(e.target.value)} placeholder="25" />
+                        <p style={{ fontSize: '12px', color: '#888', margin: '4px 0 0' }}>Leave it blank if you don’t know yet, but his hours will cost $0 until you set it on his card.</p>
+                      </div>
+                      {inlineError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{inlineError}</div>}
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button type="button" onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
-                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
                       </div>
                     </>
                   ) : (
@@ -2831,7 +2963,7 @@ ${link}`
                       <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button type="button" onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
-                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
+                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
                       </div>
                     </>
                   )}
@@ -3639,6 +3771,11 @@ ${link}`
                       <label htmlFor="invite-name">Worker’s name</label>
                       <input id="invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
                     </div>
+                    <div className="input-group">
+                      <label htmlFor="invite-rate">What you pay him an hour</label>
+                      <input id="invite-rate" type="number" inputMode="decimal" min="0" max="500" step="0.25" value={inviteRate} onChange={e => setInviteRate(e.target.value)} placeholder="25" />
+                      <p style={{ fontSize: '13px', color: '#888', margin: '4px 0 0' }}>Leave it blank if you don’t know yet, but his hours will cost $0 until you set it on his card.</p>
+                    </div>
                     {inlineError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{inlineError}</div>}
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
@@ -3723,12 +3860,16 @@ ${link}`
                       {w.hourly_rate > 0
                         ? <p style={{ color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{formatCurrency(w.hourly_rate)}/hr</p>
                         : <button onClick={() => { setShowEditRate(w); setEditRate(''); setInlineError('') }} style={{ marginTop: '4px', background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '4px 10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>⚠️ Set hourly rate — their pay reads $0 until you do</button>}
+                      {/* This card was the ONLY place in the app running on a
+                          calendar month, so it never matched the number he was
+                          about to pay. Crew Pay is weekly, the worker's own
+                          history card is weekly, this is weekly now too. */}
                       {stats && (
                         <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
                           <div>
-                            <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>This Month</p>
-                            <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatTime(stats.monthMinutes)}</p>
-                            <p style={{ fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{formatCurrency(stats.monthCost)}</p>
+                            <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>This Week</p>
+                            <p style={{ fontSize: '15px', fontWeight: '700', color: '#1C2B3A' }}>{formatTime(stats.weekMinutes)}</p>
+                            <p style={{ fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{formatCurrency(stats.weekCost)}</p>
                           </div>
                           <div style={{ width: '1px', background: '#f0f0f0' }} />
                           <div>
@@ -3796,6 +3937,61 @@ ${link}`
                 </div>
               )
             })}
+
+            {/* PAID OUT — the money that leaves on a job without anyone clocking
+                in. Grouped by job, because "what did this job cost me" is the
+                only question it answers. */}
+            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '2px solid #f0f0f0' }}>
+              <h2 style={{ fontSize: '17px', fontWeight: '800', color: '#1C2B3A', padding: '0 4px' }}>Paid out</h2>
+              <p style={{ fontSize: '13px', color: '#888', margin: '4px 0 12px', padding: '0 4px' }}>
+                Subs, day helpers, anyone you paid on a job who does not clock in. It counts as labor on that job.
+              </p>
+              <button className="btn-primary" onClick={() => { setShowNewPayout(true); setPayoutForm({ project_id: projects[0] ? projects[0].id : '', paid_to: '', description: '', amount: '', paid_on: '' }); setInlineError('') }}>
+                + Record a payout
+              </button>
+
+              {(() => {
+                if (!payoutsLoaded) return <div className="empty-state"><p>Loading…</p></div>
+                if (!payouts.length) return <div className="empty-state"><p>Nothing paid out yet. Cash to a sub, a helper, a dump truck — record it here and the job's cost stays honest.</p></div>
+                const byJob = {}
+                payouts.forEach(p => { (byJob[p.project_id] ||= []).push(p) })
+                const grand = payouts.reduce((s, p) => s + (p.amount || 0), 0)
+                return (
+                  <>
+                    <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+                      <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Paid out, all jobs</p>
+                      <p style={{ fontSize: '26px', fontWeight: '800', color: '#F59E0B' }}>{formatCurrency(grand)}</p>
+                    </div>
+                    {Object.keys(byJob).map(pid => {
+                      const rows = byJob[pid]
+                      const job = projects.find(p => p.id === pid)
+                      const jobTotal = rows.reduce((s, r) => s + (r.amount || 0), 0)
+                      return (
+                        <div key={pid} className="card">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <h3>{job ? job.name : 'Job no longer listed'}</h3>
+                            <p style={{ fontWeight: '700', fontSize: '16px', color: '#DC2626' }}>{formatCurrency(jobTotal)}</p>
+                          </div>
+                          {rows.map(r => (
+                            <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
+                              <div style={{ flex: 1, paddingRight: '10px' }}>
+                                <p style={{ fontWeight: '600', fontSize: '14px' }}>{r.store || 'Sub / helper'}</p>
+                                <p style={{ fontSize: '12px', color: '#717171' }}>
+                                  {r.description ? `${r.description} · ` : ''}
+                                  {r.purchase_date ? new Date(r.purchase_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                                </p>
+                              </div>
+                              <p style={{ fontWeight: '700', fontSize: '15px', color: '#1C2B3A', marginRight: '10px' }}>{formatCurrency(r.amount)}</p>
+                              <button onClick={() => deletePayout(r)} style={{ background: 'transparent', color: '#DC2626', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '6px 10px', fontSize: '12px', minHeight: '40px', cursor: 'pointer' }}>Delete</button>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })}
+                  </>
+                )
+              })()}
+            </div>
           </div>
         )}
 

@@ -13,6 +13,7 @@
 // `valid` keeps its old meaning exactly, because Login.js still gates the
 // email+password fallback form on it.
 import { rateOk } from './_ratelimit'
+import { adoptLegacyInvite } from './_adoptLegacyInvite'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
@@ -56,6 +57,15 @@ export default async function handler(req, res) {
     // Spent links are rejoinable only while the worker they made is still on
     // this owner's crew. Once he's removed the link is inert: it must not
     // resurrect an unlinked account or mint a second one.
+    // An invite burned by the OLD email+password flow has used_at set and
+    // used_by NULL, because there was no session at signUp to identify anyone.
+    // Adopt the worker it made, if he can be identified beyond doubt, so the
+    // row becomes a normal rejoinable invite from here on. Without this, Josh's
+    // whole existing crew reads as "expired" and gets sent to a login page they
+    // have no password for. See api/_adoptLegacyInvite.js.
+    const adopted = await adoptLegacyInvite(invite)
+    if (adopted) invite.used_by = adopted.id
+
     let rejoinable = false
     let claimedName = ''
     if (invite.used_by) {
@@ -89,6 +99,12 @@ export default async function handler(req, res) {
       valid: !invite.used_at,
       rejoinable,
       ownerId: invite.owner_id,
+      // WHO already claimed this link. The signed-in invite screen needs it to
+      // answer the only question that matters there: is the person holding this
+      // phone the same person the link belongs to? Without it, a worker who taps
+      // his own link on a phone that still has his session gets told the link is
+      // dead — which is what Josh's crew was told, every day, until this shipped.
+      usedBy: invite.used_by || null,
       workerName: claimedName || invite.worker_name || '',
       companyName: owner.company_name || owner.full_name || 'your boss'
     })

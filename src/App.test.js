@@ -109,7 +109,14 @@ test('a dead invite link still gives the worker a way in', async () => {
   goTo('/?invite=deadtoken')
   render(<App />)
   expect(await screen.findByText(/link has expired/i, {}, ROUTE_LOAD)).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: /already have a login/i })).toBeInTheDocument()
+  // The LOUD button has to be the boss, not the login form. A crew member has
+  // no password, so making "I already have a login" the primary action put him
+  // one tap from a login screen he could not pass — the screen in the photo
+  // Josh sent on 2026-08-25.
+  expect(screen.getByRole('link', { name: /text my boss/i })).toBeInTheDocument()
+  // The sign-in door still exists for the rare worker who really does have
+  // credentials. It just is not the thing being pushed.
+  expect(screen.getByRole('button', { name: /email and password/i })).toBeInTheDocument()
 })
 
 // --- The passwordless crew member's way back in ----------------------------
