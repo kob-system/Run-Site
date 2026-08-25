@@ -246,8 +246,9 @@ export default function Remodelers() {
               <div>
                 <h3>Text your crew the invite link</h3>
                 <p>
-                  JobTally gives you a link — text it to your guys. They set a password on their
-                  own phone and clock in tomorrow morning. Nothing to install, no training.
+                  JobTally gives you a link — text it to your guys. He taps it on his own phone
+                  and he is in, and he clocks in tomorrow morning. Nothing to type, no password,
+                  nothing to install, no training.
                 </p>
               </div>
             </li>

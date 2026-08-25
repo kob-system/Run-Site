@@ -49,6 +49,49 @@ async function allowedRate(uid, bucket, max, windowSecs) {
   } catch { return true }
 }
 
+// The worker's phone sends its IANA zone. Anything Intl doesn't recognise falls
+// back to Eastern rather than throwing — a bad string must never cost an email.
+function safeZone(tz) {
+  if (typeof tz !== 'string' || !/^[A-Za-z0-9_+\-/]{3,64}$/.test(tz)) return 'America/New_York'
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz })
+    return tz
+  } catch { return 'America/New_York' }
+}
+
+// Null coords are the normal case, not an error: GPS never blocks a punch, so a
+// basement clock-in legitimately has none. Returning '' makes the email say so.
+function mapLink(lat, lng) {
+  if (typeof lat !== 'number' || typeof lng !== 'number') return ''
+  if (!isFinite(lat) || !isFinite(lng)) return ''
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return ''
+  return `https://www.google.com/maps?q=${lat},${lng}`
+}
+
+function formatWorked(mins) {
+  if (typeof mins !== 'number' || !isFinite(mins) || mins < 0) return ''
+  const h = Math.floor(mins / 60)
+  const m = Math.round(mins % 60)
+  if (!h) return `${m}m`
+  return m ? `${h}h ${m}m` : `${h}h`
+}
+
+// The shift this notification is about. clientId narrows it to the exact row,
+// but it stays scoped to worker_id + owner's project either way, so a forged
+// clientId can only ever name a shift the caller already owns.
+async function latestShift(workerId, projectId, clientId) {
+  try {
+    let q = `time_entries?worker_id=eq.${encodeURIComponent(workerId)}&select=gps_lat,gps_lng,gps_out_lat,gps_out_lng,total_minutes&order=clocked_in_at.desc&limit=1`
+    if (clientId && typeof clientId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(clientId)) {
+      q += `&client_id=eq.${encodeURIComponent(clientId)}`
+    } else if (projectId) {
+      q += `&project_id=eq.${encodeURIComponent(projectId)}`
+    }
+    const rows = await sbGet(q)
+    return (rows && rows[0]) || null
+  } catch { return null }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!SUPABASE_URL || !SERVICE_KEY) return res.json({ success: false, error: 'Server misconfigured' })
@@ -63,7 +106,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ success: false, error: 'Too many notifications. Please slow down.' })
   }
 
-  const { projectId, action, timestamp } = req.body || {}
+  const { projectId, action, timestamp, tz, clientId } = req.body || {}
   if (action !== 'in' && action !== 'out') {
     return res.status(400).json({ error: 'invalid action' })
   }
@@ -93,12 +136,23 @@ export default async function handler(req, res) {
 
     const workerName = worker.full_name || 'A worker'
     const ts = timestamp ? new Date(timestamp) : new Date()
+    // This function runs on Vercel, whose clock is UTC. Formatting without a
+    // zone emailed Josh "12:02 PM" for an 8:02 AM punch all summer. The zone
+    // comes from the WORKER's phone, which is the one standing on the jobsite.
     const time = isNaN(ts.getTime())
       ? ''
-      : ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+      : ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: safeZone(tz) })
     const verb = action === 'out' ? 'clocked out of' : 'clocked in on'
     const subject = `${esc(workerName)} ${action === 'out' ? 'clocked out' : 'clocked in'} — ${esc(jobName)}`.replace(/[\r\n]+/g, ' ')
     const line = `${esc(workerName)} ${verb} ${esc(jobName)}${time ? ` at ${esc(time)}` : ''}.`
+
+    // The shift row, read server-side, is where the location and the hours live.
+    // The client never gets to assert either one — it only says which shift.
+    const shift = await latestShift(workerId, projectId, clientId)
+    const pin = action === 'out'
+      ? mapLink(shift && shift.gps_out_lat, shift && shift.gps_out_lng)
+      : mapLink(shift && shift.gps_lat, shift && shift.gps_lng)
+    const worked = action === 'out' ? formatWorked(shift && shift.total_minutes) : ''
 
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -115,7 +169,11 @@ export default async function handler(req, res) {
             <h2 style="color: #1C2B3A; margin-bottom: 8px;">JobTally</h2>
             <div style="background: #f4f6f9; border-radius: 12px; padding: 20px; margin-top: 16px;">
               <p style="font-size: 18px; font-weight: 700; color: #1C2B3A; margin: 0 0 8px;">${line}</p>
-              <p style="font-size: 14px; color: #888; margin: 0;">Logged automatically by JobTally</p>
+              ${worked ? `<p style="font-size: 34px; font-weight: 800; color: #E07B2A; margin: 14px 0 2px; line-height: 1;">${worked}</p>
+              <p style="font-size: 13px; color: #888; margin: 0 0 8px;">on the job</p>` : ''}
+              ${pin ? `<p style="margin: 14px 0 0;"><a href="${pin}" style="display: inline-block; background: #1C2B3A; color: #ffffff; text-decoration: none; padding: 11px 18px; border-radius: 8px; font-size: 15px; font-weight: 700;">&#128205; See where he ${action === 'out' ? 'finished' : 'started'}</a></p>`
+                    : `<p style="font-size: 13px; color: #B45309; margin: 12px 0 0;">No location on this punch &mdash; his phone couldn't get a fix.</p>`}
+              <p style="font-size: 14px; color: #888; margin: 14px 0 0;">Logged automatically by JobTally</p>
             </div>
           </div>
         `

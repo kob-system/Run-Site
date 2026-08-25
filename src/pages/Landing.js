@@ -85,7 +85,7 @@ const FAQS = [
   },
   {
     q: 'What does my crew have to do?',
-    a: 'Almost nothing. You text each guy an invite link, he sets a password, and from then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it.',
+    a: 'Nothing. You text each guy an invite link, he taps it, and he is in — you already typed his name when you made the link, so there is nothing for him to fill in. No password, no email, nothing to download. From then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it.',
   },
   {
     q: "I'm not a tech guy. How long is setup?",
@@ -344,7 +344,7 @@ export default function Landing() {
             <div className="ld-step">
               <span className="ld-step-num">1</span>
               <h3>Create your account</h3>
-              <p>Two minutes. Name, company, card, done.</p>
+              <p>Two minutes. Your name, your company, done. No card.</p>
             </div>
             <div className="ld-step">
               <span className="ld-step-num">2</span>
@@ -354,7 +354,7 @@ export default function Landing() {
             <div className="ld-step">
               <span className="ld-step-num">3</span>
               <h3>Text your crew the invite link</h3>
-              <p>They set a password and clock in tomorrow morning.</p>
+              <p>He taps it once and he is in. Nothing to type, no password.</p>
             </div>
           </div>
         </div>
