@@ -89,6 +89,12 @@ export default async function handler(req, res) {
       valid: !invite.used_at,
       rejoinable,
       ownerId: invite.owner_id,
+      // WHO already claimed this link. The signed-in invite screen needs it to
+      // answer the only question that matters there: is the person holding this
+      // phone the same person the link belongs to? Without it, a worker who taps
+      // his own link on a phone that still has his session gets told the link is
+      // dead — which is what Josh's crew was told, every day, until this shipped.
+      usedBy: invite.used_by || null,
       workerName: claimedName || invite.worker_name || '',
       companyName: owner.company_name || owner.full_name || 'your boss'
     })

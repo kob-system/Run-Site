@@ -81,6 +81,9 @@ export default function WorkerDashboard({ profile }) {
   const [materialItems, setMaterialItems] = useState([])
   const [punchItems, setPunchItems] = useState([])
   const [listsError, setListsError] = useState('')
+  // Who else is on each job, keyed by project id → [{worker_id, full_name}].
+  // Names only; the view (FIX-DATABASE-32) exposes nothing else and never can.
+  const [crewmates, setCrewmates] = useState({})
   // Item id currently mid-write, so only that row shows as busy.
   const [togglingItem, setTogglingItem] = useState(null)
   // Styled replacement for native confirm(): { message, confirmLabel, onConfirm }.
@@ -129,6 +132,7 @@ export default function WorkerDashboard({ profile }) {
     fetchTimeOff()
     fetchJobPhotos()
     fetchLists()
+    fetchCrewmates()
   }, [])
 
   // One assigned job? Always pin selection to it so a reassignment is reflected.
@@ -156,6 +160,7 @@ export default function WorkerDashboard({ profile }) {
       fetchHistory()
       fetchJobPhotos()
       fetchLists()
+      fetchCrewmates()
     }
   }, [isOnline])
 
@@ -333,6 +338,23 @@ export default function WorkerDashboard({ profile }) {
       }
     } catch (e) {
       setError('Could not load jobs. Check your connection.')
+    }
+  }
+
+  // Who else is showing up. Deliberately silent on failure: until
+  // FIX-DATABASE-32 is applied this view does not exist and the read 404s, and
+  // a missing crew list must never put an error banner on a working clock-in
+  // screen. No list simply means no list.
+  const fetchCrewmates = async () => {
+    try {
+      const { data, error } = await supabase.from('worker_crewmates').select('project_id, worker_id, full_name')
+      if (error) throw error
+      const byJob = {}
+      ;(data || []).forEach(r => { (byJob[r.project_id] ||= []).push(r) })
+      Object.values(byJob).forEach(list => list.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '')))
+      setCrewmates(byJob)
+    } catch {
+      setCrewmates({})
     }
   }
 
@@ -903,6 +925,25 @@ export default function WorkerDashboard({ profile }) {
                       {p.client_address && <p style={{ fontSize: '13px', color: '#6B7280', marginTop: '2px' }}>{p.client_address}</p>}
                       {!p.client_address && <p style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>No address on file — ask your boss to add it.</p>}
                       {sched && sched.task_description && <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', marginTop: '4px' }}>{sched.task_description}{sched.start_time ? ` · ${formatScheduleTime(sched.start_time)}` : ''}</p>}
+                      {/* Who else is on this one. A framer used to have to text
+                          somebody to find this out. Names only — the view
+                          carries no email and no pay rate, by design. Hidden
+                          entirely when he is the only one on the job, because
+                          "On this job: you" is noise. */}
+                      {(() => {
+                        const mates = (crewmates[p.id] || []).filter(m => m.worker_id !== profile.id)
+                        if (!mates.length) return null
+                        return (
+                          <div style={{ marginTop: '8px', background: '#F3F6F9', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 10px' }}>
+                            <p style={{ fontSize: '11px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                              On this job with you
+                            </p>
+                            <p style={{ fontSize: '13px', color: '#1C2B3A', fontWeight: '600', lineHeight: 1.4 }}>
+                              {mates.map(m => m.full_name || 'Crew member').join(' · ')}
+                            </p>
+                          </div>
+                        )
+                      })()}
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '10px' }}>
                         {p.client_address && (
                           <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.client_address)}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', background: '#16A34A', color: 'white', textDecoration: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: '700', minHeight: '44px', boxSizing: 'border-box' }}>📍 Get Directions</a>
