@@ -149,7 +149,9 @@ test('a URL invite is NOT auto-redeemed — only a key off this phone is', async
   goTo('/?invite=forwarded-token')
   render(<App />)
   expect(await screen.findByText(/still on the/i, {}, ROUTE_LOAD)).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: /get me back in/i })).toBeInTheDocument()
+  // Two of them on purpose: one inline in the card, one in the pinned bar, so a
+  // phone that hides position:fixed still shows the crew member a button.
+  expect(screen.getAllByRole('button', { name: /get me back in/i }).length).toBeGreaterThan(0)
   expect(global.fetch).not.toHaveBeenCalledWith('/api/join-invite', expect.anything())
 })
 

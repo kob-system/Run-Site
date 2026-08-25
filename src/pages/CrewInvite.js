@@ -312,6 +312,19 @@ export default function CrewInvite({ token, onJoined, onUseForm, onDeadToken, au
           </div>
         </div>
 
+        {/* THE BUTTON, IN THE CARD. It is also in the pinned bar at the bottom
+            of the viewport, and that bar is the nicer of the two — but a
+            position:fixed bar is exactly the thing that vanishes inside the
+            in-app browsers a texted link actually opens in (Messages, Messenger,
+            older Android WebViews), where it can sit behind the browser chrome
+            or never paint at all. A crew member who scrolls this page and finds
+            no button reports precisely what Josh's man reported on 2026-08-25:
+            "it just brings me to the website."
+            One tap either way, and now there is no phone on which the one thing
+            this screen asks for is invisible. */}
+        {error && <div className="alert-danger" style={{ marginTop: '14px' }}>{error}</div>}
+        {cta(returning ? 'Get me back in' : firstName ? `Yep, that’s me. Let’s go` : 'Join the crew')}
+
         <p style={{ color: '#6B7280', fontSize: '12.5px', margin: '16px 2px 0', lineHeight: 1.45, textAlign: 'center' }}>
           Nothing to download. No password to make up. It&rsquo;s free for you, forever. Your boss
           pays for it.

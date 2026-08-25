@@ -68,6 +68,46 @@ const Screen = ({ children }) => (
   </ErrorBoundary>
 )
 
+// FIND THE INVITE TOKEN WHEREVER IT ENDED UP.
+//
+// This link's whole journey is a text message opened on a jobsite phone, and
+// things happen to a URL on that trip. Chat apps re-linkify it, previews rewrite
+// it, someone forwards a screenshot of it and retypes it by hand. The canonical
+// form is `/?invite=<uuid>`, and if the token is missing the app shows the
+// marketing landing page — which from the crew's seat is "I tapped the link and
+// it just brings me to the website", which is exactly what Josh's man reported
+// on 2026-08-25.
+//
+// So look in every place a token can plausibly survive, in order of how the
+// owner's Workers tab actually generates it:
+//   /?invite=TOKEN     the real one
+//   /#invite=TOKEN     apps that mangle the ? into a fragment
+//   /join/TOKEN        a short path, so a link can be read aloud or retyped
+//   /i/TOKEN           shorter still
+// Shape-checked before it is trusted: the owner mints UUIDs (crypto.randomUUID),
+// so anything that is not token-shaped is somebody else's URL and is ignored
+// rather than sent to the server as a lookup.
+const TOKEN_SHAPE = /^[A-Za-z0-9-]{8,64}$/
+function readInviteToken() {
+  try {
+    // The canonical param is taken AS-IS, deliberately. It is the form the
+    // Workers tab generates and the form every link already in the wild uses, so
+    // adding a shape check here could only ever reject a real worker's real
+    // link. The server is the thing that decides whether a token is good.
+    const qs = new URLSearchParams(window.location.search).get('invite')
+    if (qs) return qs
+
+    // A fragment never reaches the server, so this costs nothing to support.
+    const hash = window.location.hash.replace(/^#/, '')
+    const hs = new URLSearchParams(hash.includes('=') ? hash : '').get('invite')
+    if (hs && TOKEN_SHAPE.test(hs)) return hs
+
+    const m = window.location.pathname.match(/^\/(?:join|i)\/([A-Za-z0-9-]{8,64})\/?$/)
+    if (m) return m[1]
+  } catch { /* a malformed URL is just no token */ }
+  return null
+}
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -78,9 +118,7 @@ export default function App() {
   // Read once at mount, then owned by state — dismissing the handoff strips it
   // from the URL, and re-reading the querystring on every render would keep
   // resurrecting a token the visitor already declined.
-  const [inviteToken, setInviteToken] = useState(
-    () => new URLSearchParams(window.location.search).get('invite')
-  )
+  const [inviteToken, setInviteToken] = useState(readInviteToken)
   // Same deal for password recovery: the reset screen strips the spent one-time
   // token out of the address bar as soon as it's redeemed, so re-reading the URL
   // every render would kick the user off the "Password updated" confirmation and
