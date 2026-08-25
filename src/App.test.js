@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import App from './App'
 
 // Mock the Supabase client so this smoke test never touches the network.
@@ -125,14 +125,32 @@ test('a dead invite link still gives the worker a way in', async () => {
 // that makes a home-screen icon worth installing: tapping it when the session
 // has expired lands on "welcome back", not on marketing copy aimed at his boss.
 
-test('a saved crew key turns the root into a one-tap way back in', async () => {
+test('a saved crew key gets him back in with NO tap at all', async () => {
+  // The whole point of the home-screen icon. The token came off this phone,
+  // written only after his own join succeeded, and the server just confirmed it
+  // still belongs to a live member of this crew — so "Get me back in" was a
+  // button with no decision behind it. It gets pressed for him.
   localStorage.setItem('jt_crew_key', 'saved-token')
   inviteReply = { valid: false, rejoinable: true, workerName: 'Mike Reyes', companyName: 'First Class Property Services' }
   goTo('/')
   render(<App />)
+  await waitFor(
+    () => expect(global.fetch).toHaveBeenCalledWith('/api/join-invite', expect.anything()),
+    ROUTE_LOAD
+  )
+  // Never the marketing page aimed at his boss.
+  expect(screen.queryByText(/Know what every job really makes/i)).not.toBeInTheDocument()
+})
+
+test('a URL invite is NOT auto-redeemed — only a key off this phone is', async () => {
+  // An owner testing the link he just texted, or a worker opening one somebody
+  // forwarded, must still get the pitch and press the button himself.
+  inviteReply = { valid: false, rejoinable: true, workerName: 'Mike Reyes', companyName: 'First Class Property Services' }
+  goTo('/?invite=forwarded-token')
+  render(<App />)
   expect(await screen.findByText(/still on the/i, {}, ROUTE_LOAD)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /get me back in/i })).toBeInTheDocument()
-  expect(screen.queryByText(/Know what every job really makes/i)).not.toBeInTheDocument()
+  expect(global.fetch).not.toHaveBeenCalledWith('/api/join-invite', expect.anything())
 })
 
 test('a revoked crew key is thrown away instead of stranding him', async () => {

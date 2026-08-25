@@ -22,13 +22,17 @@ import { saveCrewKey } from '../utils/crewKey'
 // Then it asks for one tap. api/join-invite.js does the rest server-side; the
 // owner already typed his name when he made the link, so there is nothing left
 // for the worker to type.
-export default function CrewInvite({ token, onJoined, onUseForm, onDeadToken }) {
+// `autoResume` means this token came from THIS phone's storage, not from a URL:
+// he tapped his home-screen icon and the session had lapsed. See the auto-resume
+// effect below for why that turns a tap into no tap at all.
+export default function CrewInvite({ token, onJoined, onUseForm, onDeadToken, autoResume }) {
   // undefined = still resolving, null = lookup failed outright.
   const [invite, setInvite] = useState(undefined)
   const [joining, setJoining] = useState(false)
   const [error, setError] = useState('')
   const [hasVideo, setHasVideo] = useState(false)
   const mounted = useRef(true)
+  const autoTriedRef = useRef(false)
 
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -144,6 +148,34 @@ export default function CrewInvite({ token, onJoined, onUseForm, onDeadToken }) 
       setJoining(false)
     }
   }
+
+  // TAPPING THE HOME-SCREEN ICON SHOULD OPEN HIS HOURS. Nothing else.
+  //
+  // Day to day there is nothing to do here: the Supabase session persists and
+  // refreshes itself, so the icon goes straight to the dashboard and this screen
+  // never renders. This is the other case — the session finally lapsed, or the
+  // phone dropped it — where he used to get "Welcome back, Mike" and a button
+  // saying "Get me back in".
+  //
+  // That button was a tap with no decision behind it. The token came off HIS
+  // phone, where it was written only after HIS own join succeeded, and the
+  // server has just confirmed it still belongs to a live member of this crew.
+  // There is nothing left to ask him. So spend the token for him and let the
+  // screen be a flash of "Getting you in" on the way to his hours.
+  //
+  // Deliberately narrow. `autoResume` is false for a token that came from a URL,
+  // so an owner testing his own link, or a worker opening a link somebody
+  // forwarded, still gets the full pitch and taps the button himself. And it
+  // requires `rejoinable` — a fresh unclaimed invite is a real decision (it
+  // creates an account) and must never be taken automatically.
+  useEffect(() => {
+    if (!autoResume || autoTriedRef.current) return
+    if (!invite || !invite.rejoinable) return
+    autoTriedRef.current = true
+    join()
+    // join is stable enough for this one-shot; the ref is what guarantees once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoResume, invite])
 
   // ---- styling, kept inline to match the other auth screens ----
   // The pitch is taller than a phone screen, so the button does NOT sit at the
