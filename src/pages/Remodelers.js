@@ -146,12 +146,12 @@ export default function Remodelers() {
           just scanned a QR code in their truck has no idea who is behind this,
           and the honest origin (a contractor described the problem, so it got
           built) is the only credibility available before they've used anything.
-          Same preload="none" rule as below: 12.5 MB, cell data, click to play. */}
+          Same preload="none" rule as below: 14 MB, cell data, click to play. */}
       <section className="rl-intro" id="intro">
         <div className="rl-inner">
           <h2>Introduction video</h2>
           <p className="rl-kicker">
-            John Paul Kobrossi — the builder of JobTally
+            John Paul Kobrossi, founder of JobTally. I built the whole thing myself.
           </p>
           <div className="rl-video-frame">
             <video

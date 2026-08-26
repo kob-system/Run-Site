@@ -317,7 +317,7 @@ export default function Landing() {
       <section className="ld-intro" id="intro">
         <div className="ld-inner">
           <h2>Introduction video</h2>
-          <p className="ld-kicker">John Paul Kobrossi — the builder of JobTally</p>
+          <p className="ld-kicker">John Paul Kobrossi, founder of JobTally. I built the whole thing myself.</p>
           <div className="ld-video-frame">
             <video
               controls
