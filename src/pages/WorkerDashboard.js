@@ -187,15 +187,20 @@ export default function WorkerDashboard({ profile }) {
   // Fire-and-forget owner notification. Worker name, owner, and job name are all
   // resolved SERVER-SIDE from the authenticated token + projectId — nothing
   // user-controlled is trusted — so this can't be spoofed/injected.
-  const notifyOwner = async (action, timestamp, projectId) => {
+  // clientId names the exact shift so the server can read its location and hours
+  // back out of the row; tz is this phone's zone, because the server's is UTC and
+  // an owner reading "12:02 PM" for an 8:02 AM punch stops trusting the whole app.
+  const notifyOwner = async (action, timestamp, projectId, clientId) => {
     if (!profile.owner_id) return
+    let tz = ''
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch (e) { /* older browser */ }
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
       await fetch('/api/notify-owner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ projectId, action, timestamp })
+        body: JSON.stringify({ projectId, action, timestamp, tz, clientId })
       })
     } catch (e) { /* notifications are best-effort; never block clock in/out */ }
   }
@@ -250,8 +255,8 @@ export default function WorkerDashboard({ profile }) {
         else if (last.data) setActiveEntry(last.data)
         setSyncRetries(0)
         showToast('Synced ✓')
-        notifyOwner('in', last.entry.clocked_in_at, last.entry.project_id)
-        if (last.entry.clocked_out_at) notifyOwner('out', last.entry.clocked_out_at, last.entry.project_id)
+        notifyOwner('in', last.entry.clocked_in_at, last.entry.project_id, last.entry.client_id)
+        if (last.entry.clocked_out_at) notifyOwner('out', last.entry.clocked_out_at, last.entry.project_id, last.entry.client_id)
       }
       if (mountedRef.current) setSyncing(false)
     } catch (e) {
@@ -578,7 +583,7 @@ export default function WorkerDashboard({ profile }) {
 
       if (error) throw error
       setActiveEntry(data)
-      notifyOwner('in', clockInTime, selectedProject)
+      notifyOwner('in', clockInTime, selectedProject, entry.client_id)
       showToast('Clocked in ✓')
     } catch (e) {
       // Online but the write failed — keep it locally and let the sync effect retry.
@@ -669,7 +674,7 @@ export default function WorkerDashboard({ profile }) {
       }).eq('id', activeEntry.id)
       if (timeError) throw timeError
 
-      notifyOwner('out', now.toISOString(), activeEntry.project_id)
+      notifyOwner('out', now.toISOString(), activeEntry.project_id, activeEntry.client_id)
       setActiveEntry(null)
       setTimer(0)
       // Refetch history so the just-finished shift lands in "This week" right
