@@ -378,7 +378,7 @@ export default function Demo() {
           </a>
           <p className="dm-fine">No card. One job free forever, then $150/mo for more at once — everything included, unlimited crew.</p>
           <p className="dm-fine">
-            Rather see a person walk you through it? <a href="/#video">Watch the 2-minute introduction</a>.
+            Rather see a person walk you through it? <a href="/#video">Watch the 3-minute introduction</a>.
           </p>
         </div>
       </div>

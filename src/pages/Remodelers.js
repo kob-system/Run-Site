@@ -136,7 +136,7 @@ export default function Remodelers() {
           <span className="rl-play" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
           </span>
-          New here? Start with the 2-minute introduction
+          New here? Start with the 3-minute introduction
         </a>
         <br />
         <a className="rl-calc-link" href="#calculator">Not ready? Run your last job through the free profit calculator ↓</a>

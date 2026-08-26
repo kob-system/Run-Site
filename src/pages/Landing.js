@@ -177,7 +177,7 @@ export default function Landing() {
               <span className="ld-play" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
               </span>
-              New here? Start with the 2-minute introduction
+              New here? Start with the 3-minute introduction
             </a>
             {/* The demo sits right under the primary CTA because it converts
                 the visitor who is NOT ready to hand over a card yet — which,
@@ -305,14 +305,14 @@ export default function Landing() {
             <span className="ld-play" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
             </span>
-            Hear it from the guy who built it — 2-minute introduction
+            Hear it from the guy who built it — 3-minute introduction
           </a>
         </div>
       </section>
       {/* Introduction — a face and the honest origin, before anyone is asked
           for anything. Same file and same placement rule as /remodelers: it
           sits ABOVE the walkthrough, because the intro's closing line points
-          down at it. 13 MB, so preload="none" — a guy standing on a job site
+          down at it. 14 MB, so preload="none" — a guy standing on a job site
           on cell data downloads nothing until he actually presses play. */}
       <section className="ld-intro" id="intro">
         <div className="ld-inner">
@@ -478,7 +478,7 @@ export default function Landing() {
           <span className="ld-play" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
           </span>
-          Still deciding? Watch the 2-minute introduction
+          Still deciding? Watch the 3-minute introduction
         </a>
       </section>
 
