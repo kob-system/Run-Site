@@ -1181,7 +1181,12 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // crew says no to. So we write the text for him, in the words that work:
   // not what the app is, what the worker gets out of tapping it.
   const inviteMessage = (name, link) => {
-    const who = (name || '').trim().split(/s+/)[0]
+    // \s, not s. Without the backslash this splits on the LETTER s, so every
+    // worker whose name contains one got the message addressed to a fragment:
+    // "Josh" became "Jo", "Robert Place" survived, "Matt Schegel" became "Matt
+    // Schegel" only by luck of the capital. It is the first word of the first
+    // thing a crew member ever reads from this app.
+    const who = (name || '').trim().split(/\s+/)[0]
     return (
       `${who ? who + ', ' : ''}use this to clock in and out from your phone. ` +
       `You'll see your own hours and what they add up to, so you get paid for ` +

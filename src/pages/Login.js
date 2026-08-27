@@ -431,6 +431,17 @@ export default function Login() {
           {isSignup ? 'Already have an account?' : "Don't have an account?"}
           <button onClick={() => { setIsSignup(!isSignup); setError(''); setNotice('') }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', cursor: 'pointer', marginLeft: '6px' }}>{isSignup ? 'Sign In' : 'Sign Up'}</button>
         </p>
+        {/* The crew door. A worker who tapped "Sign in" from the landing page
+            is standing at a form he can never pass: his account was built by
+            api/join-invite.js with no password, and the invite link his boss
+            texted him is the only credential that exists. Send him there
+            instead of leaving him guessing at an email he never chose. */}
+        {!isSignup && (
+          <p style={{ textAlign: 'center', marginTop: '10px', fontSize: '13px', color: '#666' }}>
+            On a crew and have no password?
+            <a href="/crew" style={{ color: '#E07B2A', fontWeight: '600', marginLeft: '6px' }}>Get back in</a>
+          </p>
+        )}
         {!isSignup && notice.includes('confirmation link') && (
           <p style={{ textAlign: 'center', marginTop: '4px', fontSize: '13px', color: '#666' }}>
             Didn't get it?

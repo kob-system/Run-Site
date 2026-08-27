@@ -109,6 +109,50 @@ test('a worker invite link reaches the crew screen, not the landing page', async
   expect(document.querySelectorAll('input')).toHaveLength(0)
 })
 
+// --- The crew member who shows up with NO link ----------------------------
+// Robert Place joined Josh's crew on 2026-08-24 and has clocked in zero times
+// since. The home-screen icon opens manifest start_url, which is the bare root,
+// and on iOS a standalone web app can get a storage partition separate from the
+// Safari tab he joined in — so no session, no saved key, no token. That used to
+// answer with the contractor sales page and a password form he has no password
+// for, which from his seat is "I tapped it and it just took me to the website."
+
+test('the installed icon never answers a crew member with the sales page', async () => {
+  // start_url carries ?home=1, so reaching the logged-out root through it is
+  // proof somebody installed this app and came back. Whatever else is true, the
+  // contractor pitch is the wrong answer to that.
+  goTo('/?home=1')
+  render(<App />)
+  expect(await screen.findByText(/get you to your clock/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(screen.queryByText(/Know what every job really makes/i)).not.toBeInTheDocument()
+})
+
+test('/crew tells him his link IS his password and puts his boss one tap away', async () => {
+  goTo('/crew')
+  render(<App />)
+  expect(await screen.findByText(/get you to your clock/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  // The one action that actually ends this: his boss. Not a password reset for
+  // an email he never chose.
+  expect(screen.getByRole('link', { name: /text my boss/i })).toBeInTheDocument()
+  // And the owner using the same icon must not be told to text his boss.
+  expect(screen.getByRole('link', { name: /owner/i })).toBeInTheDocument()
+  // eslint-disable-next-line testing-library/no-node-access
+  expect(document.querySelectorAll('input')).toHaveLength(0)
+})
+
+test('a saved crew key still beats the ?home=1 fallback screen', async () => {
+  // The fallback is for the case where the key is GONE. A worker whose key
+  // survived must be signed straight back in without ever seeing it.
+  localStorage.setItem('jt_crew_key', 'saved-token')
+  inviteReply = { valid: false, rejoinable: true, workerName: 'Mike Reyes', companyName: 'First Class Property Services' }
+  goTo('/?home=1')
+  render(<App />)
+  await waitFor(
+    () => expect(global.fetch).toHaveBeenCalledWith('/api/join-invite', expect.anything()),
+    ROUTE_LOAD
+  )
+})
+
 test('a dead invite link still gives the worker a way in', async () => {
   // Used, revoked, or mistyped are indistinguishable from his seat and all end
   // the same way: ask the boss. Never leave him on a screen with nothing to tap.

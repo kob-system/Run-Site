@@ -150,6 +150,10 @@ export default function Landing() {
       <header className="ld-top">
         <a className="ld-logo" href="/">JobTally</a>
         <nav>
+          {/* A crew member with no link in hand lands HERE, and every other
+              door on this page is an owner door. His account has no password,
+              so "Sign in" is a form he can never pass. This is his. */}
+          <a className="ld-signin" href="/crew">On a crew?</a>
           <a className="ld-signin" href="/login">Sign in</a>
           <a className="ld-cta-sm" href={SIGNUP_URL} onClick={cta('topbar')}>Start free</a>
         </nav>
@@ -369,7 +373,7 @@ export default function Landing() {
         </div>
       </section>
       <footer className="ld-footer">
-        <a href="/login">Sign in</a>·<a href="/faq/">FAQ</a>·<a href="/your-data/">Your data</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
+        <a href="/crew">On a crew?</a>·<a href="/login">Sign in</a>·<a href="/faq/">FAQ</a>·<a href="/your-data/">Your data</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
         <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
       </footer>
     </div>
