@@ -35,6 +35,12 @@ const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
 const CrewInvite = React.lazy(() => import('./pages/CrewInvite'))
 // The home-screen step, shown once to a brand-new crew member.
 const CrewInstall = React.lazy(() => import('./components/CrewInstall'))
+// The way back in for a crew member who arrived with no token: the home-screen
+// icon opens the bare root, and on iOS a standalone web app can have a storage
+// partition of its own, so the saved crew key is not always there. Before this
+// existed he got the contractor marketing page and a password form he has no
+// password for.
+const CrewLost = React.lazy(() => import('./pages/CrewLost'))
 const ResetPassword = React.lazy(() => import('./pages/ResetPassword'))
 
 // The first thing anyone sees, every single time the app opens — both while the
@@ -408,6 +414,14 @@ export default function App() {
     // indexed as real pages and splits the site's ranking across infinite
     // addresses. Anything unrecognised now gets an honest not-found screen
     // carrying <meta name="robots" content="noindex">.
+    // Anyone who installed the app to their home screen comes back through
+    // manifest start_url, which carries ?home=1. Reaching here means that
+    // launch found no session and no saved crew key, and the one thing it must
+    // not do is answer with the contractor sales page. /crew is the same screen
+    // at a stable address, so it can be linked and texted.
+    if (path === '/crew' || (path === '/' && params.has('home'))) {
+      return <Screen><CrewLost /></Screen>
+    }
     if (path === '/') return <Screen><Landing /></Screen>
     return <Screen><NotFound /></Screen>
   }
