@@ -32,6 +32,12 @@
 .ld-hero h1 { font-size: clamp(32px, 6vw, 50px); font-weight: 800; line-height: 1.12; max-width: 620px; }
 .ld-hero .ld-sub { color: rgba(255,255,255,0.78); font-size: clamp(16px, 2.5vw, 19px); max-width: 540px; margin-top: 18px; }
 .ld-hero .ld-cta-note { color: rgba(255,255,255,0.55); font-size: 13px; margin-top: 10px; }
+/* The offer, sized like the offer. Orange rule on the left because on this
+   page orange means "this is the thing", and it sits directly above the button
+   so the promise and the tap are one glance apart. */
+.ld-free { margin: 26px 0 22px; padding: 16px 0 16px 18px; border-left: 4px solid var(--orange); max-width: 540px; }
+.ld-free-big { font-size: clamp(26px, 5vw, 38px); font-weight: 800; line-height: 1.1; letter-spacing: -0.01em; }
+.ld-free-sub { color: rgba(255,255,255,0.72); font-size: clamp(14px, 2vw, 16px); margin-top: 8px; line-height: 1.45; }
 .ld-trust { list-style: none; padding: 0; margin: 26px 0 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .ld-trust li { color: rgba(255,255,255,0.7); font-size: 14px; font-weight: 600; position: relative; padding-left: 20px; }
 .ld-trust li::before { content: '✓'; position: absolute; left: 0; color: var(--orange); font-weight: 700; }

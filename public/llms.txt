@@ -27,8 +27,7 @@
 - [Best job costing apps for small contractors (2026)](https://www.getjobtally.com/best-job-costing-app-for-small-contractors/): comparison hub
 - [JobTally vs Jobber](https://www.getjobtally.com/compare/jobber/): comparison
 - [How job costing works](https://www.getjobtally.com/guides/job-costing/): guide for contractors
-- [For remodelers](https://www.getjobtally.com/remodelers): remodeler-specific page with a free profit calculator
-- [Free job profit calculator](https://www.getjobtally.com/calculator): work out what a finished job really made after labor, materials and overhead
+- [For remodelers](https://www.getjobtally.com/remodelers): remodeler-specific landing page
 - [FAQ](https://www.getjobtally.com/faq/): price, trial, crew setup, iPhone, offline clock-in, data, cancelling
 - [Your data](https://www.getjobtally.com/your-data/): export, deletion, who can see what, and every subprocessor
 - [Live demo](https://www.getjobtally.com/demo): tap through the real app with sample numbers, no signup

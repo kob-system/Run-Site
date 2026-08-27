@@ -9,6 +9,7 @@ import AssistantPanel from '../components/AssistantPanel'
 import InstallPrompt from '../components/InstallPrompt'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
+import JobChat, { lastChatRead } from '../components/JobChat'
 import { track, EV } from '../utils/analytics'
 import { legacyFreeDaysLeft, canStartJob } from '../utils/trialWindow'
 import {
@@ -132,16 +133,52 @@ const BackBtn = ({ label, onClick }) => (
 // point: you can tell whether a section is worth opening WITHOUT opening it,
 // which is what the old tab rows could never do — every tab looked identical
 // whether it held 40 receipts or nothing.
-const JobSection = ({ title, count, open, onToggle, children }) => (
-  <div style={{ marginBottom: '6px' }}>
-    <button type="button" onClick={onToggle} aria-expanded={open}
-      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', borderBottom: '1px solid #EEE', padding: '10px 4px', cursor: 'pointer', textAlign: 'left', minHeight: 'var(--tap)' }}>
-      <span style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>{title}</span>
-      {count > 0 && <span style={{ fontSize: '11px', fontWeight: '700', color: '#E07B2A', background: '#FFF7ED', borderRadius: '999px', padding: '2px 8px' }}>{count}</span>}
-      <span style={{ flex: 1 }} />
-      <span style={{ color: '#9CA3AF', fontSize: '13px' }}>{open ? '▾' : '▸'}</span>
-    </button>
-    {open && <div style={{ paddingTop: '10px' }}>{children}</div>}
+const JobSection = ({ title, count, open, onToggle, active, children }) => {
+  // When `active` is passed, this section is being driven by the sub-tab row
+  // above it instead of by its own header — so it renders bare, or not at all.
+  // JP opened a job on his phone, landed on Work, saw a long list of names and
+  // could not tell what ELSE was in Work: "if someone's new to the app they're
+  // not gonna find out about these." Stacked sections only announce themselves
+  // if you scroll. A row of tabs announces all four at once.
+  //
+  // This is NOT a return to the three-rows-of-nav layout that was killed on
+  // 2026-08-15 (see the comment at the top of this file). That was three rows
+  // stacked BEFORE any content. This is one row, inside one tab, naming the
+  // four things that tab holds.
+  if (active === false) return null
+  if (active === true) return <div>{children}</div>
+  return (
+    <div style={{ marginBottom: '6px' }}>
+      <button type="button" onClick={onToggle} aria-expanded={open}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', borderBottom: '1px solid #EEE', padding: '10px 4px', cursor: 'pointer', textAlign: 'left', minHeight: 'var(--tap)' }}>
+        <span style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>{title}</span>
+        {count > 0 && <span style={{ fontSize: '11px', fontWeight: '700', color: '#E07B2A', background: '#FFF7ED', borderRadius: '999px', padding: '2px 8px' }}>{count}</span>}
+        <span style={{ flex: 1 }} />
+        <span style={{ color: '#9CA3AF', fontSize: '13px' }}>{open ? '▾' : '▸'}</span>
+      </button>
+      {open && <div style={{ paddingTop: '10px' }}>{children}</div>}
+    </div>
+  )
+}
+
+// The second row of navigation inside a job tab. Scrolls sideways rather than
+// wrapping, so four labels plus a count never push the content down the page.
+const SubTabs = ({ items, value, onChange }) => (
+  <div className="tabs tabs-scroll" style={{ marginBottom: '14px' }}>
+    {items.map(i => (
+      <button
+        key={i.key}
+        type="button"
+        className={'tab ' + (value === i.key ? 'active' : '')}
+        onClick={() => onChange(i.key)}
+      >
+        {i.label}
+        {i.count > 0 && (
+          <span style={{ marginLeft: '5px', background: value === i.key ? 'rgba(255,255,255,0.22)' : '#FFF7ED', color: value === i.key ? 'white' : '#E07B2A', borderRadius: '999px', padding: '1px 7px', fontSize: '11px', fontWeight: '700' }}>{i.count}</span>
+        )}
+        {i.dot && <span style={{ marginLeft: '5px', display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#E07B2A', verticalAlign: 'middle' }} />}
+      </button>
+    ))}
   </div>
 )
 
@@ -322,6 +359,17 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [selectedProject, setSelectedProject] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false) // job detail tables in flight (show loading, not a false empty-state)
   const [projectTab, setProjectTab] = useState('work')
+  // The second row, inside Work and inside Plan. Named the way JP named them.
+  const [workSub, setWorkSub] = useState('time')
+  const [planSub, setPlanSub] = useState('schedule')
+  const [jobChatUnread, setJobChatUnread] = useState(false)
+  // Whether the open job's thread has something the owner hasn't seen. Just the
+  // newest timestamp, so it costs one tiny query per job opened. His own
+  // messages never light the dot.
+  const [chatPulseFor, setChatPulseFor] = useState(null)
+  // null = every receipt on the job. 'materials' / 'other' = the slice the owner
+  // just tapped over in Money.
+  const [receiptFilter, setReceiptFilter] = useState(null)
   // Sections are OPEN by default (this is a scrolling page, not an accordion) —
   // this only remembers the ones you deliberately folded away.
   const [closedSections, setClosedSections] = useState({})
@@ -795,7 +843,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const fetchInvoices = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('invoices')
-        .select('*, projects(name, client_name, client_email)')
+        .select('*, projects(name, client_name, client_email, client_phone)')
         .eq('owner_id', profile.id)
         .order('issued_date', { ascending: false })
       if (error) throw error
@@ -881,6 +929,33 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   useEffect(() => {
     fetchSpend(projects)
   }, [projects, fetchSpend])
+
+  // Dot on the Crew chat sub-tab: is the newest message on this job one the
+  // owner hasn't opened, and not one he wrote himself. Runs when a job opens,
+  // and again if he switches jobs. Quiet on every failure — a missing table
+  // (migration not applied) or no signal simply means no dot.
+  useEffect(() => {
+    const pid = selectedProject && selectedProject.id
+    if (!pid || pid === chatPulseFor) return
+    setChatPulseFor(pid)
+    setJobChatUnread(false)
+    setReceiptFilter(null)
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('job_message_feed')
+          .select('created_at, author_id')
+          .eq('project_id', pid)
+          .order('created_at', { ascending: false })
+          .limit(1)
+        if (error) throw error
+        const newest = data && data[0]
+        if (!newest || newest.author_id === profile.id) return
+        const seen = lastChatRead(pid)
+        setJobChatUnread(!seen || new Date(newest.created_at) > new Date(seen))
+      } catch (e) { /* no table, no signal — no dot */ }
+    })()
+  }, [selectedProject, chatPulseFor, profile.id])
 
   useEffect(() => {
     if (activeTab === 'payroll' && workers.length) fetchPayroll()
@@ -1547,6 +1622,48 @@ ${link}`
     const subject = `Invoice${inv.label ? ': ' + inv.label : ''}${job ? ' — ' + job : ''}`
     const body = `Hi${inv.projects && inv.projects.client_name ? ' ' + inv.projects.client_name : ''},\n\n${inv.label || 'Invoice'}${job ? ' for ' + job : ''}: $${Number(inv.amount || 0).toFixed(2)}${inv.due_date ? '\nDue: ' + new Date(inv.due_date + 'T00:00:00').toLocaleDateString() : ''}${inv.payment_link ? '\n\nPay online: ' + inv.payment_link : ''}\n\nThank you,\n${profile.company_name || profile.full_name || ''}`
     window.location.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
+
+  // The same words the email would have carried, on the clipboard instead.
+  // JP's ask, in his words: "instead of the message button, a copy button — at
+  // least they can copy the message and send it to them in an easy way."
+  // mailto: is useless for a client he only has a phone number for, and half
+  // the homeowners he bills are a text message, not an inbox.
+  const invoiceText = (inv) => {
+    const job = inv.projects ? inv.projects.name : ''
+    const who = inv.projects && inv.projects.client_name ? ' ' + inv.projects.client_name : ''
+    return `Hi${who},\n\n${inv.label || 'Invoice'}${job ? ' for ' + job : ''}: $${Number(inv.amount || 0).toFixed(2)}${inv.due_date ? '\nDue: ' + new Date(inv.due_date + 'T00:00:00').toLocaleDateString() : ''}${inv.payment_link ? '\n\nPay online: ' + inv.payment_link : ''}\n\nThank you,\n${profile.company_name || profile.full_name || ''}`
+  }
+
+  const copyInvoice = async (inv) => {
+    const text = invoiceText(inv)
+    try {
+      // navigator.clipboard needs HTTPS and a real user gesture. It is present
+      // on every phone this app runs on, but the fallback matters on an older
+      // Android webview where it silently isn't.
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+      showToast('Copied — paste it into a text ✓')
+    } catch (e) {
+      showToast('Could not copy. Long-press the invoice to select it.', 'error')
+    }
+  }
+
+  // Straight into the phone's messaging app with the invoice already written.
+  // One tap fewer than copy-then-paste when he does have the number.
+  const textInvoice = (inv) => {
+    const phone = inv.projects ? (inv.projects.client_phone || '') : ''
+    window.location.href = `sms:${phone}${phone ? '' : ''}?&body=${encodeURIComponent(invoiceText(inv))}`
   }
 
   const addInvoice = async () => {
@@ -2232,6 +2349,30 @@ ${link}`
 
   const getBudgetPct = (spent, budget) => budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
   const getBudgetClass = (pct) => pct >= 100 ? 'danger' : pct >= 80 ? 'warning' : ''
+  // JP, looking at his own phone: "Bathroom job, close to budget, approaching
+  // limits — so what does that mean?" It meant 80% of one bucket, and the
+  // screen never said WHICH bucket or how much was left. Every budget warning
+  // in this app now answers both in the same breath.
+  const budgetLine = (spent, budget, label) => {
+    if (!(budget > 0)) return ''
+    const pct = Math.round((spent / budget) * 100)
+    const left = budget - spent
+    return left < 0
+      ? `${label} over by ${formatCurrency(Math.abs(left))}`
+      : `${label} ${pct}% — ${formatCurrency(left)} left`
+  }
+  // The single worst bucket on a job, for the one-line warnings on the jobs list
+  // and the home screen. Over-budget always beats merely-close.
+  const worstBudgetLine = (p) => {
+    const s = spendOf(p.id)
+    const lines = [
+      { over: s.materials - p.materials_budget, text: budgetLine(s.materials, p.materials_budget, 'Materials') },
+      { over: s.labor - p.labor_budget, text: budgetLine(s.labor, p.labor_budget, 'Labor') }
+    ].filter(l => l.text)
+    if (!lines.length) return ''
+    lines.sort((a, b) => b.over - a.over)
+    return lines[0].text
+  }
   const spendOf = (pid) => spendByProject[pid] || { materials: 0, labor: 0, other: 0 }
   const coOf = (pid) => coByProject[pid] || 0
   // Contract price the client owes = base contract + approved change orders.
@@ -2423,6 +2564,21 @@ ${link}`
     </div>
   )
 
+  // Tapping a cost total in Money jumps to Work → Receipts with that bucket
+  // already filtered. Returns the handler so both onClick and onKeyDown use one
+  // definition.
+  const openReceiptsFor = (bucket) => () => {
+    setReceiptFilter(bucket)
+    setProjectTab('work')
+    setWorkSub('receipts')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const shownReceipts = receiptFilter === 'materials'
+    ? receipts.filter(r => r.category === 'materials')
+    : receiptFilter === 'other'
+      ? receipts.filter(r => r.category !== 'materials')
+      : receipts
+
   // PROJECT DETAIL VIEW
   if (selectedProject) {
     const sp = spendOf(selectedProject.id)
@@ -2437,8 +2593,8 @@ ${link}`
           <h1 style={{ fontSize: '16px' }}>{selectedProject.name}</h1>
           <span className={'status-pill status-' + selectedProject.stage} aria-label={`Job status: ${stageLabel(selectedProject.stage)}`}>{stageLabel(selectedProject.stage)}</span>
         </div>
-        {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{matPct >= 100 ? '🔴 Materials over budget!' : '⚠️ Materials at ' + Math.round(matPct) + '%'}</div>}
-        {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{labPct >= 100 ? '🔴 Labor over budget!' : '⚠️ Labor at ' + Math.round(labPct) + '%'}</div>}
+        {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{(matPct >= 100 ? "🔴 " : "⚠️ ") + budgetLine(sp.materials, selectedProject.materials_budget, "Materials")}</div>}
+        {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{(labPct >= 100 ? "🔴 " : "⚠️ ") + budgetLine(sp.labor, selectedProject.labor_budget, "Labor")}</div>}
         {/* The pill in the header now only REPORTS the stage; the control that
             changes it says out loud what it will do. It used to be a "Not
             started ↻" pill in the corner — plus a second, identical stage button
@@ -2508,10 +2664,16 @@ ${link}`
                   <p style={{ fontSize: '15px', fontWeight: '700', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f0f0f0' }}>Adjusted contract <span style={{ float: 'right' }}>{formatCurrency(contractOf(selectedProject))}</span></p>
                 </div>
               )}
-              <div className="card">
+              {/* JP: "How do I find out the details on material, and other
+                  cost?" He couldn't — both were dead-end totals. Now the card
+                  IS the way in: it opens the receipts that add up to it. */}
+              <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer' }}
+                onClick={openReceiptsFor('materials')}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReceiptsFor('materials')() } }}>
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>MATERIALS</p>
                 <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(sp.materials)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.materials_budget)}</span></p>
                 <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(matPct)} style={{ width: matPct + '%' }} /></div>
+                <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '700', marginTop: '8px' }}>See the {receipts.filter(r => r.category === 'materials').length || ''} receipts behind this →</p>
               </div>
               <div className="card">
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>LABOR</p>
@@ -2541,10 +2703,13 @@ ${link}`
   )}
               </div>
               {sp.other > 0 && (
-                <div className="card">
+                <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer' }}
+                  onClick={openReceiptsFor('other')}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReceiptsFor('other')() } }}>
                   <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>OTHER COSTS</p>
                   <p style={{ fontWeight: '700', fontSize: '18px', color: '#DC2626' }}>{formatCurrency(sp.other)}</p>
                   <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>Non-materials receipts (gas, permits, tools, subs)</p>
+                  <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '700', marginTop: '8px' }}>See what these were →</p>
                 </div>
               )}
               {/* The two cards that used to sit here (PROFIT TARGET and a second
@@ -2583,7 +2748,17 @@ ${link}`
 
           {projectTab === 'work' && (
             <div>
-              <JobSection title="Time" count={timeEntries.length} open={isOpen('time')} onToggle={() => toggleSection('time')}>
+              <SubTabs
+                value={workSub}
+                onChange={(k) => { setWorkSub(k); if (k !== "receipts") setReceiptFilter(null) }}
+                items={[
+                  { key: 'time', label: 'Time', count: timeEntries.length },
+                  { key: 'daily', label: 'Daily notes', count: dailyLogs.length + jobPhotos.length },
+                  { key: 'receipts', label: 'Receipts', count: receipts.length },
+                  { key: 'mileage', label: 'Mileage', count: mileageEntries.length }
+                ]}
+              />
+              <JobSection active={workSub === "time"}>
               <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: todayLocal(), start_time: '', end_time: '' }) }}>+ Add time</button>
               {timeEntries.map(t => (
                 <div key={t.id} className="card">
@@ -2640,7 +2815,7 @@ ${link}`
                   they're one act — "here's what happened today" — so they're one
                   feed now, grouped by day, newest first. Add a photo, add a
                   note, or both; they land on the same day card. */}
-              <JobSection title="Daily notes" count={dailyLogs.length + jobPhotos.length} open={isOpen('daily')} onToggle={() => toggleSection('daily')}>
+              <JobSection active={workSub === "daily"}>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <label className="btn-primary" style={{ flex: 1, marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
                     {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
@@ -2687,9 +2862,20 @@ ${link}`
                 {dailyLogs.length === 0 && jobPhotos.length === 0 && <div className="empty-state"><p>Nothing logged yet. Snap before/after shots and jot down what happened on site — great for clients, and it settles arguments later.</p></div>}
               </JobSection>
 
-              <JobSection title="Receipts" count={receipts.length} open={isOpen('receipts')} onToggle={() => toggleSection('receipts')}>
+              <JobSection active={workSub === "receipts"}>
                 <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add receipt</button>
-                {receipts.map(r => (
+                {/* Set when the owner tapped the Materials or Other-costs total
+                    over in Money. Says out loud that he's looking at a slice, and
+                    gives him one tap back to all of them. */}
+                {receiptFilter && (
+                  <div className="card" style={{ background: '#FFF7ED', border: '1px solid #FED7AA', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <p style={{ flex: 1, fontSize: '14px', fontWeight: '700', color: '#9A3412' }}>
+                      {receiptFilter === 'materials' ? 'Materials only' : 'Everything except materials'} · {formatCurrency(shownReceipts.reduce((s, r) => s + (r.amount || 0), 0))}
+                    </p>
+                    <button type="button" onClick={() => setReceiptFilter(null)} style={{ background: 'white', border: '1px solid #FED7AA', color: '#9A3412', fontWeight: '700', fontSize: '13px', borderRadius: '8px', padding: '8px 12px', minHeight: '40px', cursor: 'pointer' }}>Show all</button>
+                  </div>
+                )}
+                {shownReceipts.map(r => (
                   <div key={r.id} className="card" role="button" tabIndex={0} onClick={() => setPhotoViewer(r)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPhotoViewer(r) } }} style={{ cursor: r.photo_url ? 'pointer' : 'default' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
@@ -2705,10 +2891,11 @@ ${link}`
                     </div>
                   </div>
                 ))}
+                {shownReceipts.length === 0 && receiptFilter && <div className="empty-state"><p>No receipts in this bucket yet — the total came from somewhere else on the job.</p></div>}
                 {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store, total, sales tax and date for you and adds it to this job's costs.</p></div>}
               </JobSection>
 
-              <JobSection title="Mileage" count={mileageEntries.length} open={isOpen('mileage')} onToggle={() => toggleSection('mileage')}>
+              <JobSection active={workSub === "mileage"}>
               <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
               {mileageEntries.length > 0 && (
                 <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
@@ -2783,7 +2970,29 @@ ${link}`
               in two different rows of navigation. */}
           {projectTab === 'plan' && (
             <div>
-              <JobSection title="Schedule" count={scheduleEntries.length} open={isOpen('schedule')} onToggle={() => toggleSection('schedule')}>
+              <SubTabs
+                value={planSub}
+                onChange={(k) => { setPlanSub(k); if (k === 'chat') setJobChatUnread(false) }}
+                items={[
+                  { key: 'schedule', label: 'Schedule', count: scheduleEntries.length },
+                  { key: 'materials', label: 'Shopping list', count: materialItems.filter(it => !it.bought).length },
+                  { key: 'punch', label: 'Fix-it list', count: punchItems.filter(it => !it.done).length },
+                  { key: 'chat', label: 'Crew chat', dot: jobChatUnread && planSub !== 'chat' }
+                ]}
+              />
+              {/* The talk about the job, kept with the job. JP asked for it next
+                  to the lists rather than off in its own place: the crew reads
+                  "grab two more sheets" in the same tab as the shopping list
+                  it belongs to. */}
+              {planSub === 'chat' && (
+                <div>
+                  <JobChat projectId={selectedProject.id} selfId={profile.id} placeholder={`Message the crew on ${selectedProject.name}…`} />
+                  <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '10px', lineHeight: 1.5 }}>
+                    Everyone assigned to this job sees this thread. Crew on your other jobs do not.
+                  </p>
+                </div>
+              )}
+              <JobSection active={planSub === "schedule"}>
                 <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule worker</button>
                 {scheduleEntries.map(s => (
                   <div key={s.id} className="card">
@@ -2796,7 +3005,7 @@ ${link}`
                 {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job. They see their own days on their phone.</p></div>}
               </JobSection>
 
-              <JobSection title="Shopping list" count={materialItems.filter(it => !it.bought).length} open={isOpen('materials')} onToggle={() => toggleSection('materials')}>
+              <JobSection active={planSub === "materials"}>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                   <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
                   <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
@@ -2812,7 +3021,7 @@ ${link}`
                 {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them. The crew on this job sees it too.</p></div>}
               </JobSection>
 
-              <JobSection title="Fix-it list" count={punchItems.filter(it => !it.done).length} open={isOpen('punch')} onToggle={() => toggleSection('punch')}>
+              <JobSection active={planSub === "punch"}>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                   <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
                   <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
@@ -3095,7 +3304,7 @@ ${link}`
         {activeTab === 'crew' && (
           <div>
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers, their week, and their pay.</p>
-            <HubCard icon="📅" title="This week" sub="Who's working which day, and where" onClick={() => setActiveTab('crewweek')} />
+            <HubCard icon="📅" title="Today and this week" sub="Who is on the clock now, and who is scheduled which day" onClick={() => setActiveTab('crewweek')} />
             <HubCard icon="👷" title="Workers" sub="Add crew, set rates, time-off requests" onClick={() => setActiveTab('workers')} />
             <HubCard icon="💰" title="Crew Pay" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
           </div>
@@ -3540,7 +3749,7 @@ ${link}`
                 {budgetAlerts.map(p => {
                   const s = spendOf(p.id)
                   const over = getBudgetPct(s.materials, p.materials_budget) >= 100 || getBudgetPct(s.labor, p.labor_budget) >= 100
-                  return <div key={p.id} className={over ? 'alert-danger' : 'alert-warning'} role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }}>{over ? '🔴' : '⚠️'} {p.name} — {over ? 'over budget' : 'approaching limit'}</div>
+                  return <div key={p.id} className={over ? 'alert-danger' : 'alert-warning'} role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => fetchProjectDetails(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchProjectDetails(p) } }}>{over ? "🔴 " : "⚠️ "}{p.name} — {worstBudgetLine(p)}</div>
                 })}
               </>
             )}
@@ -3593,7 +3802,15 @@ ${link}`
           <div>
             <BackBtn label="Jobs" onClick={() => setActiveTab('jobs')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Everything coming up across all your jobs.</p>
-            {upcomingSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Assign crew from a job's Schedule tab.</p></div>}
+            {/* This screen used to be a dead end: it said "assign a crew from a
+                job to schedule" and then made JP leave and go find the job. A
+                screen that names the next action has to be able to do it. The
+                modal is the same one the job's Schedule tab opens — with the
+                job dropdown showing, because out here it isn't implied. */}
+            <button className="btn-primary" style={{ marginTop: 0, marginBottom: '14px' }} onClick={() => { setScheduleForm({ worker_id: '', project_id: '', task_description: '', scheduled_date: todayLocal(), start_time: '', end_time: '' }); setShowNewSchedule(true); setInlineError('') }}>
+              + Schedule a worker
+            </button>
+            {upcomingSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Tap the button above to put someone on a day — they see it on their phone straight away.</p></div>}
             {(() => {
               const byDay = {}
               upcomingSchedule.forEach(s => { const k = s.scheduled_date || 'unscheduled'; (byDay[k] = byDay[k] || []).push(s) })
@@ -3702,7 +3919,7 @@ ${link}`
                       </div>
                       {(matPct >= 80 || labPct >= 80) && (
                         <div className={matPct >= 100 || labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ marginBottom: '8px' }}>
-                          {matPct >= 100 || labPct >= 100 ? '🔴 Over budget' : '⚠️ Approaching limit'}
+                          {(matPct >= 100 || labPct >= 100 ? "🔴 " : "⚠️ ") + worstBudgetLine(p)}
                         </div>
                       )}
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#888', marginBottom: '4px' }}><span>Materials</span><span>{formatCurrency(s.materials)} / {formatCurrency(p.materials_budget)}</span></div>
@@ -3900,6 +4117,13 @@ ${link}`
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
               Weekly pay per worker, straight from their clocked hours. Tap "Mark Paid" each week to record a paycheck.
             </p>
+            {/* Moved up here from the bottom of the page at JP's call. Paying a
+                sub in cash is the thing an owner opens this screen to DO; the
+                weekly hours below are the thing he opens it to READ. The doing
+                goes first. The Paid-out ledger itself still lives below. */}
+            <button className="btn-primary" style={{ marginTop: 0, marginBottom: '16px' }} onClick={() => { setShowNewPayout(true); setPayoutForm({ project_id: projects[0] ? projects[0].id : '', paid_to: '', description: '', amount: '', paid_on: '' }); setInlineError('') }}>
+              + Record a payout
+            </button>
             {workers.length === 0 && <div className="empty-state"><p>Add workers first — their clocked hours become weekly paychecks here.</p></div>}
             {workers.map(w => {
               const rows = payroll.filter(r => r.worker_id === w.id)
@@ -3946,7 +4170,11 @@ ${link}`
               <p style={{ fontSize: '13px', color: '#888', margin: '4px 0 12px', padding: '0 4px' }}>
                 Subs, day helpers, anyone you paid on a job who does not clock in. It counts as labor on that job.
               </p>
-              <button className="btn-primary" onClick={() => { setShowNewPayout(true); setPayoutForm({ project_id: projects[0] ? projects[0].id : '', paid_to: '', description: '', amount: '', paid_on: '' }); setInlineError('') }}>
+              {/* The second copy of this button used to be the only one, all
+                  the way down here. The primary now sits at the top of the tab;
+                  this one stays because a long payout list would otherwise send
+                  you scrolling back up to add the next one. */}
+              <button className="btn-secondary" onClick={() => { setShowNewPayout(true); setPayoutForm({ project_id: projects[0] ? projects[0].id : '', paid_to: '', description: '', amount: '', paid_on: '' }); setInlineError('') }}>
                 + Record a payout
               </button>
 
@@ -4002,11 +4230,30 @@ ${link}`
               Quote a job, send it, and turn a "yes" into a job with one tap.
             </p>
             <button className="btn-primary" onClick={openNewEstimate}>+ New estimate</button>
-            {estimates.map(est => {
+            {/* JP asked to see the ones that didn't go through, not only the
+                wins. They stay in the list, but they sink to the bottom under
+                their own heading so the live quotes are what he sees first.
+                Order: still out → won → lost.
+                NOTE: "deleted" estimates are not here because Delete is a real
+                delete — the row is gone from the database. Bringing those back
+                would mean a deleted_at column and a second migration; declined
+                is the case that actually matters and this covers it. */}
+            {[
+              { key: 'open', label: null, rows: estimates.filter(e => e.status !== 'accepted' && e.status !== 'declined') },
+              { key: 'won', label: 'Won', rows: estimates.filter(e => e.status === 'accepted') },
+              { key: 'lost', label: "Didn't go through", rows: estimates.filter(e => e.status === 'declined') }
+            ].filter(g => g.rows.length).map(group => (
+            <div key={group.key}>
+            {group.label && (
+              <p style={{ fontSize: '11px', fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: '1px', margin: '22px 4px 8px', paddingTop: '10px', borderTop: '1px solid #EEE' }}>
+                {group.label} · {group.rows.length}
+              </p>
+            )}
+            {group.rows.map(est => {
               const total = estimateTotal(est.items, est.tax_rate, est.tax_mode)
               const statusColor = est.status === 'accepted' ? 'status-end' : est.status === 'sent' ? 'status-mid' : 'status-start'
               return (
-                <div key={est.id} className="card" style={est.status === 'accepted' ? { background: '#f9fafb' } : undefined}>
+                <div key={est.id} className="card" style={est.status === 'accepted' ? { background: '#f9fafb' } : est.status === 'declined' ? { background: '#f9fafb', opacity: 0.75 } : undefined}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                     <div style={{ flex: 1, paddingRight: '10px' }}>
                       <h3>{est.title || 'Untitled estimate'}</h3>
@@ -4026,6 +4273,8 @@ ${link}`
                 </div>
               )
             })}
+            </div>
+            ))}
             {estimates.length === 0 && (estimatesLoaded
               ? <div className="empty-state"><p>No estimates yet. Quote your next job and send it to win the work.</p></div>
               : <div className="empty-state"><p>Loading…</p></div>)}
@@ -4070,6 +4319,11 @@ ${link}`
                         <button onClick={() => markInvoicePaid(inv)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark paid</button>
                       </div>
                       <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                        {/* Copy is unconditional on purpose — it is the only
+                            send path that works when there is no email and no
+                            phone number on the job at all. */}
+                        <button onClick={() => copyInvoice(inv)} style={btnSm('#E07B2A')}>📋 Copy</button>
+                        {inv.projects && inv.projects.client_phone && <button onClick={() => textInvoice(inv)} style={btnSm('#16A34A')}>💬 Text</button>}
                         {inv.projects && inv.projects.client_email && <button onClick={() => emailInvoice(inv)} style={btnSm('#6366F1')}>✉️ Email</button>}
                         {inv.payment_link && <a href={inv.payment_link} target="_blank" rel="noopener noreferrer" style={{ ...btnSm('#16A34A'), textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>💳 Pay link</a>}
                         <button onClick={() => deleteInvoice(inv)} style={btnSmOutline()}>Delete</button>

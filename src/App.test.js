@@ -24,7 +24,14 @@ const query = () => {
   return q
 }
 
+// NOTE: this mock must export everything supabaseClient.js exports, not just
+// `supabase`. Login.js reads getStaySignedIn() while initialising state, and a
+// mock missing it throws inside the first render — which surfaces here as a
+// test TIMEOUT rather than a TypeError, because the screen simply never appears.
 jest.mock('./supabaseClient', () => ({
+  STAY_KEY: 'jobtally_stay_signed_in',
+  getStaySignedIn: () => true,
+  setStaySignedIn: () => {},
   supabase: {
     auth: {
       getSession: () => Promise.resolve({ data: { session: null } }),

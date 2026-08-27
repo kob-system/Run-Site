@@ -20,25 +20,25 @@ const FEATURES = [
     img: '/landing/clockin-active.png',
     alt: 'JobTally crew clock-in screen with GPS stamp',
     kicker: 'Crew hours',
-    title: 'Your crew clocks in and out with one tap — both GPS-stamped',
+    title: 'Your crew clocks in and out with one tap, both GPS-stamped',
     body:
-      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. No more \"I was there at 7\" — or \"I stayed till 4.\" Two stamps, start and finish, not a tracker — nothing follows your crew around in between, which is why they'll actually use it.",
+      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. No more \"I was there at 7\" or \"I stayed till 4.\" Two stamps, start and finish, not a tracker. Nothing follows your crew around in between, which is why they'll actually use it.",
   },
   {
     img: '/landing/receipts-list.png',
     alt: 'JobTally receipts list booked to a job',
     kicker: 'Receipts',
-    title: 'Snap a receipt — store, total, tax and date fill themselves in',
+    title: 'Snap a receipt and the store, total, tax and date fill themselves in',
     body:
-      'Take a photo at the register and JobTally reads the store, the total, the sales tax and the date off it, and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing, and because the tax and the real purchase date are already on there, tax time stops being a nightmare weekend.',
+      'Take a photo at the register and JobTally reads the store, the total, the sales tax and the date off it, and drops them into a new expense. You just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing, and because the tax and the real purchase date are already on there, tax time stops being a nightmare weekend.',
   },
   {
     img: '/landing/job-profit.png',
     alt: 'JobTally job screen showing live materials, labor, and projected profit',
     kicker: 'Profit',
-    title: "See what every job is making — while it's still running",
+    title: "See what every job is making, while it's still running",
     body:
-      "Every job shows what you're charging, what's gone out in labor and materials, and what's left for you — live, not three months later when it's too late to fix. If a job starts bleeding, you know that week.",
+      "Every job shows what you're charging, what's gone out in labor and materials, and what's left for you. Live, not three months later when it's too late to fix. If a job starts bleeding, you know that week.",
   },
   {
     img: '/landing/estimate-sent.png',
@@ -60,7 +60,7 @@ const HOME_FEATURE = {
   kicker: 'Your home screen',
   title: 'Open it and the first thing you see is what you’re owed',
   body:
-    "Active jobs, open estimates and your projected profit sit right underneath it. And you're never left guessing what to do first — a setup guide walks you through your first job, your crew, your first estimate and your first invoice, ticking each step off by itself as you go.",
+    "Active jobs, open estimates and your projected profit sit right underneath it. And you're never left guessing what to do first. A setup guide walks you through your first job, your crew, your first estimate and your first invoice, ticking each step off by itself as you go.",
 }
 const INCLUDED = [
   'Talk to it instead of tapping',
@@ -75,29 +75,29 @@ const INCLUDED = [
   'Business health dashboard',
   'Reports & tax exports',
   'Insurance & license reminders',
-  'Works on any phone — no install',
+  'Works on any phone, no install',
 ]
 
 const FAQS = [
   {
     q: 'Do I need a credit card to try it?',
-    a: 'There is no card at signup. You run one job free, for as long as you want. When you need a second job open at the same time it is $150/mo — every feature, unlimited crew.',
+    a: 'There is no card at signup. You run one job free, for as long as you want. When you need a second job open at the same time it is $150/mo for every feature, unlimited crew.',
   },
   {
     q: 'What does my crew have to do?',
-    a: 'Nothing. You text each guy an invite link, he taps it, and he is in — you already typed his name when you made the link, so there is nothing for him to fill in. No password, no email, nothing to download. From then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it.',
+    a: 'Nothing. You text each guy an invite link, he taps it, and he is in. You already typed his name when you made the link, so there is nothing for him to fill in. No password, no email, nothing to download. From then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it.',
   },
   {
     q: "I'm not a tech guy. How long is setup?",
-    a: 'About five minutes. When you first sign in, a setup guide walks you through your first job, your crew, your first estimate and invoice — each step checks itself off as you go.',
+    a: 'About five minutes. When you first sign in, a setup guide walks you through your first job, your crew, your first estimate and invoice, and each step checks itself off as you go.',
   },
   {
     q: 'Do I really just talk to it?',
-    a: 'Yes. Hold the mic and say it the way you\'d say it to a foreman — "Dave was on the Miller deck six hours," "how much am I making on the Klein job" — and it does it and reads the answer back. It always shows you what it\'s about to save before it saves, so it can\'t put something in your books you didn\'t agree to. Your crew can use it too, for clocking in and logging receipts.',
+    a: 'Yes. Hold the mic and say it the way you\'d say it to a foreman. "Dave was on the Miller deck six hours." "How much am I making on the Klein job." It does it and reads the answer back. It always shows you what it\'s about to save before it saves, so it can\'t put something in your books you didn\'t agree to. Your crew can use it too, for clocking in and logging receipts.',
   },
   {
     q: 'What if I want out?',
-    a: 'Cancel anytime, no contract. Your data stays yours — you can export everything to a spreadsheet whenever you want, even after you cancel your subscription. And if you want it all gone, there\'s a delete button in Settings that erases the whole account.',
+    a: 'Cancel anytime, no contract. Your data stays yours. You can export everything to a spreadsheet whenever you want, even after you cancel your subscription. And if you want it all gone, there\'s a delete button in Settings that erases the whole account.',
   },
 ]
 
@@ -108,7 +108,7 @@ export default function Landing() {
   const [quotes, setQuotes] = useState([])
 
   useEffect(() => {
-    document.title = 'JobTally — know what every job really makes'
+    document.title = 'JobTally: know what every job really makes'
     // Top of the funnel. Once per tab so a re-render doesn't inflate it.
     trackOnce(EV.LANDING_VIEW)
   }, [])
@@ -143,12 +143,6 @@ export default function Landing() {
     introPlayedRef.current = true
     track(EV.LANDING_CTA, { where: 'intro-video-play' })
   }
-  const pitchPlayedRef = useRef(false)
-  const onPitchPlay = () => {
-    if (pitchPlayedRef.current) return
-    pitchPlayedRef.current = true
-    track(EV.LANDING_CTA, { where: 'video-play' })
-  }
 
   return (
     <div className="ld">
@@ -167,12 +161,21 @@ export default function Landing() {
           <div className="ld-hero-copy">
             <h1>Know what every job really makes.</h1>
             <p className="ld-sub">
-              JobTally tracks your crew's hours, your receipts, and your profit — live,
+              JobTally tracks your crew's hours, your receipts, and your profit, live,
               from the phone already in your pocket. Built for contractors running a
               2–10 man crew.
             </p>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free — no card</a>
-            <div className="ld-cta-note">One job, free forever — no card. $150/mo when you want two at once.</div>
+            {/* THE BIG IDEA, and JP called it that: "one active job, free,
+                forever, no card" is the whole offer, not a footnote under the
+                button. His framing, word for word: "give it a shot, it's free,
+                just track one job with it and see how that goes." So it gets
+                its own band above the button, at a size you cannot miss. */}
+            <div className="ld-free">
+              <div className="ld-free-big">One job. Free forever.</div>
+              <div className="ld-free-sub">No card. Not a trial. Track one job with it and see how it goes.</div>
+            </div>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free, no card</a>
+            <div className="ld-cta-note">$150/mo only when you want a second job open at the same time.</div>
             <a className="ld-intro-link" href="#intro">
               <span className="ld-play" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
@@ -185,7 +188,7 @@ export default function Landing() {
                 Watching a video is passive; tapping through the actual app is
                 the thing that makes someone believe it. */}
             <a className="ld-demo-link" href="/demo" onClick={cta('hero-demo')}>
-              Or try it yourself — no signup, no card
+              Or try it yourself. No signup, no card
             </a>
             <ul className="ld-trust">
               <li>Set up in ~5 minutes</li>
@@ -197,7 +200,7 @@ export default function Landing() {
                 that can actually act on it. */}
             <div className="ld-a2hs">
               <div className="ld-a2hs-copy">
-                <strong>Nothing to download.</strong> No app store, no waiting — it's a web page.
+                <strong>Nothing to download.</strong> No app store, no waiting. It's a web page.
                 Put it on your home screen and it opens like anything else on your phone.
               </div>
               <InstallButton />
@@ -207,7 +210,7 @@ export default function Landing() {
             <div className="ld-phone">
               <img src="/landing/jobs-list.png" alt="JobTally jobs list showing live projected profit per job" width="390" height="844" />
             </div>
-            <div className="ld-shot-caption">Real screens from the app — this is what you get.</div>
+            <div className="ld-shot-caption">Real screens from the app. This is what you get.</div>
           </div>
         </div>
       </section>
@@ -240,75 +243,6 @@ export default function Landing() {
           convincing possible way to sell "you can just say it out loud." The
           spoken sentences ARE the demo, so they're the whole section. Kept to
           one tight band because the page's last pass was specifically about
-          not describing the product four times. */}
-      <section className="ld-say">
-        <div className="ld-inner">
-          <div className="ld-say-kicker">The part nobody else has</div>
-          <h2>Or don't tap anything. Just say it.</h2>
-          <p className="ld-say-lede">
-            Hold the mic and talk like you'd talk to a foreman. It does the work, reads the
-            answer back out loud, and shows you exactly what it's about to save before it
-            saves it. Built for a truck, a job site, and hands that aren't clean.
-          </p>
-          <div className="ld-say-list">
-            {[
-              {
-                said: '"Put Dave and Tony on the Miller deck, six hours each, and I drove fifteen miles each way."',
-                did: 'Two time entries and a mileage trip — one confirmation, all at once.',
-              },
-              {
-                said: '"How much am I actually making on the Klein bathroom?"',
-                did: 'Reads you the contract, what’s gone out in labor and materials, and what’s left.',
-              },
-              {
-                said: '"New job, Delgado basement, twenty-two thousand."',
-                did: 'Walks you through it one question at a time and creates the job.',
-              },
-            ].map((x) => (
-              <div className="ld-say-item" key={x.said}>
-                <div className="ld-say-said"><span aria-hidden="true">🎤</span> {x.said}</div>
-                <div className="ld-say-did">{x.did}</div>
-              </div>
-            ))}
-          </div>
-          <p className="ld-say-foot">
-            Your crew gets it too — they can clock in, log a receipt, or ask for a day off
-            without learning a single screen.
-          </p>
-        </div>
-      </section>
-      {/* Why this exists — origin story / trust band */}
-      <section className="ld-story">
-        <div className="ld-inner ld-story-inner">
-          <div className="ld-story-kicker">Why this exists</div>
-          <h2>Built for a contractor who was losing money he couldn't see.</h2>
-          <p>
-            JobTally started with a contractor friend of ours in Troy, NY. Good builder, steady
-            work, crew of guys who showed up. His system: crew hours scribbled in
-            <strong> spiral notebooks</strong>, and every receipt from the supply house stuffed into
-            a <strong>plastic sheet</strong> in the truck — crumpled, coffee-stained, half of them
-            faded to nothing.
-          </p>
-          <p>
-            Ask him if a job made money and he'd say "pretty sure." Come tax time it was a
-            <strong> nightmare weekend</strong> of flattening receipts on the kitchen table, trying
-            to remember which job the lumber run belonged to. He wasn't losing money because he was
-            bad at building — he was losing it because nobody could see the numbers until it was way
-            too late.
-          </p>
-          <p className="ld-story-punch">
-            <strong>So we built JobTally to kill that.</strong> The notebook, the plastic sheet, the
-            tax-time archaeology — all of it. One app, on the phones you and your crew already carry,
-            that keeps score while the job is running.
-          </p>
-          <a className="ld-intro-link" href="#intro">
-            <span className="ld-play" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
-            </span>
-            Hear it from the guy who built it — 3-minute introduction
-          </a>
-        </div>
-      </section>
       {/* Introduction — a face and the honest origin, before anyone is asked
           for anything. Same file and same placement rule as /remodelers: it
           sits ABOVE the walkthrough, because the intro's closing line points
@@ -331,8 +265,8 @@ export default function Landing() {
             </video>
           </div>
           <div className="ld-video-after">
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start free — no card</a>
-            <div className="ld-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start free, no card</a>
+            <div className="ld-cta-note">Or watch the walkthrough below first. No sign-up needed for either.</div>
           </div>
         </div>
       </section>
@@ -374,7 +308,7 @@ export default function Landing() {
                     <blockquote>{t.quote}</blockquote>
                     {(who || t.city) && (
                       <figcaption>
-                        {who}{who && t.city ? ' — ' : ''}{t.city}
+                        {who}{who && t.city ? ', ' : ''}{t.city}
                       </figcaption>
                     )}
                   </figure>
@@ -385,36 +319,17 @@ export default function Landing() {
         </section>
       )}
 
-      {/* Watch-it-run video — click-to-play, nothing loads until they hit play */}
-      <section className="ld-video" id="video">
-        <div className="ld-inner">
-          <h2>See it run — 3-minute walkthrough</h2>
-          <p className="ld-kicker">Watch a real job go from clock-in to profit. No sign-up needed.</p>
-          <div className="ld-video-frame">
-            <video
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/pitch-poster.jpg"
-              src="/landing/JobTally-Pitch.mp4"
-              onPlay={onPitchPlay}
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-        </div>
-      </section>
       <section className="ld-pricing">
         <div className="ld-inner">
           <h2>One price. Everything. No games.</h2>
           <div className="ld-price-card">
             <div className="ld-price">$150<span>/mo</span></div>
             <ul>
-              <li>Unlimited crew — no per-seat charges</li>
+              <li>Unlimited crew, no per-seat charges</li>
               <li>Every feature included, nothing gated</li>
-              <li>One job free, forever — no card</li>
+              <li>One job free, forever, no card</li>
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
-              <li>Cancel anytime — your data stays yours, export it whenever</li>
+              <li>Cancel anytime. Your data stays yours, export it whenever</li>
             </ul>
             {/* The old "Everything's included. Nothing's gated." section was a
                 third full-width pass over the feature list, three screens above
@@ -426,7 +341,7 @@ export default function Landing() {
                 {INCLUDED.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free — no card</a>
+            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free, no card</a>
             <p className="ld-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
             </p>
@@ -453,37 +368,8 @@ export default function Landing() {
           </p>
         </div>
       </section>
-      {/* Free calculator — the give-before-you-ask page. It lived only as an
-          anchor two thirds down /remodelers (one partner's flyer page), so the
-          home page never sent anyone to the one thing a contractor will use
-          before he trusts us. */}
-      <section className="ld-calc-strip">
-        <div className="ld-inner">
-          <h2>Not ready to sign up? Run your last job through it.</h2>
-          <p>
-            Contract price, hours, materials, overhead — thirty seconds and you'll see what that
-            job really made. Free, no signup, no card.
-          </p>
-          <a className="ld-cta" href="/calculator" onClick={cta('calculator')}>
-            Open the free profit calculator
-          </a>
-        </div>
-      </section>
-      {/* Final CTA */}
-      <section className="ld-final">
-        <h2>Know your number before the job's over.</h2>
-        <p>Setup takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="ld-cta" href={SIGNUP_URL} onClick={cta('final')}>Start free — no card</a>
-        <a className="ld-intro-link ld-intro-link-onnavy" href="#intro">
-          <span className="ld-play" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
-          </span>
-          Still deciding? Watch the 3-minute introduction
-        </a>
-      </section>
-
       <footer className="ld-footer">
-        <a href="/login">Sign in</a>·<a href="/faq/">FAQ</a>·<a href="/calculator">Profit calculator</a>·<a href="/your-data/">Your data</a>·<a href="/remodelers">For remodelers</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
+        <a href="/login">Sign in</a>·<a href="/faq/">FAQ</a>·<a href="/your-data/">Your data</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
         <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
       </footer>
     </div>
