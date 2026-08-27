@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { supabase } from '../supabaseClient'
+import { supabase, getStaySignedIn, setStaySignedIn } from '../supabaseClient'
 import { getAttribution, saveSignupAttribution } from '../utils/attribution'
 import buildInfo from '../buildInfo.json'
 
@@ -35,6 +35,9 @@ export default function Login() {
   const [inviteToken, setInviteToken] = useState(null)
   const [inviteOwnerId, setInviteOwnerId] = useState(null)
   const [inviteCompany, setInviteCompany] = useState('')
+  // Defaults ON. The whole point is that a crew member never types a password
+  // to clock in; turning it off is the exception (a shared or borrowed phone).
+  const [stayIn, setStayIn] = useState(getStaySignedIn())
 
   // Marketing CTAs (e.g. /remodelers) land on /?signup=1 — open straight to
   // the Create Account form instead of making them find the toggle.
@@ -73,6 +76,9 @@ export default function Login() {
     e.preventDefault()
     setLoading(true)
     setError('')
+    // Set the storage choice BEFORE signing in, so the brand-new session is
+    // written straight into the right store instead of being migrated after.
+    setStaySignedIn(stayIn)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) setError(friendlyError(error.message))
     setLoading(false)
@@ -111,6 +117,7 @@ export default function Login() {
     setLoading(true)
     setError('')
     setNotice('')
+    setStaySignedIn(stayIn)
 
     let ownerId = null
     if (role === 'worker' && inviteOwnerId) {
@@ -227,8 +234,14 @@ export default function Login() {
   // Ordered list of fields for the current mode. Recomputed each render, so
   // switching Sign In/Create Account or owner/worker reshapes the remaining
   // steps automatically.
+  // SIGN IN IS ONE SCREEN, ON PURPOSE. It used to be email on step 1 and
+  // password on step 2 — and a browser or iPhone password manager will not
+  // offer to save or fill a login where the username field is not in the DOM at
+  // the same time as the password field. That is why signing back in always
+  // meant typing the whole password by hand. Two fields is not a wall; splitting
+  // them cost the one feature that makes signing in effortless. Do not re-split.
   const steps = (() => {
-    if (!isSignup) return ['email', 'password']
+    if (!isSignup) return ['signin']
     if (inviteToken) return ['name', 'email', 'password']
     return ['role', 'name', role === 'owner' ? 'company' : 'ownerEmail', 'email', 'password']
   })()
@@ -250,6 +263,10 @@ export default function Login() {
   // Validate just the field currently on screen before moving on.
   const validateStep = () => {
     switch (stepKey) {
+      case 'signin':
+        if (!emailOk(email)) return 'Enter a valid email address.'
+        if (!password) return 'Please enter your password.'
+        break
       case 'name': if (!name.trim()) return 'Please enter your name.'; break
       case 'company': if (!company.trim()) return 'Please enter your company name.'; break
       case 'ownerEmail': if (!emailOk(ownerEmail)) return "Enter your boss's email address."; break
@@ -296,14 +313,18 @@ export default function Login() {
       <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
           <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1C2B3A', margin: 0 }}>{isSignup ? 'Create Account' : 'Sign In'}</h2>
-          <span style={{ marginLeft: 'auto', fontSize: '12px', fontWeight: '600', color: '#9CA3AF' }}>Step {step + 1} of {steps.length}</span>
+          {steps.length > 1 && <span style={{ marginLeft: 'auto', fontSize: '12px', fontWeight: '600', color: '#9CA3AF' }}>Step {step + 1} of {steps.length}</span>}
         </div>
-        {/* Progress: one segment per field, filled up to the current step */}
-        <div style={{ display: 'flex', gap: '6px', marginBottom: '18px' }} aria-hidden="true">
-          {steps.map((_, i) => (
-            <div key={i} style={{ height: '4px', borderRadius: '2px', flex: 1, background: i <= step ? '#E07B2A' : '#E5E7EB', transition: 'background .2s ease' }} />
-          ))}
-        </div>
+        {/* Progress: one segment per field, filled up to the current step.
+            Hidden on sign-in, which is a single screen — a one-segment bar
+            that is always full is decoration, not information. */}
+        {steps.length > 1 && (
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '18px' }} aria-hidden="true">
+            {steps.map((_, i) => (
+              <div key={i} style={{ height: '4px', borderRadius: '2px', flex: 1, background: i <= step ? '#E07B2A' : '#E5E7EB', transition: 'background .2s ease' }} />
+            ))}
+          </div>
+        )}
         {error && <div className="alert-danger">{error}</div>}
         {notice && <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', color: '#15803d', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', fontWeight: '600', marginBottom: '12px' }}>{notice}</div>}
         <form onSubmit={handleNext}>
@@ -311,6 +332,27 @@ export default function Login() {
             <div style={{ background: '#FFF4ED', border: '1px solid #E07B2A', borderRadius: '8px', padding: '12px', fontSize: '14px', color: '#1C2B3A', marginBottom: '16px', fontWeight: '600' }}>
               🎉 <strong>{inviteCompany}</strong> invited you to join the crew. Set your name, then a password, to get started.
             </div>
+          )}
+
+          {/* Both fields, one form, real name= attributes — this is what makes
+              "Save password?" appear on iPhone and Chrome. */}
+          {stepKey === 'signin' && (
+            <>
+              <div className="input-group">
+                <label htmlFor="li-email">Your Email</label>
+                <input ref={activeRef} id="li-email" name="email" type="email" inputMode="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required />
+              </div>
+              <div className="input-group">
+                <label htmlFor="li-password">Password</label>
+                <div className="pw-wrap">
+                  <input id="li-password" name="password" type={showPw ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+                  <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
+                </div>
+                <p style={{ textAlign: 'right', margin: '8px 2px 0' }}>
+                  <button type="button" onClick={handleForgotPassword} disabled={loading} style={{ background: 'none', border: 'none', color: '#E07B2A', fontWeight: '600', fontSize: '13px', cursor: 'pointer', padding: 0 }}>Forgot password?</button>
+                </p>
+              </div>
+            </>
           )}
 
           {stepKey === 'role' && (
@@ -341,9 +383,13 @@ export default function Login() {
 
           {stepKey === 'password' && (
             <div className="input-group">
+              {/* Password managers refuse to save a new password unless a
+                  username field is in the same form. On signup the email is a
+                  step behind, so it rides along here, hidden and read-only. */}
+              <input type="text" name="username" autoComplete="username" value={email} readOnly tabIndex={-1} aria-hidden="true" style={{ position: 'absolute', opacity: 0, height: 0, width: 0, padding: 0, border: 0 }} />
               <label htmlFor="li-password">Password</label>
               <div className="pw-wrap">
-                <input ref={activeRef} id="li-password" type={showPw ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required minLength={isSignup ? 6 : undefined} />
+                <input ref={activeRef} id="li-password" name="new-password" type={showPw ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required minLength={isSignup ? 6 : undefined} />
                 <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
               </div>
               {isSignup && <p style={{ fontSize: '12px', color: '#6B7280', margin: '6px 2px 0' }}>At least 6 characters.</p>}
@@ -353,6 +399,25 @@ export default function Login() {
                 </p>
               )}
             </div>
+          )}
+
+          {/* The switch JP asked for, in his words: "a button they can confirm
+              that it stays signed in." Shown on the screen where the password
+              is typed — sign-in, and the last step of sign-up — because that is
+              the moment the promise means something. */}
+          {(stepKey === 'signin' || (isSignup && stepKey === 'password')) && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', margin: '4px 2px 16px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={stayIn}
+                onChange={e => { setStayIn(e.target.checked); setStaySignedIn(e.target.checked) }}
+                style={{ width: '20px', height: '20px', marginTop: '1px', accentColor: '#E07B2A', flex: '0 0 auto' }}
+              />
+              <span style={{ fontSize: '13px', color: '#4B5563', lineHeight: 1.4 }}>
+                <strong style={{ color: '#1C2B3A' }}>Keep me signed in on this phone</strong><br />
+                No password next time — just open JobTally. Turn this off on a shared phone.
+              </span>
+            </label>
           )}
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>

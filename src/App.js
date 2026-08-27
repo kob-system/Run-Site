@@ -28,7 +28,6 @@ const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
 const Demo = React.lazy(() => import('./pages/Demo'))
 // Same reasoning: a marketing page must never ride in the bundle a paying
 // customer downloads.
-const Calculator = React.lazy(() => import('./pages/Calculator'))
 const NotFound = React.lazy(() => import('./pages/NotFound'))
 const InviteHandoff = React.lazy(() => import('./components/InviteHandoff'))
 // The crew's front door. Split out like every other screen — an owner signing
@@ -334,12 +333,12 @@ export default function App() {
   if (path === '/demo') {
     return <Screen><Demo /></Screen>
   }
-  // /calculator is the free job-profit calculator on its own URL. Public and
-  // logged-out-safe like the two above: it computes entirely in the browser and
-  // only touches Supabase if a visitor asks for their numbers by email.
-  if (path === '/calculator') {
-    return <Screen><Calculator /></Screen>
-  }
+  // /calculator is GONE, deliberately, 2026-08-26. JP's call on his own
+  // walkthrough: "the calculator is shit, I think we should get rid of it."
+  // It was a second thing to try INSTEAD of signing up, on a page whose only
+  // job is to get someone to sign up. The page, the shared component and the
+  // send-lead-numbers endpoint behind it were all deleted with it. Do not
+  // re-add the route without re-adding all three.
 
   // Password recovery beats every other branch, including a live session. The
   // older implicit recovery link signs the user in as the page loads, so any

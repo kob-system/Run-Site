@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { track, trackOnce, EV } from '../utils/analytics'
 import InstallButton from '../components/InstallButton'
-import ProfitCalculator from '../components/ProfitCalculator'
 import './Remodelers.css'
 
 // Public marketing page at /remodelers — remodelers & GCs running a 2–10 man
@@ -138,8 +137,6 @@ export default function Remodelers() {
           </span>
           New here? Start with the 3-minute introduction
         </a>
-        <br />
-        <a className="rl-calc-link" href="#calculator">Not ready? Run your last job through the free profit calculator ↓</a>
       </section>
 
       {/* Introduction — the FIRST thing flyer traffic should hit. Someone who
@@ -307,8 +304,6 @@ export default function Remodelers() {
         </div>
       </section>
 
-      {/* Free calculator — shared with /calculator so both pages run the same math */}
-      <ProfitCalculator source="remodelers-calculator" />
 
       {/* Pricing */}
       <section className="rl-pricing">

@@ -6,6 +6,7 @@ import { captureGps } from '../utils/gps'
 import AssistantPanel from '../components/AssistantPanel'
 import InstallPrompt from '../components/InstallPrompt'
 import ConfirmSheet from '../components/ConfirmSheet'
+import JobChat, { lastChatRead } from '../components/JobChat'
 
 const OFFLINE_KEY = 'runsite_offline_entry'
 const MAX_RETRIES = 3
@@ -88,6 +89,16 @@ export default function WorkerDashboard({ profile }) {
   const [togglingItem, setTogglingItem] = useState(null)
   // Styled replacement for native confirm(): { message, confirmLabel, onConfirm }.
   const [confirmSheet, setConfirmSheet] = useState(null)
+  // The Lists tab holds two things now: the boss's lists, and the job's chat
+  // thread. JP asked for the chat "mixed in with the lists" rather than as a
+  // sixth tab — five already share the width of a phone.
+  const [listsSub, setListsSub] = useState('lists')
+  const [chatProject, setChatProject] = useState('')
+  const [hasUnread, setHasUnread] = useState(false)
+  // "Ask my boss to put me on a job" — the button that replaced a dead label.
+  const [askingBoss, setAskingBoss] = useState(false)
+  const [askedBoss, setAskedBoss] = useState(false)
+  const [askBossError, setAskBossError] = useState('')
 
   // Refs so the sync lock / retry timer / mounted check are synchronous and not
   // subject to stale-closure bugs the way React state is.
@@ -133,6 +144,7 @@ export default function WorkerDashboard({ profile }) {
     fetchJobPhotos()
     fetchLists()
     fetchCrewmates()
+    fetchChatPulse()
   }, [])
 
   // One assigned job? Always pin selection to it so a reassignment is reflected.
@@ -144,6 +156,13 @@ export default function WorkerDashboard({ profile }) {
       setSelectedProject('')
     }
   }, [projects, selectedProject])
+
+  // The chat always opens on a job. Default to his first one, and never leave a
+  // job he's been taken off selected.
+  useEffect(() => {
+    if (!projects.length) { setChatProject(''); return }
+    if (!chatProject || !projects.some(p => p.id === chatProject)) setChatProject(projects[0].id)
+  }, [projects, chatProject])
 
   // Re-fetch on RECONNECT only. The mount effect above already does the first
   // load; without the guard this fires again on mount (isOnline starts true),
@@ -161,6 +180,7 @@ export default function WorkerDashboard({ profile }) {
       fetchJobPhotos()
       fetchLists()
       fetchCrewmates()
+      fetchChatPulse()
     }
   }, [isOnline])
 
@@ -487,6 +507,58 @@ export default function WorkerDashboard({ profile }) {
       showToast("Couldn't save that — try again")
     }
     setTogglingItem(null)
+  }
+
+  // Is there anything in any of this worker's job threads he hasn't seen? Only
+  // the newest 50 rows and only the timestamps — enough for a dot on the tab,
+  // and cheap enough to run on the same schedule as everything else. Somebody
+  // else's message counts; his own never does.
+  const fetchChatPulse = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('job_message_feed')
+        .select('project_id, created_at, author_id')
+        .order('created_at', { ascending: false })
+        .limit(50)
+      if (error) throw error
+      const unread = (data || []).some(m => {
+        if (m.author_id === profile.id) return false
+        const seen = lastChatRead(m.project_id)
+        return !seen || new Date(m.created_at) > new Date(seen)
+      })
+      setHasUnread(unread)
+    } catch (e) {
+      // 42P01 (migration not run) or no signal — no dot, no noise.
+    }
+  }
+
+  // Emails the owner "your guy is waiting on a job." Everything about who is
+  // asking and who receives it is resolved server-side from the token; the
+  // phone only says "send it".
+  const requestAssignment = async () => {
+    if (askingBoss || askedBoss) return
+    setAskBossError('')
+    if (!profile.owner_id) { setAskBossError("You're not linked to a boss yet. Ask him for a fresh invite link."); return }
+    setAskingBoss(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('no session')
+      const resp = await fetch('/api/request-assignment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({})
+      })
+      const data = await resp.json().catch(() => ({}))
+      if (!data.success) throw new Error(data.error || 'failed')
+      setAskedBoss(true)
+      showToast('Sent to your boss ✓')
+    } catch (e) {
+      setAskBossError(e.message && e.message !== 'failed' && e.message !== 'no session'
+        ? e.message
+        : "Couldn't send that. Check your signal and try again.")
+    } finally {
+      setAskingBoss(false)
+    }
   }
 
   const fetchTimeOff = async () => {
@@ -824,6 +896,7 @@ export default function WorkerDashboard({ profile }) {
         <button className={'tab ' + (activeTab === 'schedule' ? 'active' : '')} onClick={() => setActiveTab('schedule')}>Schedule</button>
         <button className={'tab ' + (activeTab === 'lists' ? 'active' : '')} onClick={() => setActiveTab('lists')}>
           Lists{openListCount > 0 && <span style={{ marginLeft: '4px', background: '#E07B2A', color: 'white', borderRadius: '999px', padding: '1px 6px', fontSize: '11px', fontWeight: '700' }}>{openListCount}</span>}
+          {hasUnread && activeTab !== 'lists' && <span style={{ marginLeft: '4px', display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#E07B2A', verticalAlign: 'middle' }} />}
         </button>
         <button className={'tab ' + (activeTab === 'history' ? 'active' : '')} onClick={() => setActiveTab('history')}>History</button>
         <button className={'tab ' + (activeTab === 'timeoff' ? 'active' : '')} onClick={() => setActiveTab('timeoff')}>Time Off</button>
@@ -897,9 +970,26 @@ export default function WorkerDashboard({ profile }) {
                     </button>
                   )}
                 </div>
+              ) : projects.length === 0 ? (
+                /* This used to be the LABEL on a disabled Clock In button:
+                   "Ask your boss to assign a job." JP tapped it, nothing
+                   happened, and he got the no-entry cursor — the app told him
+                   to do something and then refused to let him do it. Now the
+                   button sends the ask. */
+                <div>
+                  <button
+                    className="btn-primary"
+                    onClick={requestAssignment}
+                    disabled={askingBoss || askedBoss || !isOnline}
+                    style={{ fontSize: '17px', padding: '18px', minHeight: '60px', background: askedBoss ? '#16A34A' : undefined }}
+                  >
+                    {askedBoss ? '✓ Sent — he\'ll get an email' : askingBoss ? 'Sending…' : !isOnline ? '📶 No signal — try when you have bars' : '👋 Ask my boss to put me on a job'}
+                  </button>
+                  {askBossError && <p style={{ fontSize: '13px', color: '#B45309', marginTop: '8px' }}>{askBossError}</p>}
+                </div>
               ) : (
-                <button className="btn-primary" onClick={clockIn} disabled={loading || (isOnline && !clockReady) || projects.length === 0} style={{ fontSize: '18px', padding: '18px', minHeight: '60px' }}>
-                  {projects.length === 0 ? 'Ask your boss to assign a job' : loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
+                <button className="btn-primary" onClick={clockIn} disabled={loading || (isOnline && !clockReady)} style={{ fontSize: '18px', padding: '18px', minHeight: '60px' }}>
+                  {loading ? 'Clocking In...' : (isOnline && !clockReady) ? 'Checking…' : 'Clock In'}
                 </button>
               )}
               <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '14px', lineHeight: '1.5', borderTop: '1px solid #f0f0f0', paddingTop: '12px' }}>
@@ -915,7 +1005,7 @@ export default function WorkerDashboard({ profile }) {
             {projects.length === 0 && !currentEntry && clockReady && (
               <div className="empty-state">
                 <p style={{ fontWeight: '700', color: '#1C2B3A', marginBottom: '4px' }}>You’re on the crew ✓</p>
-                <p>Your boss picks which job you’re on. Once he does, your Clock In button turns on right here. Nothing else for you to do.</p>
+                <p>Your boss picks which job you’re on. Once he does, your Clock In button turns on right here by itself — nothing else for you to do. If he hasn’t yet, tap the button above and he gets an email.</p>
               </div>
             )}
 
@@ -1007,6 +1097,43 @@ export default function WorkerDashboard({ profile }) {
 
         {activeTab === 'lists' && (
           <div>
+            {/* Two things live under one tab: what the boss wants done, and the
+                talk about getting it done. Same row, one tap apart. */}
+            <div className="tabs" style={{ marginBottom: '14px' }}>
+              <button className={'tab ' + (listsSub === 'lists' ? 'active' : '')} onClick={() => setListsSub('lists')}>
+                Lists{openListCount > 0 && <span style={{ marginLeft: '4px', background: listsSub === 'lists' ? 'white' : '#E07B2A', color: listsSub === 'lists' ? '#1C2B3A' : 'white', borderRadius: '999px', padding: '1px 6px', fontSize: '11px', fontWeight: '700' }}>{openListCount}</span>}
+              </button>
+              <button className={'tab ' + (listsSub === 'chat' ? 'active' : '')} onClick={() => { setListsSub('chat'); setHasUnread(false) }}>
+                Chat{hasUnread && listsSub !== 'chat' && <span style={{ marginLeft: '5px', display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#E07B2A', verticalAlign: 'middle' }} />}
+              </button>
+            </div>
+
+            {listsSub === 'chat' && (
+              projects.length === 0
+                ? <div className="empty-state"><p>You’ll get a thread here once your boss puts you on a job.</p></div>
+                : (
+                  <div>
+                    {projects.length > 1 && (
+                      <div className="input-group" style={{ marginBottom: '12px' }}>
+                        <label htmlFor="chat-job">Job</label>
+                        <select id="chat-job" value={chatProject} onChange={e => setChatProject(e.target.value)}>
+                          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {projects.length === 1 && (
+                      <p style={{ fontSize: '12px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 4px 8px' }}>{projects[0].name}</p>
+                    )}
+                    <JobChat projectId={chatProject} selfId={profile.id} placeholder="Message your boss and the crew…" />
+                    <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '10px', lineHeight: 1.5 }}>
+                      Everyone on this job sees this — your boss and the crew working it. Nobody on his other jobs does.
+                    </p>
+                  </div>
+                )
+            )}
+
+            {listsSub === 'lists' && (
+          <div>
             {listsError && <div className="alert-danger" style={{ marginBottom: '12px' }}>{listsError}</div>}
             {listsByJob.length === 0 && !listsError
               ? <div className="empty-state"><p>Nothing on your lists yet. When your boss adds what to pick up or what needs fixing on your jobs, it shows up here.</p></div>
@@ -1070,6 +1197,8 @@ export default function WorkerDashboard({ profile }) {
                   )
                 })
             }
+          </div>
+            )}
           </div>
         )}
 
