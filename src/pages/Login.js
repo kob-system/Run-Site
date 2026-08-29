@@ -27,9 +27,9 @@ export default function Login() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [name, setName] = useState('')
-  const [company, setCompany] = useState('')
+  // Kept, but it is no longer a question anybody answers. 'owner' is the only
+  // self-serve signup there is; a legacy ?invite= link flips it to 'worker'.
   const [role, setRole] = useState('owner')
-  const [ownerEmail, setOwnerEmail] = useState('')
   // Owner-initiated invite (?invite=<token>): when present we already
   // know the owner, so we skip the "Boss's Email" lookup and lock the
   // signup to a worker joining that specific crew.
@@ -120,31 +120,14 @@ export default function Login() {
     setNotice('')
     setStaySignedIn(stayIn)
 
-    let ownerId = null
-    if (role === 'worker' && inviteOwnerId) {
-      // Came in through an invite link — owner is already known.
-      ownerId = inviteOwnerId
-    } else if (role === 'worker') {
-      let ownerLookup
-      try {
-        const resp = await fetch('/api/find-owner', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ownerEmail })
-        })
-        ownerLookup = await resp.json()
-      } catch (err) {
-        setError("Couldn't reach the server. Check your connection and try again.")
-        setLoading(false)
-        return
-      }
-      if (!ownerLookup || !ownerLookup.ownerId) {
-        setError("Could not find an owner account with that email. Ask your boss to sign up first.")
-        setLoading(false)
-        return
-      }
-      ownerId = ownerLookup.ownerId
-    }
+    // THE ONLY SELF-SERVE SIGNUP IS AN OWNER. A crew member never reaches this
+    // form and never types an email: his boss makes a link, texts it, and
+    // api/join-invite.js builds his account with no password at all. The
+    // "I am a Worker" toggle and the "your boss's email" lookup that used to
+    // live here were two extra questions in front of every contractor, to serve
+    // a path nobody has taken since the text-a-link flow shipped. Both gone.
+    // A legacy ?invite= link still works and arrives with the owner resolved.
+    const ownerId = inviteOwnerId || null
 
     // Stash the signup details in the auth user's metadata. If email
     // confirmation is ON there's no session yet (so we can't create the
@@ -153,7 +136,10 @@ export default function Login() {
     const signupMeta = {
       full_name: name,
       role,
-      company_name: role === 'owner' ? company : null,
+      // Not asked any more. It is one more box between a contractor and his
+      // dashboard, and every place that prints it already falls back to his own
+      // name. He sets it in Settings the first time he sends an estimate.
+      company_name: null,
       owner_id: ownerId
     }
     // Carry the invite token so App.js can finish the claim on first sign-in
@@ -210,7 +196,7 @@ export default function Login() {
         id: data.user.id,
         email,
         full_name: name,
-        company_name: role === 'owner' ? company : null,
+        company_name: null,
         role,
         owner_id: ownerId
       })
@@ -244,16 +230,24 @@ export default function Login() {
   // the same time as the password field. That is why signing back in always
   // meant typing the whole password by hand. Two fields is not a wall; splitting
   // them cost the one feature that makes signing in effortless. Do not re-split.
-  // ONE SCREEN, BOTH MODES. Sign-up used to be five "Next" taps — role, name,
-  // company, email, password — with a progress bar over the top. That is five
-  // keyboard round trips on a phone before an account exists, and it hid the
-  // same thing from password managers on SIGN-UP that splitting the sign-in
-  // form used to hide on SIGN-IN: a browser will not offer to save a new
-  // password unless the username field is in the DOM beside it.
-  // Four labelled boxes and one button is not a wall. Do not re-split.
+  // SIGN-UP IS THREE QUESTIONS, ONE AT A TIME. Name, email, password, done.
+  //
+  // It was five steps (role, name, company, email, password), then briefly one
+  // screen with all four boxes, and it is now three because JP asked for the
+  // click-through back — with the two questions that were never worth asking
+  // taken out rather than put back on one page: nobody picks "Worker" (a crew
+  // member gets a text with a link and never sees this form) and nobody needs
+  // to type a company name before they have made a single job.
+  //
+  // SIGN IN STAYS ONE SCREEN. Not a style choice: a browser or iPhone password
+  // manager will not offer to fill a login whose username field is not in the
+  // DOM at the same time as the password field. Splitting it is what made
+  // signing back in mean typing the whole password by hand. Do not re-split it.
+  // Sign-UP is safe to split because the password step carries a hidden
+  // read-only copy of the email, which is enough for "Save password?" to fire.
   const steps = (() => {
     if (!isSignup) return ['signin']
-    return ['all']
+    return ['name', 'email', 'password']
   })()
   const stepKey = steps[Math.min(step, steps.length - 1)]
   const isLastStep = step >= steps.length - 1
@@ -277,13 +271,9 @@ export default function Login() {
         if (!emailOk(email)) return 'Enter a valid email address.'
         if (!password) return 'Please enter your password.'
         break
-      case 'all':
-        // Top field first, so the message always points at the box nearest the
-        // top of the screen that is actually wrong.
-        if (!name.trim()) return 'Please enter your name.'
-        if (!inviteToken && role === 'owner' && !company.trim()) return 'Please enter your company name.'
-        if (!inviteToken && role === 'worker' && !emailOk(ownerEmail)) return "Enter your boss's email address."
-        if (!emailOk(email)) return 'Enter a valid email address.'
+      case 'name': if (!name.trim()) return 'Please enter your name.'; break
+      case 'email': if (!emailOk(email)) return 'Enter a valid email address.'; break
+      case 'password':
         if (!password) return 'Please choose a password.'
         if (password.length < 6) return 'Password must be at least 6 characters.'
         break
@@ -303,14 +293,7 @@ export default function Login() {
     if (isSignup) handleSignup(e); else handleLogin(e)
   }
 
-  const roleBtn = (val, label) => (
-    <button
-      type="button"
-      aria-pressed={role === val}
-      onClick={() => setRole(val)}
-      style={{ flex: 1, minHeight: '48px', padding: '12px 10px', borderRadius: '8px', border: '2px solid ' + (role === val ? '#E07B2A' : '#ddd'), background: role === val ? '#FFF4ED' : 'white', color: role === val ? '#E07B2A' : '#666', fontWeight: '600', cursor: 'pointer' }}
-    >{label}</button>
-  )
+  const goBack = () => { setError(''); setStep((s) => Math.max(0, s - 1)) }
 
   return (
     <div style={{ minHeight: '100vh', background: '#1C2B3A', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
@@ -321,9 +304,20 @@ export default function Login() {
         <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', marginTop: '6px' }}>Contractor job tracking — from your phone</p>
       </div>
       <div style={{ background: 'white', borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 12px 32px rgba(0,0,0,0.28)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
           <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1C2B3A', margin: 0 }}>{isSignup ? 'Create your account' : 'Sign In'}</h2>
+          {steps.length > 1 && <span style={{ marginLeft: 'auto', fontSize: '12px', fontWeight: '600', color: '#9CA3AF' }}>Step {step + 1} of {steps.length}</span>}
         </div>
+        {/* One segment per question, filled up to where they are. Hidden on
+            sign-in, which is a single screen: a one-segment bar that is always
+            full is decoration, not information. */}
+        {steps.length > 1 && (
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '18px' }} aria-hidden="true">
+            {steps.map((_, i) => (
+              <div key={i} style={{ height: '4px', borderRadius: '2px', flex: 1, background: i <= step ? '#E07B2A' : '#E5E7EB', transition: 'background .2s ease' }} />
+            ))}
+          </div>
+        )}
         {error && <div className="alert-danger">{error}</div>}
         {notice && <div style={{ background: '#f0fdf4', border: '1px solid #16A34A', color: '#15803d', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', fontWeight: '600', marginBottom: '12px' }}>{notice}</div>}
         <form onSubmit={handleNext}>
@@ -354,52 +348,42 @@ export default function Login() {
             </>
           )}
 
-          {stepKey === 'all' && (
-            <>
-              {/* No role question for an invited crew member: the link already
-                  said who they are, and asking again is a way to get it wrong. */}
-              {!inviteToken && (
-                <div className="input-group">
-                  <label>I am a...</label>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                    {roleBtn('owner', 'Contractor / Owner')}
-                    {roleBtn('worker', 'Worker')}
-                  </div>
-                </div>
-              )}
+          {stepKey === 'name' && (
+            <div className="input-group">
+              <label htmlFor="su-name">What's your name?</label>
+              <input ref={activeRef} id="su-name" type="text" autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="Mike Reynolds" />
+            </div>
+          )}
 
-              <div className="input-group"><label htmlFor="su-name">Your name</label><input ref={activeRef} id="su-name" type="text" autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder="Mike Reynolds" /></div>
+          {stepKey === 'email' && (
+            <div className="input-group">
+              <label htmlFor="su-email">What's your email?</label>
+              <input ref={activeRef} id="su-email" type="email" inputMode="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" />
+            </div>
+          )}
 
-              {!inviteToken && role === 'owner' && (
-                <div className="input-group"><label htmlFor="su-company">Company name</label><input id="su-company" type="text" autoComplete="organization" value={company} onChange={e => setCompany(e.target.value)} placeholder="Reynolds Contracting" /></div>
-              )}
-
-              {!inviteToken && role === 'worker' && (
-                <div className="input-group"><label htmlFor="su-owner">Your boss's email</label><input id="su-owner" type="email" inputMode="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} placeholder="boss@email.com" /></div>
-              )}
-
-              {/* name="username" + autoComplete="username" on the email box, in
-                  the same form as the password box, is the whole reason "Save
-                  password?" appears. The old flow needed a hidden decoy field
-                  for this because email was a step behind; now the real field
-                  is right here and the decoy is gone. */}
-              <div className="input-group"><label htmlFor="su-email">Your email</label><input id="su-email" name="username" type="email" inputMode="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" /></div>
-
-              <div className="input-group">
-                <label htmlFor="su-password">Choose a password</label>
-                <div className="pw-wrap">
-                  <input id="su-password" name="new-password" type={showPw ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 6 characters" minLength={6} />
-                  <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
-                </div>
+          {stepKey === 'password' && (
+            <div className="input-group">
+              {/* THE DECOY, AND IT IS LOAD-BEARING. A password manager will not
+                  offer to save a new password unless a username field sits in
+                  the same form. On a click-through the email is a step behind,
+                  so it rides along here: hidden, read-only, carrying whatever
+                  they typed on step two. Delete this and "Save password?" stops
+                  appearing, and every future sign-in is typed by hand. */}
+              <input type="text" name="username" autoComplete="username" value={email} readOnly tabIndex={-1} aria-hidden="true" style={{ position: 'absolute', opacity: 0, height: 0, width: 0, padding: 0, border: 0 }} />
+              <label htmlFor="su-password">Choose a password</label>
+              <div className="pw-wrap">
+                <input ref={activeRef} id="su-password" name="new-password" type={showPw ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 6 characters" minLength={6} />
+                <button type="button" className="pw-toggle" onClick={() => setShowPw(s => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}>{showPw ? 'Hide' : 'Show'}</button>
               </div>
-            </>
+            </div>
           )}
 
           {/* The switch JP asked for, in his words: "a button they can confirm
               that it stays signed in." Shown on the screen where the password
               is typed — sign-in, and the last step of sign-up — because that is
               the moment the promise means something. */}
-          {(stepKey === 'signin' || stepKey === 'all') && (
+          {(stepKey === 'signin' || stepKey === 'password') && (
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', margin: '4px 2px 16px', cursor: 'pointer' }}>
               <input
                 type="checkbox"
@@ -415,7 +399,10 @@ export default function Login() {
           )}
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
-            <button type="submit" className="btn-primary" disabled={loading} style={{ flex: 1, width: 'auto', marginTop: 0 }}>{loading ? <><span className="spinner" />Working…</> : isSignup ? 'Create my account' : 'Sign In'}</button>
+            {step > 0 && (
+              <button type="button" onClick={goBack} disabled={loading} style={{ flex: '0 0 auto', minWidth: '88px', minHeight: '48px', padding: '12px 16px', borderRadius: '8px', border: '2px solid #ddd', background: 'white', color: '#666', fontWeight: '700', cursor: 'pointer' }}>Back</button>
+            )}
+            <button type="submit" className="btn-primary" disabled={loading} style={{ flex: 1, width: 'auto', marginTop: 0 }}>{loading ? <><span className="spinner" />Working…</> : isLastStep ? (isSignup ? 'Create my account' : 'Sign In') : 'Next'}</button>
           </div>
           {isSignup && (
             <p style={{ textAlign: 'center', fontSize: '12.5px', color: '#6B7280', margin: '10px 2px 0' }}>
@@ -432,12 +419,15 @@ export default function Login() {
             api/join-invite.js with no password, and the invite link his boss
             texted him is the only credential that exists. Send him there
             instead of leaving him guessing at an email he never chose. */}
-        {!isSignup && (
-          <p style={{ textAlign: 'center', marginTop: '10px', fontSize: '13px', color: '#666' }}>
-            On a crew and have no password?
-            <a href="/crew" style={{ color: '#E07B2A', fontWeight: '600', marginLeft: '6px' }}>Get back in</a>
-          </p>
-        )}
+        {/* This is what replaced the "I am a Worker" button, and it is the
+            honest version of it. A crew member has no password and no account
+            he made himself — there is nothing on this form he could ever fill
+            in. What he actually needs is the link his boss texted him, or help
+            getting a new one, and /crew is the page that does that. */}
+        <p style={{ textAlign: 'center', marginTop: '10px', fontSize: '13px', color: '#666' }}>
+          On a crew? Your boss texts you a link, you never sign up.
+          <a href="/crew" style={{ color: '#E07B2A', fontWeight: '600', marginLeft: '6px' }}>Lost yours?</a>
+        </p>
         {!isSignup && notice.includes('confirmation link') && (
           <p style={{ textAlign: 'center', marginTop: '4px', fontSize: '13px', color: '#666' }}>
             Didn't get it?
