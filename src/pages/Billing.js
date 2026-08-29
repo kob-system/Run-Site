@@ -9,6 +9,23 @@ import { track, trackOnce, EV } from '../utils/analytics'
 //                    open the Stripe portal at any time.
 // It does NOT import or touch OwnerDashboard, so it can't trigger the TDZ traps
 // in that file.
+//
+// ── 2026-08-28: THIS SCREEN IS ONE DECISION, NOT A COMPARISON ────────────────
+// It used to open with a five-step "what you're about to run" tour, then two
+// side-by-side plan cards of equal weight, then a data-safety panel, then two
+// more buttons. Somebody who arrives here has ALREADY used the product free and
+// has already decided; every extra element between them and Stripe is a place
+// to change their mind. So: one sentence, one big button (monthly, the default
+// everyone picks), yearly demoted to a line underneath, everything else below
+// the fold.
+//
+// The wallet line is not decoration. Stripe Checkout shows Apple Pay / Google
+// Pay / Link automatically on a device that has them — but only if those methods
+// are switched on in the Stripe Dashboard (Settings -> Payments -> Payment
+// methods). We deliberately do NOT send payment_method_types from
+// api/create-checkout-session, because sending it PINS the list to cards and
+// kills the wallets. If wallets ever stop appearing, check the Dashboard first
+// and that file second.
 
 async function authedPost(path, body) {
   const { data: { session } } = await supabase.auth.getSession()
@@ -24,81 +41,39 @@ async function authedPost(path, body) {
   return data
 }
 
-const card = {
-  border: '1px solid #e3e8ef', borderRadius: 14, padding: 24, flex: 1, minWidth: 240,
-  background: '#fff', display: 'flex', flexDirection: 'column', gap: 6,
+const primaryBtn = {
+  width: '100%', padding: '17px 20px', fontSize: 18, fontWeight: 800, borderRadius: 12,
+  border: 'none', background: 'var(--orange)', color: '#fff', cursor: 'pointer', minHeight: 56,
 }
-const btn = {
-  marginTop: 14, padding: '12px 16px', fontSize: 16, fontWeight: 700, borderRadius: 10,
-  border: 'none', background: 'var(--orange)', color: '#fff', cursor: 'pointer', minHeight: 44,
-}
-
-// A brand-new owner hits this screen seconds after signing up, before they have
-// seen a single thing the product does. Plan cards alone read as a toll booth,
-// so the same five steps the dashboard walks them through get shown here first:
-// the card is a door into something specific, not a wall.
-const CYCLE = [
-  ['Set the job', 'Client, contract price, materials and labor budget.'],
-  ['Put the crew on it', 'They clock in from their own phone, stamped where they stood.'],
-  ['Feed it costs', 'Snap the receipt. It reads the store, total and tax off the photo.'],
-  ['Watch the number', 'Spent vs. budget, live. Amber at 80%, red if you go over.'],
-  ['Close it out', 'Invoice it, mark it paid, and the real profit on that job is locked in.'],
-]
-
-function Onramp() {
-  return (
-    <div style={{ marginTop: 18, border: '1px solid #e3e8ef', borderRadius: 14, padding: '18px 20px', background: '#fff' }}>
-      <div style={{ fontWeight: 800, color: '#1C2B3A', fontSize: 17 }}>What you're about to run</div>
-      <p style={{ color: '#667085', fontSize: 14, margin: '4px 0 14px' }}>
-        Five steps. Same five on every job, start to finish.
-      </p>
-      <ol style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {CYCLE.map(([title, detail], i) => (
-          <li key={title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <span style={{
-              flex: 'none', width: 26, height: 26, borderRadius: '50%', background: '#1C2B3A', color: '#fff',
-              fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1,
-            }}>{i + 1}</span>
-            <span>
-              <strong style={{ color: '#1C2B3A', fontSize: 15, display: 'block' }}>{title}</strong>
-              <span style={{ color: '#667085', fontSize: 13.5, lineHeight: 1.45 }}>{detail}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
-      <p style={{ color: '#425466', fontSize: 14, margin: '16px 0 0', paddingTop: 14, borderTop: '1px solid #eef2f6' }}>
-        Pick a plan below and you land straight on your dashboard with a sample job already in it.
-        Your first real job takes about two minutes to set up.
-      </p>
-    </div>
-  )
+const quietBtn = {
+  padding: '12px 16px', fontSize: 15, fontWeight: 700, borderRadius: 10,
+  background: 'transparent', cursor: 'pointer', minHeight: 44,
 }
 
 export default function Billing({ profile, sub, mode = 'manage' }) {
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
+  const [showExtras, setShowExtras] = useState(false)
 
   // An owner with a live subscription (or one in the grace/past-due window)
-  // shouldn't be pitched the plan cards or the "no charge today" trial line —
-  // show them their status and the Manage-billing button only.
-  // 'comp' = a grandfathered/free account (e.g. a partner grant). Treat it like an
-  // active sub for UI purposes: no plan cards, no "no charge today" pitch — so a
-  // comp'd owner can't accidentally start a paid checkout that the webhook would
-  // then overwrite on top of their grant.
+  // shouldn't be pitched the plan at all — show them their status and the
+  // Manage-billing button only. 'comp' = a grandfathered/free grant; treat it
+  // like an active sub so a comp'd owner can't start a paid checkout that the
+  // webhook would then overwrite on top of their grant.
   const status = sub && sub.status
   const activeSub = ['active', 'trialing', 'past_due', 'comp'].includes(status)
   const periodEnd = sub && sub.current_period_end ? new Date(sub.current_period_end) : null
 
   // The paywall is the single most expensive screen in the product — it's where
-  // a trial either turns into money or turns into a churned account. Once per
-  // tab so a re-render doesn't inflate it. `status` is a fixed enum, not PII.
+  // a free account either turns into money or churns. Once per tab so a
+  // re-render doesn't inflate it. `status` is a fixed enum, not PII.
   useEffect(() => {
     if (mode === 'paywall') trackOnce(EV.PAYWALL_HIT, { status: status || 'none' })
   }, [mode, status])
 
   const go = async (action, arg) => {
     setErr(''); setBusy(arg || action)
-    // Fired before the redirect, so the drop-off between "clicked a plan" and
+    // Fired before the redirect, so the drop-off between "tapped subscribe" and
     // "Stripe webhook says subscribed" is measurable.
     if (action === 'checkout') track(EV.CHECKOUT_STARTED, { plan: arg, mode })
     try {
@@ -146,110 +121,110 @@ export default function Billing({ profile, sub, mode = 'manage' }) {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 20px' }}>
-      <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 4 }}>JobTally</h2>
-      <h3 style={{ margin: '0 0 4px' }}>
-        {activeSub
-          ? 'Your subscription'
-          : mode === 'paywall'
-          // A brand-new owner (no sub row at all) now lands here on their FIRST
-          // load — the card trial replaced the no-card window, so this is a
-          // welcome screen, not a cutoff. A RETURNING owner (`status` exists but
-          // isn't active) really is cut off, and gets the old heading.
-          ? (status ? 'Pick up where you left off' : 'Start free — no card')
-          : 'Your subscription'}
-      </h3>
-      {activeSub ? (
-        <p style={{ color: '#667085', marginTop: 0 }}>
-          {status === 'trialing'
-            ? 'You’re on the free plan'
-            : status === 'past_due'
-            ? 'Your last payment didn’t go through — update your card to avoid interruption'
-            : 'Your subscription is active'}
-          {periodEnd
-            ? ` — ${status === 'trialing' ? 'trial ends' : status === 'past_due' ? 'retry by' : 'renews'} ${periodEnd.toLocaleDateString()}`
-            : ''}
-          . Use <strong>Manage billing</strong> below to change your plan, update your card, or cancel.
-        </p>
-      ) : status ? (
-        // A prior sub row exists but it's not active (canceled / unpaid /
-        // expired) — a RETURNING owner, not a new account. Since 2026-08-11 this
-        // is NOT a lockout: they drop to the free plan and keep running one job.
-        // Saying "restore full access" at someone who still has access reads as
-        // a scare tactic, and they'll find out it's untrue in about ten seconds.
-        <p style={{ color: '#667085', marginTop: 0 }}>
-          You’re on the <strong>free plan</strong> — one job at a time, for as long as you want, and all your
-          data is right where you left it. Subscribe below to run as many jobs at once as you like. Billing
-          starts today (the one job free, forever is for new accounts only) and you can cancel anytime.
-        </p>
-      ) : (
-        <p style={{ color: '#667085', marginTop: 0 }}>
-          <strong>One job is free, forever</strong>, with <strong>no card</strong>. A subscription is what lets you run more
-          than one job at the same time. Billing starts the day you subscribe, through Stripe's secure checkout.
-          Cancel anytime from Manage billing and you drop straight back to the
-          <strong> free plan: one job at a time, forever</strong>. Nothing is ever deleted and nothing shuts off mid-job.
-        </p>
-      )}
+    <div style={{ maxWidth: 460, margin: '0 auto', padding: '32px 20px 48px' }}>
+      <h2 style={{ color: 'var(--orange)', fontWeight: 800, letterSpacing: '0.02em', marginBottom: 18, fontSize: 20 }}>JobTally</h2>
 
       {err && (
-        <div style={{ background: '#fde8e8', color: '#9b1c1c', padding: 12, borderRadius: 10, margin: '12px 0' }}>
+        <div style={{ background: '#fde8e8', color: '#9b1c1c', padding: 12, borderRadius: 10, margin: '0 0 14px' }}>
           {err}
         </div>
       )}
 
-      {/* Brand-new owner only. A returning owner already knows what the app does;
-          showing them the tour again would just delay the button they came for. */}
-      {!activeSub && !status && <Onramp />}
+      {activeSub ? (
+        <>
+          <h3 style={{ margin: '0 0 6px', fontSize: 22, color: '#1C2B3A' }}>
+            {status === 'past_due' ? 'Your last payment didn’t go through' : 'Your subscription is active'}
+          </h3>
+          <p style={{ color: '#667085', marginTop: 0, fontSize: 15, lineHeight: 1.5 }}>
+            {status === 'past_due'
+              ? 'Update your card and everything carries on. Nothing has shut off.'
+              : 'Unlimited jobs, unlimited crew.'}
+            {periodEnd ? ` ${status === 'past_due' ? 'Retry by' : 'Renews'} ${periodEnd.toLocaleDateString()}.` : ''}
+          </p>
+          <button onClick={() => go('portal')} disabled={!!busy} style={{ ...primaryBtn, marginTop: 14 }}>
+            {busy === 'portal' ? 'Opening…' : 'Manage billing'}
+          </button>
+        </>
+      ) : (
+        <>
+          <h3 style={{ margin: '0 0 6px', fontSize: 22, color: '#1C2B3A', lineHeight: 1.25 }}>
+            Run as many jobs as you want.
+          </h3>
+          <p style={{ color: '#667085', marginTop: 0, marginBottom: 22, fontSize: 15, lineHeight: 1.5 }}>
+            Every feature, unlimited crew, no per-seat charges. Cancel any time and you drop straight
+            back to the free plan with everything still in it.
+          </p>
 
-      {!activeSub && (
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
-          <div style={card}>
-            <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Monthly</div>
-            <div style={{ fontSize: 28, fontWeight: 800 }}>$150<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/mo</span></div>
-            <div style={{ color: '#667085', fontSize: 14 }}>All features, unlimited crew. Cancel anytime.</div>
-            <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'monthly')}>
-              {busy === 'monthly' ? 'Starting…' : 'Choose monthly'}
-            </button>
+          <div style={{ textAlign: 'center', marginBottom: 18 }}>
+            <div style={{ fontSize: 52, fontWeight: 800, color: '#1C2B3A', lineHeight: 1 }}>
+              $150<span style={{ fontSize: 20, fontWeight: 600, color: '#667085' }}>/mo</span>
+            </div>
           </div>
 
-          <div style={{ ...card, borderColor: '#1C2B3A', borderWidth: 2 }}>
-            <div style={{ fontWeight: 700, color: '#1C2B3A' }}>Yearly <span style={{ color: '#0a7d33', fontSize: 13 }}>· 4 months free</span></div>
-            <div style={{ fontSize: 28, fontWeight: 800 }}>$1,200<span style={{ fontSize: 15, fontWeight: 500, color: '#667085' }}>/yr</span></div>
-            <div style={{ display: 'inline-block', alignSelf: 'flex-start', background: 'var(--green-tint)', color: 'var(--green-dark)', fontSize: 13, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginTop: 4 }}>Save $600 vs. monthly</div>
-            <button style={btn} disabled={!!busy} onClick={() => go('checkout', 'yearly')}>
-              {busy === 'yearly' ? 'Starting…' : 'Choose yearly'}
+          <button style={primaryBtn} disabled={!!busy} onClick={() => go('checkout', 'monthly')}>
+            {busy === 'monthly' ? 'Opening checkout…' : 'Subscribe'}
+          </button>
+
+          {/* Said out loud because it is the difference between "I'll do it at
+              my desk later" and thumb-print, done. Stripe only renders the
+              wallet the device actually has, so this stays honest either way. */}
+          <p style={{ textAlign: 'center', fontSize: 13, color: '#667085', margin: '12px 0 0' }}>
+             Apple Pay, Google Pay, or card. Secure checkout by Stripe.
+          </p>
+
+          <p style={{ textAlign: 'center', margin: '18px 0 0' }}>
+            <button
+              onClick={() => go('checkout', 'yearly')}
+              disabled={!!busy}
+              style={{ ...quietBtn, border: '2px solid #d9e0ea', color: '#1C2B3A', width: '100%' }}
+            >
+              {busy === 'yearly' ? 'Opening checkout…' : 'Pay yearly instead — $1,200 (save $600)'}
             </button>
-          </div>
+          </p>
+        </>
+      )}
+
+      {/* Everything that is not the decision. Collapsed, because on the paywall
+          it is exactly the material that makes someone put the phone down. */}
+      <p style={{ textAlign: 'center', marginTop: 26 }}>
+        <button
+          onClick={() => setShowExtras((s) => !s)}
+          style={{ ...quietBtn, border: 'none', color: '#667085', fontSize: 14, fontWeight: 600 }}
+        >
+          {showExtras ? 'Hide' : 'Your data, and other options'}
+        </button>
+      </p>
+
+      {showExtras && (
+        <div style={{ marginTop: 4, background: '#f7f9fc', border: '1px solid #e3e8ef', borderRadius: 12, padding: 16 }}>
+          <p style={{ color: '#425466', fontSize: 14, margin: '0 0 12px', lineHeight: 1.55 }}>
+            Nothing is ever deleted if you cancel. Your jobs, receipts, hours and invoices stay in your
+            account, and you can download a full copy any time — including after you cancel.
+          </p>
+          <button
+            onClick={exportData}
+            disabled={!!busy}
+            style={{ ...quietBtn, border: '2px solid #1C2B3A', color: '#1C2B3A', width: '100%' }}
+          >
+            {busy === 'export' ? 'Preparing…' : 'Export all my data'}
+          </button>
+          {!activeSub && (
+            <button
+              onClick={() => go('portal')}
+              disabled={!!busy}
+              style={{ ...quietBtn, border: 'none', color: '#667085', width: '100%', marginTop: 8, fontSize: 14 }}
+            >
+              {busy === 'portal' ? 'Opening…' : 'Manage billing / past invoices'}
+            </button>
+          )}
         </div>
       )}
 
-      <div style={{ marginTop: 24, background: '#f0f6ff', border: '1px solid #cfe0f5', borderRadius: 12, padding: 16 }}>
-        <div style={{ fontWeight: 700, color: '#1C2B3A', marginBottom: 4 }}>🔒 Your data is safe</div>
-        <p style={{ color: '#425466', fontSize: 14, margin: '0 0 12px' }}>
-          Nothing is ever deleted if you cancel — your jobs, receipts, hours and invoices stay in your account.
-          You can download a full copy anytime.
-        </p>
-        <button
-          onClick={exportData}
-          disabled={!!busy}
-          style={{ ...btn, marginTop: 0, background: 'transparent', color: '#1C2B3A', border: '2px solid #1C2B3A' }}
-        >
-          {busy === 'export' ? 'Preparing…' : 'Export all my data'}
-        </button>
-      </div>
-
-      <div style={{ marginTop: 24, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          onClick={() => go('portal')}
-          disabled={!!busy}
-          style={{ ...btn, background: 'transparent', color: 'var(--orange)', border: '2px solid var(--orange)', marginTop: 0 }}
-        >
-          {busy === 'portal' ? 'Opening…' : 'Manage billing'}
-        </button>
+      <div style={{ marginTop: 22, textAlign: 'center' }}>
         {mode === 'paywall' ? (
           <button
             onClick={() => supabase.auth.signOut()}
-            style={{ background: 'none', border: 'none', color: '#667085', cursor: 'pointer', fontSize: 14 }}
+            style={{ background: 'none', border: 'none', color: '#98a2b3', cursor: 'pointer', fontSize: 14 }}
           >
             Sign out
           </button>

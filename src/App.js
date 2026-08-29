@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient'
 import { captureAttribution, saveSignupAttribution } from './utils/attribution'
 import { track, trackOnce, setAnalyticsUser, EV } from './utils/analytics'
 import { seedSampleJob } from './utils/sampleJob'
+import { sendWelcomeEmail } from './utils/welcome'
 import { legacyFreeDaysLeft, FREE_ACTIVE_JOBS } from './utils/trialWindow'
 import { setErrorContext } from './utils/reportError'
 import { isRecoveryUrl } from './utils/recoveryUrl'
@@ -259,6 +260,10 @@ export default function App() {
           // "signup completed", and it's tracked here rather than in the login
           // form so BOTH signup paths (instant and email-confirm) count.
           if (!insErr) track(EV.SIGNUP_COMPLETED, { role: md.role })
+          // The welcome email rides the same once-per-account moment as the
+          // SIGNUP_COMPLETED event, and for the same reason: this branch is the
+          // only place a profile row is born on the confirm-email path.
+          if (!insErr) sendWelcomeEmail(supabase)
           // Finish claiming the invite now that the profile row exists and we
           // have a session. This is what applies the pay rate the owner set
           // when he created the invite — read server-side off the invite row,
