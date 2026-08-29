@@ -1,18 +1,36 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef } from 'react'
 import './Landing.css'
-import { supabase } from '../supabaseClient'
 import { track, trackOnce, EV } from '../utils/analytics'
-import InstallButton from '../components/InstallButton'
 
-// Public landing page at / — what a stranger sees before they have an
-// account. Rendered before the Login screen (App.js) for logged-out
-// visitors; logged-in users never hit it. Screenshots in /landing/* are
-// REAL app screens from the demo company (Summit Remodeling) — nothing
-// mocked up. CTAs point at the real signup: /login?signup=1 opens the
-// Create Account form. New owners get a one job free, forever that DOES take a
-// card up front (Stripe trial_period_days=30, see api/create-checkout-session
-// — the old app-side no-card window is retired). Never write "no card
-// required" here: no invented trials, no invented pricing.
+// Public landing page at / — what a stranger sees before they have an account.
+// Rendered before the Login screen (App.js) for logged-out visitors; logged-in
+// users never hit it. Screenshots in /landing/* are REAL app screens from the
+// demo company (Summit Remodeling) — nothing mocked up. CTAs point at the real
+// signup: /login?signup=1 opens the Create Account form.
+//
+// ── 2026-08-28: CUT TO THE BONE, on JP's call ───────────────────────────────
+// "Plain and simple, only the necessary. Get rid of everything that isn't. We
+// can always add things back."
+//
+// What came out, and why, so nobody re-adds it by accident:
+//   · "How it works" (3 numbered steps)  — the FAQ already answers all three,
+//                                          two screens further down, better.
+//   · "Everything, for that one price" (13-item grid) — a third pass over the
+//                                          same feature list, in list form.
+//   · Two of the six feature rows (estimates, home screen) — the page sells on
+//                                          hours, receipts and profit. The rest
+//                                          is what they find once they're in.
+//   · The trust bullets, the add-to-home-screen band, the testimonial grid
+//                                        — nobody has given a quote yet, so
+//                                          that section rendered empty anyway.
+//   · Two of the five FAQs.
+//
+// THE RULE FOR PUTTING ANYTHING BACK: it has to answer a question a contractor
+// actually asks before signing up. Nothing here exists to look complete.
+//
+// ⚠️ The offer on this page is "one job free forever, no card." There is no
+// trial. api/create-checkout-session.js sends no trial_period_days. If that
+// ever changes, this page, /pricing, /faq and the FAQ JSON-LD change with it.
 const SIGNUP_URL = '/login?signup=1'
 
 const FEATURES = [
@@ -22,7 +40,7 @@ const FEATURES = [
     kicker: 'Crew hours',
     title: 'Your crew clocks in and out with one tap, both GPS-stamped',
     body:
-      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. No more \"I was there at 7\" or \"I stayed till 4.\" Two stamps, start and finish, not a tracker. Nothing follows your crew around in between, which is why they'll actually use it.",
+      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. Two stamps, start and finish, not a tracker. Nothing follows your crew around in between, which is why they'll actually use it.",
   },
   {
     img: '/landing/receipts-list.png',
@@ -30,7 +48,7 @@ const FEATURES = [
     kicker: 'Receipts',
     title: 'Snap a receipt and the store, total, tax and date fill themselves in',
     body:
-      'Take a photo at the register and JobTally reads the store, the total, the sales tax and the date off it, and drops them into a new expense. You just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing, and because the tax and the real purchase date are already on there, tax time stops being a nightmare weekend.',
+      'Take a photo at the register and JobTally reads the store, the total, the sales tax and the date off it, and drops them into a new expense. You just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing.',
   },
   {
     img: '/landing/job-profit.png',
@@ -40,42 +58,6 @@ const FEATURES = [
     body:
       "Every job shows what you're charging, what's gone out in labor and materials, and what's left for you. Live, not three months later when it's too late to fix. If a job starts bleeding, you know that week.",
   },
-  {
-    img: '/landing/estimate-sent.png',
-    alt: 'JobTally estimate ready to send, with one-tap accept to job',
-    kicker: 'Getting paid',
-    title: 'Estimate → invoice → paid, all from your phone',
-    body:
-      'Write the estimate on your phone, send it, and turn a "yes" into a job with one tap. Invoices come out of the same numbers, and the home screen always shows exactly who still owes you what.',
-  },
-]
-
-// Was its own full-width section ("Open the app, see your money") sitting right
-// under What it does — the same kind of claim, about the same product, in a
-// different layout, which is most of why this page felt like it repeated itself.
-// It's a feature. It goes in the feature list.
-const HOME_FEATURE = {
-  img: '/landing/home-owed.png',
-  alt: 'JobTally home screen showing money owed to you and the guided setup checklist',
-  kicker: 'Your home screen',
-  title: 'Open it and the first thing you see is what you’re owed',
-  body:
-    "Active jobs, open estimates and your projected profit sit right underneath it. And you're never left guessing what to do first. A setup guide walks you through your first job, your crew, your first estimate and your first invoice, ticking each step off by itself as you go.",
-}
-const INCLUDED = [
-  'Talk to it instead of tapping',
-  'Crew GPS time clock',
-  'Crew pay totals',
-  'Estimates & invoices',
-  'Client list',
-  'Receipt scanning',
-  'Mileage tracking',
-  'Job photos & daily logs',
-  'Schedule & time off',
-  'Business health dashboard',
-  'Reports & tax exports',
-  'Insurance & license reminders',
-  'Works on any phone, no install',
 ]
 
 const FAQS = [
@@ -88,55 +70,23 @@ const FAQS = [
     a: 'Nothing. You text each guy an invite link, he taps it, and he is in. You already typed his name when you made the link, so there is nothing for him to fill in. No password, no email, nothing to download. From then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it.',
   },
   {
-    q: "I'm not a tech guy. How long is setup?",
-    a: 'About five minutes. When you first sign in, a setup guide walks you through your first job, your crew, your first estimate and invoice, and each step checks itself off as you go.',
-  },
-  {
-    q: 'Do I really just talk to it?',
-    a: 'Yes. Hold the mic and say it the way you\'d say it to a foreman. "Dave was on the Miller deck six hours." "How much am I making on the Klein job." It does it and reads the answer back. It always shows you what it\'s about to save before it saves, so it can\'t put something in your books you didn\'t agree to. Your crew can use it too, for clocking in and logging receipts.',
-  },
-  {
     q: 'What if I want out?',
-    a: 'Cancel anytime, no contract. Your data stays yours. You can export everything to a spreadsheet whenever you want, even after you cancel your subscription. And if you want it all gone, there\'s a delete button in Settings that erases the whole account.',
+    a: 'Cancel anytime, no contract. Your data stays yours. You can export everything to a spreadsheet whenever you want, even after you cancel. And if you want it all gone, there is a delete button in Settings that erases the whole account.',
   },
 ]
 
 export default function Landing() {
-  // Real customer quotes, approved by hand in Supabase (testimonials.approved).
-  // Empty until someone actually says something — the section simply doesn't
-  // render rather than shipping invented praise.
-  const [quotes, setQuotes] = useState([])
-
   useEffect(() => {
     document.title = 'JobTally: know what every job really makes'
     // Top of the funnel. Once per tab so a re-render doesn't inflate it.
     trackOnce(EV.LANDING_VIEW)
   }, [])
 
-  useEffect(() => {
-    let alive = true
-    supabase
-      .from('testimonials')
-      .select('id, quote, author_name, company_name, city, rating')
-      .eq('approved', true)
-      .order('created_at', { ascending: false })
-      .limit(6)
-      .then(({ data, error }) => {
-        // A missing table (migration not run) or an RLS refusal both just mean
-        // "no proof to show" — never an error on a stranger's first visit.
-        if (alive && !error && data) setQuotes(data)
-      })
-    return () => { alive = false }
-  }, [])
-
-  // Which CTA got the click matters — hero vs pricing vs final tells us whether
+  // Which CTA got the click matters — hero vs pricing vs video tells us whether
   // the page sells on the promise or on the price.
   const cta = (where) => () => track(EV.LANDING_CTA, { where })
 
-  // Two videos sit on this page and they answer different questions: "did a
-  // stranger trust a face enough to press play" vs "did they stay for the
-  // product". Each gets its own guard so one play is one event, not one per
-  // scrub, and its own `where` so the two never collapse into each other.
+  // One play is one event, not one per scrub.
   const introPlayedRef = useRef(false)
   const onIntroPlay = () => {
     if (introPlayedRef.current) return
@@ -180,35 +130,12 @@ export default function Landing() {
             </div>
             <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free, no card</a>
             <div className="ld-cta-note">$150/mo only when you want a second job open at the same time.</div>
-            <a className="ld-intro-link" href="#intro">
-              <span className="ld-play" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
-              </span>
-              New here? Start with the 3-minute introduction
-            </a>
-            {/* The demo sits right under the primary CTA because it converts
-                the visitor who is NOT ready to hand over a card yet — which,
-                on a page whose trial asks for one up front, is most of them.
-                Watching a video is passive; tapping through the actual app is
-                the thing that makes someone believe it. */}
+            {/* Kept because it converts the visitor who is not ready to hand
+                over an email yet: watching is passive, tapping through the real
+                app is the thing that makes someone believe it. */}
             <a className="ld-demo-link" href="/demo" onClick={cta('hero-demo')}>
-              Or try it yourself. No signup, no card
+              Or try it yourself first. No signup, no card
             </a>
-            <ul className="ld-trust">
-              <li>Set up in ~5 minutes</li>
-              <li>Works on any phone</li>
-              <li>No modules, no training, no 3-week setup</li>
-            </ul>
-            {/* The strongest objection-killer we have and it went unsaid for
-                months: there is nothing to download. Renders only on a phone
-                that can actually act on it. */}
-            <div className="ld-a2hs">
-              <div className="ld-a2hs-copy">
-                <strong>Nothing to download.</strong> No app store, no waiting. It's a web page.
-                Put it on your home screen and it opens like anything else on your phone.
-              </div>
-              <InstallButton />
-            </div>
           </div>
           <div className="ld-hero-shot">
             <div className="ld-phone">
@@ -218,12 +145,35 @@ export default function Landing() {
           </div>
         </div>
       </section>
+
+      {/* Introduction — a face and the honest origin, before anyone is asked for
+          anything. 14 MB, so preload="none": a guy standing on a job site on
+          cell data downloads nothing until he actually presses play. */}
+      <section className="ld-intro" id="intro">
+        <div className="ld-inner">
+          <h2>Who built this</h2>
+          <p className="ld-kicker">John Paul Kobrossi, founder of JobTally. I built the whole thing myself.</p>
+          <div className="ld-video-frame">
+            <video
+              controls
+              playsInline
+              preload="none"
+              poster="/landing/intro-poster.jpg"
+              src="/landing/JobTally-Intro.mp4"
+              onPlay={onIntroPlay}
+            >
+              Your browser can't play this video.
+            </video>
+          </div>
+        </div>
+      </section>
+
       {/* Features — alternating rows, real screenshots */}
       <section className="ld-features">
         <div className="ld-inner">
           <h2>What it does</h2>
-          <p className="ld-kicker">Five things, done properly. Sign up and it works.</p>
-          {[...FEATURES, HOME_FEATURE].map((f, i) => (
+          <p className="ld-kicker">Three things, done properly. Sign up and it works.</p>
+          {FEATURES.map((f, i) => (
             <div className={'ld-row' + (i % 2 ? ' ld-row-flip' : '')} key={f.title}>
               <div className="ld-row-copy">
                 <div className="ld-row-kicker">{f.kicker}</div>
@@ -239,89 +189,6 @@ export default function Landing() {
           ))}
         </div>
       </section>
-      {/* The assistant. This is the one thing in JobTally that no competitor
-          has, it has been live in production since June, and until now the
-          landing page did not mention it once — a visitor could read this
-          entire page and never learn the app can be talked to.
-          No screenshot on purpose: a still frame of a chat panel is the least
-          convincing possible way to sell "you can just say it out loud." The
-          spoken sentences ARE the demo, so they're the whole section. Kept to
-          one tight band because the page's last pass was specifically about
-      {/* Introduction — a face and the honest origin, before anyone is asked
-          for anything. Same file and same placement rule as /remodelers: it
-          sits ABOVE the walkthrough, because the intro's closing line points
-          down at it. 14 MB, so preload="none" — a guy standing on a job site
-          on cell data downloads nothing until he actually presses play. */}
-      <section className="ld-intro" id="intro">
-        <div className="ld-inner">
-          <h2>Introduction video</h2>
-          <p className="ld-kicker">John Paul Kobrossi, founder of JobTally. I built the whole thing myself.</p>
-          <div className="ld-video-frame">
-            <video
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/intro-poster.jpg"
-              src="/landing/JobTally-Intro.mp4"
-              onPlay={onIntroPlay}
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-          <div className="ld-video-after">
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start free, no card</a>
-            <div className="ld-cta-note">Or watch the walkthrough below first. No sign-up needed for either.</div>
-          </div>
-        </div>
-      </section>
-      {/* How it works */}
-      <section className="ld-how">
-        <div className="ld-inner">
-          <h2>Up and running by tomorrow morning</h2>
-          <div className="ld-steps">
-            <div className="ld-step">
-              <span className="ld-step-num">1</span>
-              <h3>Create your account</h3>
-              <p>Two minutes. Your name, your company, done. No card.</p>
-            </div>
-            <div className="ld-step">
-              <span className="ld-step-num">2</span>
-              <h3>Add your first job</h3>
-              <p>The setup guide walks you through it step by step.</p>
-            </div>
-            <div className="ld-step">
-              <span className="ld-step-num">3</span>
-              <h3>Text your crew the invite link</h3>
-              <p>He taps it once and he is in. Nothing to type, no password.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-      {/* Social proof — real, approved quotes only. Renders nothing until there
-          are some, because a fake testimonial is worse than no testimonial. */}
-      {quotes.length > 0 && (
-        <section className="ld-proof">
-          <div className="ld-inner">
-            <h2>From contractors running it</h2>
-            <div className="ld-proof-grid">
-              {quotes.map((t) => {
-                const who = [t.author_name, t.company_name].filter(Boolean).join(' · ')
-                return (
-                  <figure className="ld-proof-card" key={t.id}>
-                    {t.rating ? <div className="ld-proof-stars" aria-label={`${t.rating} out of 5`}>{'★'.repeat(t.rating)}</div> : null}
-                    <blockquote>{t.quote}</blockquote>
-                    {(who || t.city) && (
-                      <figcaption>
-                        {who}{who && t.city ? ', ' : ''}{t.city}
-                      </figcaption>
-                    )}
-                  </figure>
-                )
-              })}
-            </div>
-          </div>
-        </section>
-      )}
 
       <section className="ld-pricing">
         <div className="ld-inner">
@@ -335,16 +202,6 @@ export default function Landing() {
               <li>$1,200/yr if you'd rather pay once (4 months free)</li>
               <li>Cancel anytime. Your data stays yours, export it whenever</li>
             </ul>
-            {/* The old "Everything's included. Nothing's gated." section was a
-                third full-width pass over the feature list, three screens above
-                the price. It answers one question — what do I get for $150 —
-                so it belongs where that question gets asked. */}
-            <div className="ld-price-inc">
-              <div className="ld-price-inc-head">Everything, for that one price</div>
-              <ul className="ld-inc-grid">
-                {INCLUDED.map((item) => <li key={item}>{item}</li>)}
-              </ul>
-            </div>
             <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free, no card</a>
             <p className="ld-price-note">
               One caught receipt pile or one job that stops bleeding pays for the year.
@@ -352,6 +209,7 @@ export default function Landing() {
           </div>
         </div>
       </section>
+
       {/* FAQ */}
       <section className="ld-faq">
         <div className="ld-inner">
@@ -372,6 +230,7 @@ export default function Landing() {
           </p>
         </div>
       </section>
+
       <footer className="ld-footer">
         <a href="/crew">On a crew?</a>·<a href="/login">Sign in</a>·<a href="/faq/">FAQ</a>·<a href="/your-data/">Your data</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
         <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>

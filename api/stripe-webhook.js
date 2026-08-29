@@ -9,6 +9,7 @@
 // No Stripe SDK: signature verified with node:crypto, REST via fetch.
 import crypto from 'crypto'
 import { alertOwner } from './_alert'
+import { send, shell, money, stamp as fmtDate, esc, APP_URL } from './_email'
 
 export const config = { api: { bodyParser: false } }
 
@@ -179,6 +180,122 @@ async function rowFromSubscription(sub, ownerIdHint) {
   }
 }
 
+// ── Customer billing email ──────────────────────────────────────────────────
+//
+// Two letters, both driven off the Stripe INVOICE, which is the only object
+// that knows what was actually charged:
+//
+//   invoice.payment_succeeded  -> the receipt. Fires on the first charge and
+//                                 again on every renewal, so this one email is
+//                                 both "you're subscribed" and "here's your
+//                                 monthly receipt" — told apart by
+//                                 billing_reason, so nobody gets two emails on
+//                                 the same day for the same dollar.
+//   invoice.payment_failed     -> the card didn't go through, here's the link
+//                                 to fix it, and here is what does NOT happen.
+//
+// Stripe's own automatic receipts (Dashboard -> Settings -> Emails) are a
+// separate, unbranded email. Turn ONE of the two on, not both.
+//
+// Never throws: send() swallows, and every caller is inside the handler's try.
+
+// Who to email. The invoice usually carries it; the profiles row is the
+// fallback, and the only source when Stripe has no email on the customer.
+async function billingRecipient(invoice, ownerId) {
+  const onInvoice = invoice && (invoice.customer_email || (invoice.customer_details && invoice.customer_details.email))
+  if (onInvoice) return onInvoice
+  if (!ownerId) return null
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(ownerId)}&select=email`,
+      { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } }
+    )
+    if (!r.ok) return null
+    const rows = await r.json()
+    return (rows && rows[0] && rows[0].email) || null
+  } catch { return null }
+}
+
+// The subscription id, wherever this pinned API version keeps it.
+function subIdOf(invoice) {
+  return (
+    invoice.subscription ||
+    (invoice.parent &&
+      invoice.parent.subscription_details &&
+      invoice.parent.subscription_details.subscription) ||
+    null
+  )
+}
+
+function planLabel(invoice) {
+  const line = invoice && invoice.lines && invoice.lines.data && invoice.lines.data[0]
+  const priceId = line && ((line.price && line.price.id) || (line.pricing && line.pricing.price_details && line.pricing.price_details.price))
+  const plan = planFor(priceId)
+  if (plan === 'yearly') return 'JobTally, yearly'
+  if (plan === 'monthly') return 'JobTally, monthly'
+  return 'JobTally'
+}
+
+async function emailReceipt(invoice, ownerId) {
+  const to = await billingRecipient(invoice, ownerId)
+  if (!to) return
+  const paid = invoice.amount_paid != null ? invoice.amount_paid : invoice.amount_due
+  const first = invoice.billing_reason === 'subscription_create'
+  const nextAt = invoice.lines && invoice.lines.data && invoice.lines.data[0] && invoice.lines.data[0].period && invoice.lines.data[0].period.end
+  const link = invoice.hosted_invoice_url || invoice.invoice_pdf
+
+  await send({
+    to,
+    subject: first
+      ? 'You’re subscribed to JobTally'
+      : `JobTally receipt — ${money(paid, invoice.currency)}`,
+    html: shell({
+      heading: first ? 'You’re subscribed. Run as many jobs as you want.' : 'Payment received. Thank you.',
+      lead: first
+        ? 'The one-job limit is off. Nothing else about your account changed, and everything already in it stayed exactly where it was.'
+        : 'Nothing needed from you. This is your receipt for this period.',
+      hero: money(paid, invoice.currency),
+      heroLabel: first ? 'charged today' : 'charged',
+      rows: [
+        ['Plan', planLabel(invoice)],
+        ['Paid on', fmtDate(invoice.status_transitions && invoice.status_transitions.paid_at) || fmtDate(invoice.created)],
+        nextAt ? ['Next charge', fmtDate(nextAt)] : null,
+        invoice.number ? ['Receipt no.', invoice.number] : null,
+      ],
+      cta: link ? 'View or print this receipt' : 'Open JobTally',
+      ctaHref: link || APP_URL,
+      foot:
+        'Cancel any time from <strong>Manage billing</strong> inside the app. If you cancel you drop back to the free plan, one job at a time, and nothing is deleted. ' +
+        'Reply to this email if a number here looks wrong.',
+    }),
+  })
+}
+
+async function emailPaymentFailed(invoice, ownerId) {
+  const to = await billingRecipient(invoice, ownerId)
+  if (!to) return
+  const due = invoice.amount_due
+  const link = invoice.hosted_invoice_url
+
+  await send({
+    to,
+    subject: 'Your JobTally payment didn’t go through',
+    html: shell({
+      heading: 'Your card didn’t go through.',
+      lead:
+        'Usually an expired card or a bank block, and it takes about a minute to fix. <strong>Nothing has shut off.</strong> Your jobs, hours, receipts and invoices are all still there and your crew can still clock in.',
+      hero: money(due, invoice.currency),
+      heroLabel: 'still owed on this period',
+      rows: [['Plan', planLabel(invoice)], ['Tried on', fmtDate(invoice.created)]],
+      cta: link ? 'Update your card' : 'Open JobTally',
+      ctaHref: link || APP_URL,
+      foot:
+        'Stripe retries this a few times over the next couple of weeks. If it never clears, the account drops to the free plan, one job at a time. It is not deleted and it is not locked. ' +
+        'Reply here if you want a hand with it.',
+    }),
+  })
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!SUPABASE_URL || !SERVICE_KEY || !STRIPE_SECRET || !WEBHOOK_SECRET) {
@@ -232,6 +349,27 @@ export default async function handler(req, res) {
         }
         break
       }
+      case 'invoice.payment_succeeded': {
+        // The receipt. Also the ONLY "welcome to the paid plan" email: the
+        // first invoice arrives in the same second as checkout.session.completed,
+        // so a separate subscribe confirmation there would put two emails about
+        // one payment in one inbox at once. billing_reason tells the two apart
+        // inside the one letter.
+        //
+        // No DB write of its own, on purpose. This event carries no subscription
+        // state we don't already get from customer.subscription.updated; it is
+        // here purely to email a human.
+        const paidSubId = subIdOf(obj)
+        let paidOwnerId = null
+        if (paidSubId) {
+          try {
+            const paidSub = await stripeGet('subscriptions/' + paidSubId)
+            paidOwnerId = (paidSub.metadata && paidSub.metadata.owner_id) || null
+          } catch { /* the invoice's own email address is enough to send on */ }
+        }
+        await emailReceipt(obj, paidOwnerId)
+        break
+      }
       case 'invoice.payment_failed': {
         // Reflect the dunning state; the subscription.updated event usually
         // covers this too, but handle it directly in case it arrives first.
@@ -243,11 +381,16 @@ export default async function handler(req, res) {
           (obj.parent &&
             obj.parent.subscription_details &&
             obj.parent.subscription_details.subscription)
+        let failedOwnerId = null
         if (subId) {
           const sub = await stripeGet('subscriptions/' + subId)
           const row = await rowFromSubscription(sub, null)
+          failedOwnerId = row && row.owner_id
           await applyRow(row, event.created)
         }
+        // Emailed AFTER the status write, so nobody is told their card failed by
+        // an event that then blew up before recording anything.
+        await emailPaymentFailed(obj, failedOwnerId)
         break
       }
       default:
