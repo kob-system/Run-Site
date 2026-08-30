@@ -105,7 +105,39 @@ export default async function handler(req, res) {
       }
     }
 
-    res.json({ ok: true, applied })
+    // Adopt any shifts the owner booked against this invite before this man
+    // had a profile at all (FIX-DATABASE-34). Both columns move in the SAME
+    // patch so schedule_target_exactly_one is never momentarily false.
+    //
+    // Non-fatal on purpose, and loud. If this fails the worker is still
+    // joined and can still clock in — he just opens his app to an empty week
+    // his boss already built, which is confusing but not broken. A 400 here
+    // almost always means FIX-DATABASE-34 has not been run yet.
+    let adoptedShifts = 0
+    if (usedBy) {
+      try {
+        const adopt = await fetch(
+          `${base}/rest/v1/schedule_entries?invite_id=eq.${invite.id}` +
+          `&owner_id=eq.${invite.owner_id}&select=id`,
+          {
+            method: 'PATCH',
+            headers: { ...svc, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+            body: JSON.stringify({ worker_id: usedBy, invite_id: null }),
+          }
+        )
+        if (adopt.ok) {
+          const moved = await adopt.json().catch(() => [])
+          adoptedShifts = Array.isArray(moved) ? moved.length : 0
+        } else {
+          const body = await adopt.text().catch(() => '')
+          console.error('claim-invite: shift adoption failed', adopt.status, body)
+        }
+      } catch (e) {
+        console.error('claim-invite: shift adoption threw', e)
+      }
+    }
+
+    res.json({ ok: true, applied, adoptedShifts })
   } catch (err) {
     console.error('claim-invite error:', err)
     // Non-fatal for the worker — they're already signed up + linked.
