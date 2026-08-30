@@ -82,21 +82,41 @@ const EXPORT_TABLES = [
   // owner_id filter is not redundant belt-and-braces — it is load-bearing.
   ['testimonials', 'Your review', 'owner_id'],
 ]
+// THREE DOORS. This was four tabs with eight sub-tabs behind them — twelve
+// places a man in a truck had to guess between. JP, 2026-08-30: he wanted to
+// open a job and see three things, not a filing cabinet.
+//
+//   JOB   — am I making money, and who do I call
+//   CREW  — the chat, and everything the crew does through it
+//   PAPER — receipts, mileage, permits, documents. The filing.
+//
+// Nothing was deleted to get here. Time moved into Crew (the Hours sheet),
+// daily notes and photos moved into Crew (the Photo sheet, which is also the
+// diary), and the old Docs tab merged into Paper.
 const PROJECT_TABS = [
-  { key: 'work', label: 'Work' },
-  { key: 'plan', label: 'Plan' },
-  { key: 'money', label: 'Money' },
-  { key: 'docs', label: 'Docs' },
+  { key: 'job', label: 'Job' },
+  { key: 'crew', label: 'Crew' },
+  { key: 'paper', label: 'Paper' },
 ]
 // Plain-English names for the DB stage values (start/mid/end). The raw values
 // mean nothing to a contractor — always render through this map.
 const STAGE_LABELS = { start: 'Not started', mid: 'In progress', end: 'Done' }
 const stageLabel = (s) => STAGE_LABELS[s] || s
-// What tapping the stage control actually DOES, spelled out. This used to be a
-// bare "Not started ↻" pill in the top-right corner of the job header, and the
-// owner's own words on seeing it were "a not started button on the top right
-// hand corner which I don't know what that is."
-const STAGE_ACTION = { start: 'Start work →', mid: 'Mark done ✓', end: '↩ Reopen job' }
+// The stage picker, in whole sentences. There used to be a full-width primary
+// button here that said "Mark done ✓" — the loudest control on the job screen,
+// competing with the profit number for the owner's eye, on a job he'd opened
+// to check money. It's a quiet line now, and this is what opens behind it.
+//
+// One row each, no ceremony: pick where the job actually is. Going backwards is
+// allowed and unremarkable — a job that got called done and isn't is the most
+// ordinary thing on a site.
+const STAGE_SENTENCES = [
+  { key: 'start', title: 'Not started', sub: 'nobody on site yet' },
+  { key: 'mid', title: 'Working on it', sub: 'crew is on it' },
+  { key: 'end', title: 'Finished', sub: 'work is done, ready to bill' },
+]
+// What the quiet status line says. Short enough to sit under the job name.
+const STAGE_LINE = { start: 'Not started', mid: 'Working on it', end: 'Finished' }
 
 // Estimate line-item math lives in utils/estimateMath.js so it can be tested —
 // it used to be three one-liners here, and one of them taxed labor. Short
@@ -358,10 +378,20 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [spendError, setSpendError] = useState(false) // true when the live spend fetch failed (don't render a silent $0)
   const [selectedProject, setSelectedProject] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false) // job detail tables in flight (show loading, not a false empty-state)
-  const [projectTab, setProjectTab] = useState('work')
-  // The second row, inside Work and inside Plan. Named the way JP named them.
-  const [workSub, setWorkSub] = useState('time')
-  const [planSub, setPlanSub] = useState('schedule')
+  // 'job' | 'crew' | 'paper'. Opens on Job — the money is what he came for.
+  const [projectTab, setProjectTab] = useState('job')
+  // Which chip sheet is open OVER the crew thread. null = just the chat.
+  // 'days' | 'buy' | 'fix' | 'hours' | 'photo'. A sheet never navigates away
+  // from the thread; you close it and the conversation is still there.
+  const [chipSheet, setChipSheet] = useState(null)
+  // The three-sentence stage picker, opened from the quiet status line.
+  const [stagePicker, setStagePicker] = useState(false)
+  // The Hours sheet: one day, every worker on the job, tick who worked.
+  // hoursDay is a 'YYYY-MM-DD'; hoursDraft is keyed by worker id →
+  // { mode: 'off' | 'day' | 'custom', hours: '8' }. Nothing saves until Save.
+  const [hoursDay, setHoursDay] = useState(() => todayLocal())
+  const [hoursDraft, setHoursDraft] = useState({})
+  const [hoursSaving, setHoursSaving] = useState(false)
   const [jobChatUnread, setJobChatUnread] = useState(false)
   // Whether the open job's thread has something the owner hasn't seen. Just the
   // newest timestamp, so it costs one tiny query per job opened. His own
@@ -1241,6 +1271,49 @@ ${link}`
     setShowInvite(false); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false); setInlineError('')
   }
 
+  // ONE definition of "add a brand-new guy without leaving this screen",
+  // rendered inside Add Time AND Schedule Worker. JP: putting a guy on a job
+  // should never mean backing out to Crew → Workers and finding your way back.
+  // The link is the account — he taps it and he is on the crew with the rate
+  // already set, so name + rate here is the whole of hiring.
+  const inviteOpenBtn = (label) => !showInvite && (
+    <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
+      {label}
+    </button>
+  )
+  const inviteBlock = (idPrefix) => showInvite && (
+    <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '10px', padding: '12px', marginBottom: '12px' }}>
+      {!inviteLink ? (
+        <>
+          <div className="input-group" style={{ marginBottom: '8px' }}>
+            <label htmlFor={idPrefix + '-invite-name'}>New worker’s name</label>
+            <input id={idPrefix + '-invite-name'} type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
+          </div>
+          <div className="input-group" style={{ marginBottom: '8px' }}>
+            <label htmlFor={idPrefix + '-invite-rate'}>What you pay him an hour</label>
+            <input id={idPrefix + '-invite-rate'} type="number" inputMode="decimal" min="0" max="500" step="0.25" value={inviteRate} onChange={e => setInviteRate(e.target.value)} placeholder="25" />
+            <p style={{ fontSize: '12px', color: '#888', margin: '4px 0 0' }}>Leave it blank if you don’t know yet, but his hours will cost $0 until you set it on his card.</p>
+          </div>
+          {inlineError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{inlineError}</div>}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="button" onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
+            <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <h3 style={{ marginBottom: '4px', fontSize: '15px' }}>Link ready for {inviteName} 🎉</h3>
+          <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. One tap and he’s on your crew — no password, nothing to download, rate already set. He shows up in the Worker list here the second he taps it.</p>
+          <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="button" onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
+            <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+
   // Owner approves or denies a worker's time-off request.
   const decideTimeOff = async (req, status) => {
     setLoading(true)
@@ -1837,6 +1910,22 @@ ${link}`
   // Called from two places now: inside a job (the job is implied) and from the
   // crew week grid (the job has to be picked). A shift with no job can't exist
   // — the crew's phone shows them WHERE to be, not just when.
+  // Who a shift is for. A shift booked before the man joined has no profile
+  // behind it, so the name comes off the open-invite list instead.
+  //
+  // Resolved from state rather than a PostgREST embed on purpose: an embed
+  // would need the invite_id foreign key to exist, so the whole Schedule
+  // screen would 400 on any database where FIX-DATABASE-34 has not been run.
+  // This way the new column is simply absent and everything renders as before.
+  const shiftWorkerName = (s) => {
+    if (s.profiles) return s.profiles.full_name
+    if (s.invite_id) {
+      const inv = openInvites.find(i => i.id === s.invite_id)
+      return `${(inv && inv.worker_name) || 'New hire'} · not joined yet`
+    }
+    return 'Worker'
+  }
+
   const addSchedule = async () => {
     const projectId = selectedProject ? selectedProject.id : scheduleForm.project_id
     if (!scheduleForm.worker_id || !scheduleForm.scheduled_date) return setInlineError('Worker and date are required')
@@ -1844,8 +1933,15 @@ ${link}`
     setLoading(true)
     setInlineError('')
     try {
+      // The picker holds either a profile id or `invite:<id>` for a man who
+      // has not tapped his link yet. Exactly one of the two columns is set —
+      // the schedule_target_exactly_one constraint enforces it server-side.
+      const picked = String(scheduleForm.worker_id)
+      const isInvite = picked.startsWith('invite:')
       const { error } = await supabase.from('schedule_entries').insert({
-        owner_id: profile.id, worker_id: scheduleForm.worker_id,
+        owner_id: profile.id,
+        worker_id: isInvite ? null : picked,
+        invite_id: isInvite ? picked.slice(7) : null,
         project_id: projectId, task_description: scheduleForm.task_description,
         scheduled_date: scheduleForm.scheduled_date, start_time: scheduleForm.start_time, end_time: scheduleForm.end_time
       })
@@ -2550,10 +2646,28 @@ ${link}`
   // below. One definition rendered in both places, rather than two copies that
   // drift apart the first time somebody adds a field.
   const scheduleModal = showNewSchedule && (
-    <div className="modal-overlay" onClick={() => setShowNewSchedule(false)}>
+    <div className="modal-overlay" onClick={() => { setShowNewSchedule(false); resetInvite() }}>
       <div className="modal-sheet" onClick={e => e.stopPropagation()}>
         <h2>Schedule Worker</h2>
-        <div className="input-group"><label>Worker</label><select value={scheduleForm.worker_id} onChange={e => setScheduleForm({ ...scheduleForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}</select></div>
+        <div className="input-group">
+          <label>Worker</label>
+          {/* Two groups on purpose. A man you have invited but who has not
+              tapped his link yet can still be put on a day — the shift rides
+              on the invite until he joins, then moves to him. See
+              FIX-DATABASE-34. */}
+          <select value={scheduleForm.worker_id} onChange={e => setScheduleForm({ ...scheduleForm, worker_id: e.target.value })}>
+            <option value="">Select worker</option>
+            {workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — ${formatCurrency(w.hourly_rate)}/hr` : ''}</option>)}
+            {openInvites.length > 0 && (
+              <optgroup label="Invited, not joined yet">
+                {openInvites.map(inv => <option key={inv.id} value={`invite:${inv.id}`}>{inv.worker_name || 'New hire'}</option>)}
+              </optgroup>
+            )}
+          </select>
+          {openInvites.length > 0 && <p style={{ fontSize: '12px', color: '#6B7280', marginTop: '6px' }}>Schedule him now, send the link when you are ready. His days show up the moment he taps it.</p>}
+          {inviteOpenBtn(workers.length === 0 && openInvites.length === 0 ? '+ Add a new worker — name, rate, send him a link' : 'Don’t see him? + Add a new worker')}
+        </div>
+        {inviteBlock('sched')}
         {/* Only when the job isn't already implied by the screen you came from. */}
         {!selectedProject && (
           <div className="input-group"><label>Job</label><select value={scheduleForm.project_id} onChange={e => setScheduleForm({ ...scheduleForm, project_id: e.target.value })}><option value="">Select job</option>{activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
@@ -2564,7 +2678,7 @@ ${link}`
         <div className="input-group"><label>End Time</label><input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} /></div>
         {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
         <button className="btn-primary" onClick={addSchedule} disabled={loading}>{loading ? 'Saving…' : 'Schedule'}</button>
-        <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError('') }}>Cancel</button>
+        <button className="btn-secondary" onClick={() => { setShowNewSchedule(false); setInlineError(''); resetInvite() }}>Cancel</button>
       </div>
     </div>
   )
@@ -2998,11 +3112,11 @@ ${link}`
                 </div>
               )}
               <JobSection active={planSub === "schedule"}>
-                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewSchedule(true); setInlineError('') }}>+ Schedule worker</button>
+                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewSchedule(true); setInlineError(''); resetInvite() }}>+ Schedule worker</button>
                 {scheduleEntries.map(s => (
                   <div key={s.id} className="card">
                     <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                    <h3>{s.profiles ? s.profiles.full_name : 'Worker'}</h3>
+                    <h3>{shiftWorkerName(s)}</h3>
                     <p>{s.task_description}</p>
                     {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
                   </div>
@@ -3145,44 +3259,9 @@ ${link}`
               <div className="input-group">
                 <label>Worker</label>
                 <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — ${formatCurrency(w.hourly_rate)}/hr` : ''}</option>)}</select>
-                {!showInvite && (
-                  <button type="button" onClick={() => { setShowInvite(true); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false); setInlineError('') }} style={{ marginTop: '6px', background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: '700', cursor: 'pointer', padding: '4px 0' }}>
-                    {workers.length === 0 ? '+ Invite a worker to send them a link' : 'Don’t see them? + Invite a new worker'}
-                  </button>
-                )}
+                {inviteOpenBtn(workers.length === 0 ? '+ Add a new worker — sends him a link' : 'Don’t see him? + Add a new worker')}
               </div>
-              {showInvite && (
-                <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '10px', padding: '12px', marginBottom: '12px' }}>
-                  {!inviteLink ? (
-                    <>
-                      <div className="input-group" style={{ marginBottom: '8px' }}>
-                        <label htmlFor="time-invite-name">New worker’s name</label>
-                        <input id="time-invite-name" type="text" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Mike Reyes" />
-                      </div>
-                      <div className="input-group" style={{ marginBottom: '8px' }}>
-                        <label htmlFor="time-invite-rate">What you pay him an hour</label>
-                        <input id="time-invite-rate" type="number" inputMode="decimal" min="0" max="500" step="0.25" value={inviteRate} onChange={e => setInviteRate(e.target.value)} placeholder="25" />
-                        <p style={{ fontSize: '12px', color: '#888', margin: '4px 0 0' }}>Leave it blank if you don’t know yet, but his hours will cost $0 until you set it on his card.</p>
-                      </div>
-                      {inlineError && <div className="alert-danger" style={{ marginBottom: '10px' }}>{inlineError}</div>}
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button type="button" onClick={createInvite} disabled={loading} className="btn-primary" style={{ flex: 1 }}>{loading ? 'Creating…' : 'Create invite link'}</button>
-                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInlineError('') }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Cancel</button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <h3 style={{ marginBottom: '4px', fontSize: '15px' }}>Link ready for {inviteName} 🎉</h3>
-                      <p style={{ fontSize: '13px', color: '#888', marginBottom: '10px' }}>Text it to {inviteName}. One tap and he’s on your crew, no password, nothing to download. If you’ve only got one job running he lands right on the clock. Otherwise tap <b>Assign</b> on his card first.</p>
-                      <div style={{ background: 'white', border: '1px solid #eee', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#1C2B3A', whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: '10px' }}>{inviteMessage(inviteName, inviteLink)}</div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button type="button" onClick={() => copyInvite()} className="btn-primary" style={{ flex: 1 }}>{inviteCopied ? 'Sent ✓' : 'Text it over'}</button>
-                        <button type="button" onClick={() => { setShowInvite(false); setInviteName(''); setInviteRate(''); setInviteLink(''); setInviteCopied(false) }} style={{ background: 'transparent', color: '#888', border: '1px solid #ddd', borderRadius: '8px', padding: '0 16px', cursor: 'pointer' }}>Done</button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
+              {inviteBlock('time')}
               <div className="input-group"><label>Date</label><input type="date" value={timeForm.work_date} onChange={e => setTimeForm({ ...timeForm, work_date: e.target.value })} /></div>
               <div className="input-group"><label>Start time</label><input type="time" value={timeForm.start_time} onChange={e => setTimeForm({ ...timeForm, start_time: e.target.value })} /></div>
               <div className="input-group"><label>End time</label><input type="time" value={timeForm.end_time} onChange={e => setTimeForm({ ...timeForm, end_time: e.target.value })} /></div>
@@ -3329,6 +3408,7 @@ ${link}`
           const openAdd = (key) => {
             setScheduleForm({ worker_id: '', project_id: '', task_description: '', scheduled_date: key, start_time: '', end_time: '' })
             setInlineError('')
+            resetInvite()
             setShowNewSchedule(true)
           }
           return (
@@ -3364,7 +3444,7 @@ ${link}`
                     {shifts.map(s => (
                       <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid #f0f0f0' }}>
                         <div style={{ minWidth: 0 }}>
-                          <p style={{ fontWeight: '600', fontSize: '14px' }}>{s.profiles ? s.profiles.full_name : 'Worker'}{s.start_time ? ` · ${(s.start_time || '').slice(0, 5)}${s.end_time ? '–' + (s.end_time || '').slice(0, 5) : ''}` : ' · time not set'}</p>
+                          <p style={{ fontWeight: '600', fontSize: '14px' }}>{shiftWorkerName(s)}{s.start_time ? ` · ${(s.start_time || '').slice(0, 5)}${s.end_time ? '–' + (s.end_time || '').slice(0, 5) : ''}` : ' · time not set'}</p>
                           <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : 'No job'}{s.task_description ? ' · ' + s.task_description : ''}</p>
                         </div>
                         <button aria-label="Remove shift" onClick={() => deleteSchedule(s)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '44px', flexShrink: 0 }}>Remove</button>
@@ -3385,7 +3465,10 @@ ${link}`
                   <p style={{ fontSize: '13px', color: '#555' }}>{unscheduled.map(w => w.full_name).join(', ')}</p>
                 </div>
               )}
-              {workers.length === 0 && (
+              {/* An owner whose only crew is invited-but-not-joined still has a
+                  week to build, so this empty state must not swallow the grid.
+                  See FIX-DATABASE-34. */}
+              {workers.length === 0 && openInvites.length === 0 && (
                 <div className="empty-state"><p>No crew yet. Add workers first, then put them on the calendar.</p><button className="btn-primary" onClick={() => setActiveTab('workers')}>Add a worker</button></div>
               )}
             </div>
@@ -3764,7 +3847,7 @@ ${link}`
               <div key={s.id} className="card" style={{ padding: '12px 16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <p style={{ fontWeight: '600', fontSize: '14px' }}>{s.profiles ? s.profiles.full_name : 'Worker'} · {s.task_description}</p>
+                    <p style={{ fontWeight: '600', fontSize: '14px' }}>{shiftWorkerName(s)} · {s.task_description}</p>
                     <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : ''}</p>
                   </div>
                   <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', whiteSpace: 'nowrap', marginLeft: '10px' }}>{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
@@ -3824,7 +3907,7 @@ ${link}`
                   <p className="schedule-day">{day !== 'unscheduled' ? new Date(day + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : 'Unscheduled'}</p>
                   {byDay[day].map(s => (
                     <div key={s.id} className="card" style={{ padding: '12px 16px' }}>
-                      <p style={{ fontWeight: '600', fontSize: '14px' }}>{s.profiles ? s.profiles.full_name : 'Worker'} · {s.task_description}</p>
+                      <p style={{ fontWeight: '600', fontSize: '14px' }}>{shiftWorkerName(s)} · {s.task_description}</p>
                       <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : ''}{s.start_time ? ` · ${(s.start_time || '').slice(0, 5)}–${(s.end_time || '').slice(0, 5)}` : ''}</p>
                     </div>
                   ))}
