@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
