@@ -51,16 +51,26 @@ function speakable(text, full) {
 }
 
 // Tap-a-template starters. A chip does nothing clever — it just sends a plain
-// English opener, so the assistant runs its normal guided flow (GUIDED SETUPS
-// in api/assistant.js: one short question per message) and the usual Confirm
+// English opener, so the assistant runs its normal flow and the usual Confirm
 // card is still the last thing before anything saves. Nobody has to know what
 // to type; the app tells them what it can do.
+//
+// Every one of these used to end with "Ask me for what you need one question at
+// a time." That single sentence turned the assistant into an interrogation: a
+// man in a truck who says "put Dave on the Maple job, eight hours yesterday"
+// got asked which worker, then which job, then which day, then how long — four
+// round trips for a sentence that already had all four answers in it.
+//
+// So the chip now says the thing OUT LOUD instead: "say it all in one go."
+// api/assistant.js already handles a whole batch in one turn (SAY IT ALL IN ONE
+// BREATH) — the templates were the only thing fighting it.
+const SAY_IT_ALL = "Say it all in one go if you want — I'll fill in everything you gave me and only ask if something's genuinely missing."
 const OWNER_TEMPLATES = [
-  { icon: '🧱', label: 'New job', hint: 'name + price', prompt: "I want to set up a new job. Ask me for what you need one question at a time." },
-  { icon: '👷', label: 'Add a worker', hint: 'name + pay rate', prompt: "I want to add a guy to my crew and set what I pay him. Ask me for what you need one question at a time." },
+  { icon: '🧱', label: 'New job', hint: 'name + price', prompt: "I want to set up a new job. " + SAY_IT_ALL },
+  { icon: '👷', label: 'Add a worker', hint: 'name + pay rate', prompt: "I want to add a guy to my crew and set what I pay him. " + SAY_IT_ALL },
   { icon: '🧾', label: 'Add a receipt', hint: 'snap a photo', action: 'receipt' },
-  { icon: '⏱', label: 'Log crew hours', hint: 'who, job, hours', prompt: "I want to log hours for one of my guys. Ask me for what you need one question at a time." },
-  { icon: '💵', label: 'Send an invoice', hint: 'job + amount', prompt: "I want to bill a client. Ask me for what you need one question at a time." },
+  { icon: '⏱', label: 'Log crew hours', hint: 'who, job, hours', prompt: "I want to log hours for my guys. " + SAY_IT_ALL },
+  { icon: '💵', label: 'Send an invoice', hint: 'job + amount', prompt: "I want to bill a client. " + SAY_IT_ALL },
   { icon: '📊', label: 'Where do I stand?', hint: 'profit + owed', prompt: "Where do I stand right now — profit so far and what am I owed?" },
 ]
 const CREW_TEMPLATES = [
@@ -68,7 +78,7 @@ const CREW_TEMPLATES = [
   { icon: '🛑', label: 'Clock out', hint: 'end the day', prompt: 'Clock me out.' },
   { icon: '🧾', label: 'Add a receipt', hint: 'snap a photo', action: 'receipt' },
   { icon: '📅', label: 'My hours', hint: 'this week', prompt: 'How many hours do I have this week?' },
-  { icon: '🌴', label: 'Time off', hint: 'ask the boss', prompt: "I want to request time off. Ask me for what you need one question at a time." },
+  { icon: '🌴', label: 'Time off', hint: 'ask the boss', prompt: "I want to request time off. " + SAY_IT_ALL },
 ]
 
 // Two looks, one list: big tappable cards on the empty chat (nothing else to
@@ -122,7 +132,7 @@ async function authHeader() {
 // owns the ✨ button now, because talking to it is meant to read as a place you
 // go, not a helper hovering over the screen you're already on. Left uncontrolled
 // (the crew side) it keeps its own floating button and behaves exactly as before.
-export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange }) {
+export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange, holdVoice = false, projectId = null }) {
   const isOwner = role !== 'worker'
   const controlled = typeof openProp === 'boolean'
   const [openState, setOpenState] = useState(false)
@@ -138,7 +148,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
       // do far better than a paragraph does. Anything not on a card still
       // works by typing or talking.
       text: isOwner
-        ? "Hey — tap one of these, or hit 🎤 and just talk (jobs, money, crew, receipts, invoices, permits, punch lists…). Ask out loud and I'll answer out loud. Nothing saves until you hit Confirm."
+        ? "Hey — hold the ✨ button and just talk. Say the whole thing in one go (jobs, money, crew, receipts, invoices, permits, punch lists) and I'll sort it out. Nothing saves until you hit Confirm."
         : "Hey — tap one of these, or hit 🎤 and just say it. Ask out loud and I'll answer out loud. Nothing saves until you hit Confirm.",
     },
   ])
@@ -188,14 +198,24 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
   useEffect(() => { if (!open) hush() }, [open, hush])
   useEffect(() => hush, [hush])
 
-  const send = useCallback(async (overrideText) => {
+  const send = useCallback(async (overrideText, keepVoice) => {
     const text = (typeof overrideText === 'string' ? overrideText : input).trim()
     if (!text || busy) return
     // A template tap or a receipt scan is not a spoken turn — it silences
-    // talk-back until the mic is used again.
-    if (typeof overrideText === 'string') voiceTurnRef.current = false
+    // talk-back until the mic is used again. `keepVoice` is the exception:
+    // press-and-hold sends override text and IS a spoken turn.
+    if (typeof overrideText === 'string' && !keepVoice) voiceTurnRef.current = false
     else setInput('')
     hush()
+    // THE RULE THAT MAKES THE MIC TRUSTWORTHY.
+    // Whatever he said goes into the job's thread verbatim, before the model
+    // has looked at it and whatever the model decides to do with it. If the
+    // routing gets it wrong, that costs a tap to fix. It must never cost the
+    // note. Fire-and-forget: this can fail silently, the ask still goes.
+    if (projectId && (keepVoice || voiceTurnRef.current)) {
+      supabase.rpc('post_job_message', { p_project_id: projectId, p_body: text })
+        .then(() => {}, () => {})
+    }
     setPending(null)
     pushMsg({ role: 'user', text })
     setBusy(true)
@@ -250,7 +270,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
     } finally {
       setBusy(false)
     }
-  }, [input, busy, msgs, say, hush])
+  }, [input, busy, msgs, say, hush, projectId])
 
   // Cancel has to leave a trace in the history, otherwise the model only sees
   // an unfinished setup and proposes the exact same write again on the next
@@ -296,24 +316,71 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
     }
   }, [pending, busy, activity, onDataChanged, say])
 
-  // Mic dictation — browser speech-to-text into the input box. Button only
-  // renders when the browser has SpeechRecognition (iOS Safari 14.5+, Chrome).
-  const toggleMic = useCallback(() => {
-    if (!SR) return
-    // Barge-in: stop talking the instant the mic opens, or the assistant's own
-    // voice ends up in the transcript.
-    hush()
-    if (listening) {
-      try { if (recogRef.current) recogRef.current.stop() } catch { /* already stopped */ }
-      setListening(false)
-      return
-    }
+  // ---------------------------------------------------------------------
+  // THE MIC IS THE BUTTON NOW
+  //
+  // JP, 2026-08-30: "I don't like the microphone." The old shape was a 44px 🎤
+  // next to the text box that you tapped to start and tapped again to stop —
+  // two taps, an ambiguous state in between, and on iOS the FIRST attempt of a
+  // session very often returned nothing at all, which reads as a broken app
+  // rather than a warm-up.
+  //
+  // So the ✨ orb in the bottom bar became the mic, and it is press-and-hold:
+  // hold it, talk, let go, it sends. No mode to be in, no second tap to
+  // remember, and letting go is a thing hands do without looking.
+  //
+  // CHECKED, NOT ASSUMED (2026-08-30): Apple's Web Speech engine in a page
+  // stops on its own, throttles interim results, and misses the first attempt.
+  // Push-to-talk is documented as more stable than continuous, and
+  // `continuous = true` on iOS is a known dead end — do not reintroduce it.
+  // The warm-up below is the fix for the dead first try: the recognizer is
+  // CONSTRUCTED when the sheet opens (no permission prompt, no listening), so
+  // by the time a thumb lands on the orb the engine is already loaded.
+  // ---------------------------------------------------------------------
+
+  // Live transcript, mirrored into a ref. onend fires with a stale closure over
+  // `input`, so the auto-send on release has to read this instead.
+  const dictatedRef = useRef('')
+  // True while a press-and-hold is in flight: release should SEND, not just stop.
+  const autoSendRef = useRef(false)
+  // Latest `send`, so onend can call it without re-registering handlers.
+  const sendRef = useRef(send)
+  useEffect(() => { sendRef.current = send }, [send])
+
+  const buildRecognizer = useCallback(() => {
+    if (!SR) return null
     const rec = new SR()
     rec.lang = 'en-US'
     rec.interimResults = true // live text as they speak, not just at the end
     rec.maxAlternatives = 1
+    // continuous stays FALSE. See the note above.
+    return rec
+  }, [])
+
+  // Warm the engine the moment the sheet opens. Constructing is enough — it
+  // does not ask for the microphone and it does not listen.
+  useEffect(() => {
+    if (!open || !SR || recogRef.current) return
+    recogRef.current = buildRecognizer()
+  }, [open, buildRecognizer])
+
+  const stopMic = useCallback(() => {
+    try { if (recogRef.current) recogRef.current.stop() } catch { /* already stopped */ }
+  }, [])
+
+  // `hold` = started by press-and-hold, so releasing sends it.
+  const startMic = useCallback((hold) => {
+    if (!SR || listening) return
+    // Barge-in: stop talking the instant the mic opens, or the assistant's own
+    // voice ends up in the transcript.
+    hush()
+    const rec = recogRef.current || buildRecognizer()
+    if (!rec) return
+    recogRef.current = rec
+    autoSendRef.current = !!hold
     // Keep whatever they'd already typed; append the dictation live on top of it.
     const base = input ? input.trim() + ' ' : ''
+    dictatedRef.current = base
     rec.onresult = (e) => {
       let finalText = ''
       let interim = ''
@@ -324,27 +391,65 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
       }
       // They actually spoke — this turn earns a spoken answer back.
       if (finalText.trim()) voiceTurnRef.current = true
-      setInput((base + (finalText + interim)).replace(/\s+/g, ' ').trimStart())
+      const composed = (base + (finalText + interim)).replace(/\s+/g, ' ').trimStart()
+      dictatedRef.current = composed
+      setInput(composed)
     }
-    rec.onend = () => setListening(false)
+    rec.onend = () => {
+      setListening(false)
+      const text = (dictatedRef.current || '').trim()
+      if (autoSendRef.current) {
+        autoSendRef.current = false
+        // He spoke, so the answer comes back out loud. `keepVoice` stops the
+        // override-text path from silencing talk-back the way a template tap does.
+        if (text) { voiceTurnRef.current = true; setInput(''); sendRef.current(text, true) }
+      }
+    }
     rec.onerror = (e) => {
       setListening(false)
+      autoSendRef.current = false
       voiceTurnRef.current = false
       const err = e && e.error
       if (err === 'not-allowed' || err === 'service-not-allowed') {
-        pushMsg({ role: 'assistant', text: 'I need microphone access to hear you — allow the mic for this site in your browser settings, then tap 🎤 again. You can always just type instead.' })
+        pushMsg({ role: 'assistant', text: 'I need microphone access to hear you — allow the mic for this site in your browser settings, then hold the ✨ button again. You can always just type instead.' })
       } else if (err === 'no-speech') {
-        pushMsg({ role: 'assistant', text: "Didn't catch anything — tap 🎤 and speak, or just type it." })
+        pushMsg({ role: 'assistant', text: "Didn't catch anything — hold the ✨ button while you talk, or just type it." })
       } else if (err === 'audio-capture') {
         pushMsg({ role: 'assistant', text: "Can't find a microphone on this device — go ahead and type it instead." })
       }
     }
-    recogRef.current = rec
     try {
       rec.start()
       setListening(true)
-    } catch { setListening(false) }
-  }, [listening, input, hush])
+    } catch {
+      // start() throws if the engine is still winding down from the last turn.
+      // A fresh instance is the documented way out; one retry, then give up
+      // quietly rather than leaving a button that looks armed and is not.
+      try {
+        const fresh = buildRecognizer()
+        if (!fresh) { setListening(false); return }
+        fresh.onresult = rec.onresult; fresh.onend = rec.onend; fresh.onerror = rec.onerror
+        recogRef.current = fresh
+        fresh.start()
+        setListening(true)
+      } catch { setListening(false); autoSendRef.current = false }
+    }
+  }, [listening, input, hush, buildRecognizer])
+
+  // The crew sheet keeps a tap-to-toggle 🎤 next to its text box: they have no
+  // bottom-bar orb to hold, so deleting it would strand them with typing only.
+  const toggleMic = useCallback(() => {
+    if (listening) stopMic()
+    else startMic(false)
+  }, [listening, startMic, stopMic])
+
+  // The parent (the ✨ orb in the owner's bottom bar, and the Hold-to-talk chip
+  // on a job's Crew tab) drives this: true on press, false on release.
+  useEffect(() => {
+    if (!SR) return
+    if (holdVoice && open && !listening) startMic(true)
+    if (!holdVoice && listening && autoSendRef.current) stopMic()
+  }, [holdVoice, open, listening, startMic, stopMic])
 
   // Receipt photo (owner or crew): photo → /api/scan-receipt (Haiku vision) →
   // auto-send the store/amount/date so the normal add_expense confirm flow takes
@@ -547,7 +652,10 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
               {/* Receipt scan — owner and crew both; a crew scan books to the boss server-side. */}
               <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
               <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
-              {SR && (
+              {/* The owner's mic is the ✨ orb he held to get here, so a second
+                  one next to the text box is just a control that can disagree
+                  with the first. The crew sheet has no orb, so it keeps this. */}
+              {SR && !controlled && (
                 <button onClick={toggleMic} disabled={busy || scanning} aria-label={listening ? 'Stop listening' : 'Speak'} title={listening ? 'Stop listening' : 'Speak'} style={{ width: 44, border: listening ? 'none' : '1px solid #d1d5db', borderRadius: 10, background: listening ? '#dc2626' : 'white', fontSize: 18, cursor: 'pointer' }}>🎤</button>
               )}
               <input

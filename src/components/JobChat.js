@@ -137,6 +137,24 @@ export default function JobChat({ projectId, selfId, placeholder = 'Message the 
           </div>
         )}
         {messages.map(m => {
+          // A diary line the app wrote because something happened on the job
+          // (FIX-DATABASE-35). It is nobody's message: centred, grey, no
+          // bubble, no name. It must never look like a person said it — that
+          // is the entire reason `kind` exists instead of posting as the owner.
+          //
+          // The `=== 'system'` test is deliberate rather than `!== 'human'`:
+          // on a database where 35 has not run, `kind` is undefined and every
+          // row falls through to the normal bubble, which is exactly right.
+          if (m.kind === 'system') {
+            return (
+              <div key={m.id} style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
+                <div style={{ maxWidth: '88%', textAlign: 'center' }}>
+                  <p style={{ fontSize: '12px', color: '#6B7280', lineHeight: 1.45, background: 'rgba(0,0,0,0.035)', borderRadius: '10px', padding: '6px 12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</p>
+                  <p style={{ fontSize: '10px', color: '#9CA3AF', margin: '3px 0 0' }}>{formatChatTime(m.created_at)}</p>
+                </div>
+              </div>
+            )
+          }
           const mine = m.author_id === selfId
           return (
             <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: '10px' }}>
