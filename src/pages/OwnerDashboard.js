@@ -392,6 +392,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [hoursDay, setHoursDay] = useState(() => todayLocal())
   const [hoursDraft, setHoursDraft] = useState({})
   const [hoursSaving, setHoursSaving] = useState(false)
+  // Worker ids assigned to the OPEN job (project_workers). Distinct from
+  // assignedWorkerIds, which is "has ≥1 assignment anywhere".
+  const [projectWorkerIds, setProjectWorkerIds] = useState([])
   const [jobChatUnread, setJobChatUnread] = useState(false)
   // Whether the open job's thread has something the owner hasn't seen. Just the
   // newest timestamp, so it costs one tiny query per job opened. His own
@@ -513,6 +516,44 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [crewWeekStart, setCrewWeekStart] = useState(() => weekStartKey(new Date()))
   const [crewWeek, setCrewWeek] = useState([])
   const [crewWeekLoading, setCrewWeekLoading] = useState(false)
+  // Which day of the dot strip is expanded on the Crew screen. null = none.
+  const [crewDay, setCrewDay] = useState(null)
+
+  // ---- PRESS AND HOLD TO TALK ----
+  // JP: "I don't like the microphone." It was a small 🎤 inside the assistant
+  // sheet that you tapped on and tapped off — you had to be IN the sheet to
+  // start talking, and then remember you were recording.
+  //
+  // Now the ✨ orb IS the mic. Hold it and it opens the sheet already
+  // listening; let go and it sends. A short tap keeps the old behaviour — just
+  // open the sheet — so nothing anyone already learned breaks.
+  //
+  // HOLD_MS is the line between the two. 220ms is long enough that a normal
+  // tap never trips it, short enough that a deliberate press feels instant.
+  const HOLD_MS = 220
+  const [askHold, setAskHold] = useState(false)
+  // Which job's thread the raw spoken sentence gets copied into, if any. Set
+  // when he holds the button from inside a job; null from the bottom bar.
+  const [askProjectId, setAskProjectId] = useState(null)
+  const holdTimerRef = useRef(null)
+  // Start a press. `pid` is the job to attribute it to, if we're inside one.
+  const startAskHold = useCallback((pid) => {
+    setAskProjectId(pid || null)
+    setAssistantOpen(true)
+    clearTimeout(holdTimerRef.current)
+    holdTimerRef.current = setTimeout(() => setAskHold(true), HOLD_MS)
+  }, [])
+  // End a press. Dropping holdVoice is what tells the panel to stop and send;
+  // if the timer never fired this was a tap and the sheet is simply open.
+  const endAskHold = useCallback(() => {
+    clearTimeout(holdTimerRef.current)
+    setAskHold(false)
+  }, [])
+  const askPressStart = useCallback(() => startAskHold(null), [startAskHold])
+  const askPressEnd = useCallback(() => endAskHold(), [endAskHold])
+  // A press that is still held when the component unmounts would leave the
+  // recognizer running with nothing listening to it.
+  useEffect(() => () => clearTimeout(holdTimerRef.current), [])
   const [complianceItems, setComplianceItems] = useState([])
   const [warranties, setWarranties] = useState([])
   const [permits, setPermits] = useState([])
@@ -953,7 +994,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // working right now" is worthless if it's a snapshot from whenever the app was
   // opened, and a poll would run all day for a number nobody is looking at.
   useEffect(() => {
-    if (activeTab === 'home' || activeTab === 'workers') fetchOnTheClock(workers)
+    if (activeTab === 'home' || activeTab === 'workers' || activeTab === 'crew') fetchOnTheClock(workers)
   }, [activeTab, workers, fetchOnTheClock])
 
   useEffect(() => {
@@ -988,7 +1029,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   }, [selectedProject, chatPulseFor, profile.id])
 
   useEffect(() => {
-    if (activeTab === 'payroll' && workers.length) fetchPayroll()
+    if ((activeTab === 'payroll' || activeTab === 'crew') && workers.length) fetchPayroll()
   }, [activeTab, workers, fetchPayroll])
 
   // Payouts do NOT wait on workers.length. An owner whose whole crew is subs
@@ -1000,7 +1041,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Refetch on every visit AND on every arrow — the week you're looking at is
   // the query, so paging weeks is a fetch, not a filter.
   useEffect(() => {
-    if (activeTab === 'crewweek') fetchCrewWeek(crewWeekStart)
+    if (activeTab === 'crewweek' || activeTab === 'crew') fetchCrewWeek(crewWeekStart)
   }, [activeTab, crewWeekStart, fetchCrewWeek])
 
   // Invoices/estimates are fetched once, then reused across tabs — the
@@ -1030,7 +1071,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     // flashes job A's receipts/photos/etc. while these queries are in flight.
     setReceipts([]); setTimeEntries([]); setScheduleEntries([]); setMileageEntries([])
     setDailyLogs([]); setChangeOrders([]); setJobPhotos([]); setPhotoUrls({}); setPunchItems([])
-    setMaterialItems([]); setJobDocuments([]); setPermits([])
+    setMaterialItems([]); setJobDocuments([]); setPermits([]); setProjectWorkerIds([])
+    // A sheet left open from the last job would render the new job's data under
+    // the old job's title. Close everything on the way in.
+    setProjectTab('job'); setChipSheet(null); setStagePicker(false)
     // Tabs render a loading state (not a false "no receipts/photos" empty-state)
     // while these queries are in flight (T2.6).
     setDetailLoading(true)
@@ -1038,7 +1082,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const pid = project.id
       // Load all 11 detail tables in parallel (was 11 serial round-trips → ~10x
       // faster job open). Same queries/filters/order; just no longer waterfalled.
-      const [r, t, s, m, lg, cor, ph, pu, mt, dc, pm] = await Promise.all([
+      const [r, t, s, m, lg, cor, ph, pu, mt, dc, pm, pw] = await Promise.all([
         supabase.from('receipts').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
         supabase.from('time_entries').select('*, profiles(full_name)').eq('project_id', pid).order('clocked_in_at', { ascending: false }),
         supabase.from('schedule_entries').select('*, profiles!schedule_entries_worker_id_fkey(full_name)').eq('project_id', pid).order('scheduled_date', { ascending: true }),
@@ -1050,6 +1094,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         supabase.from('material_items').select('*').eq('project_id', pid).order('created_at', { ascending: true }),
         supabase.from('job_documents').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
         supabase.from('permits').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
+        // Who is actually ON this job. The Hours sheet needs it: a man assigned
+        // to the job but never scheduled and never clocked in still has to
+        // appear in the tick list, or the catch-up can't catch him up.
+        supabase.from('project_workers').select('worker_id').eq('project_id', pid),
       ])
       setReceipts(r.data || [])
       setTimeEntries(t.data || [])
@@ -1063,6 +1111,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       setMaterialItems(mt.data || [])
       setJobDocuments(dc.data || [])
       setPermits(pm.data || [])
+      setProjectWorkerIds((pw.data || []).map(x => x.worker_id))
       // Sign every storage-path photo in ONE request instead of one-per-photo
       // (T2.5). Full-URL seed/demo photos need no signing.
       const paths = photos.map(p => p.photo_url).filter(u => u && !/^https?:\/\//.test(u))
@@ -1110,6 +1159,128 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       setPhotoUrls(map)
     }
   })
+
+  // ---------------------------------------------------------------------
+  // HOURS: tick the guys who worked
+  //
+  // JP's words, 2026-08-30: logging a day should be ticking off who was there,
+  // not filling in a form per man. The old Add Time modal asked for a worker, a
+  // date, a start time and an end time — four fields, one man at a time, on a
+  // phone, for a crew of five. Nobody does that at 6pm.
+  //
+  // So: one sheet, one day, everybody who could plausibly have worked it.
+  //   - Clocked in and out already → shown as done, read-only. We never touch a
+  //     real clock record; it's the truth and the crew's own evidence.
+  //   - Still clocked in → shown live, also read-only. He'd be guessing at an
+  //     end time for a man who is standing on the site right now.
+  //   - Everyone else → off by default. Tap them on, 8 hours, adjust if needed.
+  //
+  // OFF IS THE DEFAULT ON PURPOSE. A sheet that pre-ticks everybody bills the
+  // client for men who weren't there, and the owner only finds out at the
+  // margin. Silence has to cost nothing.
+  //
+  // The clocker is untouched. This is the catch-up for the days it didn't get
+  // used, which on a real crew is most of them.
+  // ---------------------------------------------------------------------
+  const DAY_MINUTES = 480 // one 8-hour day, the default a tap gives you
+
+  // Everyone who might have worked this job on this day, and what we already
+  // know about each of them. Order: on the clock, then clocked out, then
+  // scheduled, then merely assigned — most-certain first.
+  const hoursRoster = (dayKey) => {
+    const dayEntries = timeEntries.filter(t => dateKey(t.clocked_in_at) === dayKey)
+    const scheduledIds = scheduleEntries.filter(s => s.scheduled_date === dayKey).map(s => s.worker_id)
+    const ids = new Set([
+      ...dayEntries.map(t => t.worker_id),
+      ...scheduledIds,
+      ...projectWorkerIds,
+    ].filter(Boolean))
+    const rank = (r) => (r.open ? 0 : r.logged ? 1 : r.scheduled ? 2 : 3)
+    return [...ids].map(id => {
+      const w = workers.find(x => x.id === id)
+      const entries = dayEntries.filter(t => t.worker_id === id)
+      const open = entries.find(t => !t.clocked_out_at)
+      const closed = entries.filter(t => t.clocked_out_at)
+      return {
+        id,
+        name: w ? w.full_name : (entries[0]?.profiles?.full_name || 'Worker'),
+        rate: w ? w.hourly_rate : null,
+        open: open || null,
+        logged: closed.length ? closed.reduce((s, t) => s + (t.total_minutes || 0), 0) : 0,
+        cost: closed.reduce((s, t) => s + (t.labor_cost || 0), 0),
+        scheduled: scheduledIds.includes(id),
+      }
+    }).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+  }
+
+  // Open the sheet on a given day with nobody ticked. Anyone whose time is
+  // already recorded isn't in the draft at all — there is nothing to decide
+  // about them.
+  const openHoursSheet = (dayKey) => {
+    const day = dayKey || todayLocal()
+    setHoursDay(day)
+    setHoursDraft({})
+    setInlineError('')
+    setChipSheet('hours')
+  }
+
+  const toggleHoursWorker = (id) => {
+    setHoursDraft(d => {
+      const next = { ...d }
+      if (next[id]) delete next[id]
+      else next[id] = { hours: '8' }
+      return next
+    })
+  }
+  const setHoursFor = (id, hours) => setHoursDraft(d => (d[id] ? { ...d, [id]: { hours } } : d))
+
+  // Write one time entry per ticked man. Times are 8am-anchored because the
+  // owner told us hours, not a shift — and clocked_in_at is a timestamp column,
+  // so it has to say something. Anchoring at 8am local keeps the entry on the
+  // right calendar day everywhere (see the UTC bug in vercel-renders-utc).
+  const saveHoursSheet = async () => {
+    const picked = Object.entries(hoursDraft)
+    if (!picked.length) return setInlineError('Tap the guys who worked, or close this.')
+    const rows = []
+    for (const [workerId, v] of picked) {
+      const hrs = parseFloat(v.hours)
+      if (!(hrs > 0) || hrs > 24) return setInlineError('Hours have to be between 0 and 24.')
+      const start = new Date(`${hoursDay}T08:00:00`)
+      const minutes = Math.round(hrs * 60)
+      const end = new Date(start.getTime() + minutes * 60000)
+      const w = workers.find(x => x.id === workerId)
+      rows.push({
+        project_id: selectedProject.id,
+        worker_id: workerId,
+        clocked_in_at: start.toISOString(),
+        clocked_out_at: end.toISOString(),
+        total_minutes: minutes,
+        labor_cost: roundCents((minutes / 60) * (w?.hourly_rate || 0)),
+      })
+    }
+    setHoursSaving(true)
+    setInlineError('')
+    try {
+      const { error } = await supabase.from('time_entries').insert(rows)
+      if (error) throw error
+      track(EV.TIME_ADDED)
+      await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
+      await fetchProjects()
+      const names = rows.map(r => (workers.find(w => w.id === r.worker_id) || {}).full_name || 'Worker')
+      const totalHrs = rows.reduce((s, r) => s + r.total_minutes, 0) / 60
+      postSystemLine(
+        selectedProject.id,
+        `⏱ ${names.join(', ')} · ${totalHrs % 1 === 0 ? totalHrs : totalHrs.toFixed(1)}h on ${new Date(hoursDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+      )
+      setHoursDraft({})
+      setChipSheet(null)
+      showToast(rows.length === 1 ? 'Hours added ✓' : `${rows.length} guys logged ✓`)
+    } catch (e) {
+      setInlineError("Couldn't save those hours. Try again.")
+    } finally {
+      setHoursSaving(false)
+    }
+  }
 
   // Owner manually logs a worker's time on a job (for crew who don't clock in
   // via the worker app). Mirrors the worker clock-out cost math:
@@ -1420,9 +1591,11 @@ ${link}`
   const addPunch = async () => {
     if (!punchInput.trim()) return
     try {
-      const { error } = await supabase.from('punch_items').insert({ owner_id: profile.id, project_id: selectedProject.id, description: punchInput.trim() })
+      const text = punchInput.trim()
+      const { error } = await supabase.from('punch_items').insert({ owner_id: profile.id, project_id: selectedProject.id, description: text })
       if (error) throw error
       setPunchInput(''); await refetchDetail('punch_items', setPunchItems, 'created_at', true)
+      postSystemLine(selectedProject.id, `🔧 Added to the fix-it list · ${text}`)
     } catch (e) { showToast('Failed to add item', 'error') }
   }
   const togglePunch = async (item) => {
@@ -1430,6 +1603,9 @@ ${link}`
       const { error } = await supabase.from('punch_items').update({ done: !item.done }).eq('id', item.id)
       if (error) throw error
       setPunchItems(items => items.map(it => it.id === item.id ? { ...it, done: !it.done } : it))
+      // Only the tick posts. Un-ticking is almost always a mis-tap being
+      // corrected, and a thread that narrates mistakes is noise.
+      if (!item.done) postSystemLine(selectedProject.id, `✓ Fixed · ${item.description}`)
     } catch (e) { showToast('Failed to update', 'error') }
   }
   const deletePunch = async (item) => {
@@ -1441,9 +1617,12 @@ ${link}`
   const addMaterial = async () => {
     if (!materialInput.name.trim()) return
     try {
-      const { error } = await supabase.from('material_items').insert({ owner_id: profile.id, project_id: selectedProject.id, name: materialInput.name.trim(), qty: materialInput.qty.trim() || null })
+      const name = materialInput.name.trim()
+      const qty = materialInput.qty.trim() || null
+      const { error } = await supabase.from('material_items').insert({ owner_id: profile.id, project_id: selectedProject.id, name, qty })
       if (error) throw error
       setMaterialInput({ name: '', qty: '' }); await refetchDetail('material_items', setMaterialItems, 'created_at', true)
+      postSystemLine(selectedProject.id, `🛒 On the buy list · ${name}${qty ? ' · ' + qty : ''}`)
     } catch (e) { showToast('Failed to add item', 'error') }
   }
   const toggleMaterial = async (item) => {
@@ -1451,6 +1630,7 @@ ${link}`
       const { error } = await supabase.from('material_items').update({ bought: !item.bought }).eq('id', item.id)
       if (error) throw error
       setMaterialItems(items => items.map(it => it.id === item.id ? { ...it, bought: !it.bought } : it))
+      if (!item.bought) postSystemLine(selectedProject.id, `✓ Got it · ${item.name}${item.qty ? ' · ' + item.qty : ''}`)
     } catch (e) { showToast('Failed to update', 'error') }
   }
   const deleteMaterial = async (item) => {
@@ -1504,8 +1684,10 @@ ${link}`
         ;({ error } = await supabase.from('job_photos').insert(legacy))
       }
       if (error) throw error
+      const cap = photoNote.trim()
       setPhotoNote('')
       await refetchJobPhotos(); showToast('Photo added ✓')
+      postSystemLine(selectedProject.id, cap ? `📷 Photo · ${cap}` : '📷 Photo added')
     } catch (err) { showToast('Photo upload failed', 'error') }
     setUploadingPhoto(false)
   }
@@ -2082,36 +2264,55 @@ ${link}`
     setTestimonialSaving(false)
   }
 
-  const advanceStage = async (project) => {
-    const stages = ['start', 'mid', 'end']
-    const current = stages.indexOf(project.stage)
-    if (current >= 2) return
+  // Set the stage to whatever the owner picked, in any direction. The old
+  // control only went forwards (start → mid → end, then a confirm dialog to
+  // reopen), which meant a job wrongly marked done took a scary-sounding
+  // "Reopen this completed job?" to undo. Now it's three sentences and you tap
+  // the true one.
+  const setJobStage = async (project, next) => {
+    setStagePicker(false)
+    if (!project || next === project.stage) return
+    const wasEnd = project.stage === 'end'
     try {
-      const next = stages[current + 1]
       const { error } = await supabase.from('projects').update({
-        stage: next, ...(next === 'end' ? { completed_at: new Date().toISOString() } : {})
+        stage: next,
+        // completed_at only means anything on a finished job. Moving off 'end'
+        // clears it, or the reports count a job as completed twice.
+        ...(next === 'end' ? { completed_at: new Date().toISOString() } : (wasEnd ? { completed_at: null } : {})),
       }).eq('id', project.id)
       if (error) throw error
       await fetchProjects()
-      setSelectedProject(prev => prev ? { ...prev, stage: next } : null)
-      showToast(next === 'end' ? 'Job completed ✓' : 'Stage advanced ✓')
-      if (next === 'end' && !project.is_sample) {
-        // Whether it made money, not how much — a dollar figure is the owner's
-        // business, the boolean is ours (it's the number the app exists to show).
+      setSelectedProject(prev => prev ? { ...prev, stage: next, ...(next === 'end' ? {} : { completed_at: null }) } : null)
+      showToast(next === 'end' ? 'Job finished ✓' : next === 'mid' ? 'Marked as working on it ✓' : 'Marked as not started ✓')
+      postSystemLine(project.id, `Job is now “${STAGE_LINE[next]}”`)
+      if (next === 'end' && !wasEnd && !project.is_sample) {
         track(EV.JOB_COMPLETED, { profitable: profitOf(project) > 0 })
         maybeAskForTestimonial(project)
       }
     } catch (e) {
-      showToast('Failed to advance stage', 'error')
+      showToast('Could not change the status', 'error')
     }
   }
 
-  // Header status-pill tap: advance the job forward (Not started → In progress →
-  // Done), or once it's Done offer to reopen it. Mirrors the clickable permit /
-  // warranty pills so the pill is the obvious stage control (T4.1).
-  const cycleStage = (project) => {
-    if (project.stage === 'end') return reopenJob(project)
-    return advanceStage(project)
+  // ---- The job diary writes itself ----
+  // Every tick, buy, hour and photo drops one plain line into the job's thread,
+  // so the chat ends up BEING the record of the job without anyone writing it.
+  //
+  // Two hard rules:
+  //  1. It is posted as the app, never as the owner. Putting words in his mouth
+  //     in a thread his crew reads is worse than having no diary at all — which
+  //     is why this needs FIX-DATABASE-35 (nullable author_id + a `kind`
+  //     column) and does NOT fall back to post_job_message.
+  //  2. It never blocks or fails the thing it's describing. If the migration
+  //     hasn't run, PostgREST answers PGRST202, we swallow it, and the tick the
+  //     owner made still saved. Same defensive shape as api/resolve-invite.js.
+  const postSystemLine = async (projectId, body) => {
+    if (!projectId || !body) return
+    try {
+      await supabase.rpc('post_job_system_message', { p_project_id: projectId, p_body: body })
+    } catch {
+      /* No system messages until FIX-DATABASE-35 runs. Never surface this. */
+    }
   }
 
   const exportReportCSV = () => {
@@ -2386,19 +2587,6 @@ ${link}`
       showToast('Time entry deleted ✓')
     } catch (e) {
       showToast('Failed to delete time entry', 'error')
-    }
-  }
-
-  const reopenJob = async (project) => {
-    if (!window.confirm('Reopen this completed job?')) return
-    try {
-      const { error } = await supabase.from('projects').update({ stage: 'mid', completed_at: null }).eq('id', project.id)
-      if (error) throw error
-      await fetchProjects()
-      setSelectedProject(prev => prev ? { ...prev, stage: 'mid', completed_at: null } : null)
-      showToast('Job reopened ✓')
-    } catch (e) {
-      showToast('Failed to reopen job', 'error')
     }
   }
 
@@ -2688,8 +2876,11 @@ ${link}`
   // definition.
   const openReceiptsFor = (bucket) => () => {
     setReceiptFilter(bucket)
-    setProjectTab('work')
-    setWorkSub('receipts')
+    setProjectTab('paper')
+    // Paper's sections are open by default, but if he'd folded Receipts away
+    // earlier, tapping a total that opens receipts has to unfold it — otherwise
+    // the tap looks like it did nothing.
+    setClosedSections(s => ({ ...s, receipts: false }))
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const shownReceipts = receiptFilter === 'materials'
@@ -2714,16 +2905,46 @@ ${link}`
         </div>
         {matPct >= 80 && <div className={matPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '12px 16px 0' }}>{(matPct >= 100 ? "🔴 " : "⚠️ ") + budgetLine(sp.materials, selectedProject.materials_budget, "Materials")}</div>}
         {labPct >= 80 && <div className={labPct >= 100 ? 'alert-danger' : 'alert-warning'} style={{ margin: '8px 16px 0' }}>{(labPct >= 100 ? "🔴 " : "⚠️ ") + budgetLine(sp.labor, selectedProject.labor_budget, "Labor")}</div>}
-        {/* The pill in the header now only REPORTS the stage; the control that
-            changes it says out loud what it will do. It used to be a "Not
-            started ↻" pill in the corner — plus a second, identical stage button
-            buried at the bottom of the Budget tab. One job, one control. */}
-        <div style={{ display: 'flex', gap: '8px', margin: '12px 16px 0' }}>
-          <button className="btn-primary" style={{ flex: 2, marginTop: 0 }} onClick={() => cycleStage(selectedProject)}>
-            {STAGE_ACTION[selectedProject.stage] || STAGE_ACTION.start}
-          </button>
-          <button className="btn-secondary" style={{ flex: 1, marginTop: 0 }} onClick={openEditJob}>✎ Edit</button>
-        </div>
+        {/* WHERE IT IS AT — a line, not a button.
+            This was a full-width orange "Mark done ✓" primary button: the
+            loudest thing on a screen the owner opened to look at money, and a
+            control he taps maybe twice in a job's whole life. It shouted every
+            time and mattered almost never.
+            Now it is a quiet explanatory row, and it only raises its voice when
+            the job is telling a lie — see the nudge below. */}
+        {(() => {
+          const stage = selectedProject.stage || 'start'
+          // Hours in the last 7 days on a job that still says nobody started.
+          // That combination is always wrong, and it is wrong in the expensive
+          // direction: labor is landing on a job the owner thinks is dormant.
+          const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+          const recentHours = timeEntries.some(t => new Date(t.clocked_in_at).getTime() >= weekAgo)
+          const lying = stage === 'start' && recentHours
+          return (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch', margin: '12px 16px 0' }}>
+              <button
+                type="button"
+                onClick={() => setStagePicker(true)}
+                aria-label={`Job status: ${STAGE_LINE[stage]}. Tap to change.`}
+                style={{
+                  flex: 1, minHeight: 'var(--tap)', textAlign: 'left', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px',
+                  borderRadius: '10px',
+                  background: lying ? '#FEF2F2' : 'white',
+                  border: '1px solid ' + (lying ? '#FCA5A5' : '#E5E7EB'),
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', color: lying ? '#DC2626' : '#9CA3AF' }}>Where it is at</span>
+                  <span style={{ display: 'block', fontSize: '15px', fontWeight: 700, color: lying ? '#DC2626' : '#1C2B3A', marginTop: '1px' }}>{STAGE_LINE[stage]}</span>
+                  {lying && <span style={{ display: 'block', fontSize: '12px', color: '#DC2626', marginTop: '3px', lineHeight: 1.35 }}>Guys are logging hours but this still says nobody has started.</span>}
+                </span>
+                <span style={{ color: lying ? '#DC2626' : '#9CA3AF', fontSize: '20px', flexShrink: 0 }}>›</span>
+              </button>
+              <button className="btn-secondary" style={{ flex: '0 0 auto', width: '92px', marginTop: 0 }} onClick={openEditJob}>✎ Edit</button>
+            </div>
+          )
+        })()}
         <div className="tabs" style={{ margin: '12px 16px 0' }}>
           {PROJECT_TABS.map(t => (
             <button key={t.key} className={'tab ' + (projectTab === t.key ? 'active' : '')} onClick={() => setProjectTab(t.key)}>{t.label}</button>
@@ -2734,7 +2955,12 @@ ${link}`
             <div className="empty-state"><p>Loading…</p></div>
           ) : (
           <>
-          {projectTab === 'money' && (
+          {/* ===================== DOOR 1 · JOB =====================
+              Am I making money, and who do I call. Nothing else lives here.
+              The client strip used to be buried three quarters of the way down
+              the old Money tab — the phone number is half of what a job screen
+              is FOR, so it sits directly under the profit now. */}
+          {projectTab === 'job' && (
             <div>
               <JobSection title="Budget & profit" open={isOpen('budget')} onToggle={() => toggleSection('budget')}>
               {/* Profit hero — the one number that matters, surfaced at the top
@@ -2761,7 +2987,6 @@ ${link}`
                   <p style={{ fontSize: '15px', color: '#4B5563', lineHeight: 1.4 }}>Add materials, labor, and profit target for this job — then JobTally shows your live profit as costs come in. <span style={{ color: '#E07B2A', fontWeight: 700 }}>Add budget →</span></p>
                 </div>
               )}
-              <button className="btn-primary" onClick={() => { setInvoiceForm({ project_id: selectedProject.id, label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' }); setActiveTab('invoices'); setSelectedProject(null); setShowNewInvoice(true); setInlineError('') }} style={{ background: '#16A34A', marginBottom: '12px' }}>+ Invoice this job</button>
               {(selectedProject.client_name || selectedProject.client_phone || selectedProject.client_email || selectedProject.client_address) && (
                 <div className="card">
                   <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CLIENT</p>
@@ -2775,6 +3000,9 @@ ${link}`
                   {selectedProject.client_address && <p style={{ fontSize: '12px', color: '#717171', marginTop: '8px' }}>{selectedProject.client_address}</p>}
                 </div>
               )}
+              {/* Billing sits under the client, because billing is a thing you
+                  do TO a client — not a thing you do to a profit figure. */}
+              <button className="btn-primary" onClick={() => { setInvoiceForm({ project_id: selectedProject.id, label: '', amount: '', issued_date: '', due_date: '', notes: '', payment_link: '' }); setActiveTab('invoices'); setSelectedProject(null); setShowNewInvoice(true); setInlineError('') }} style={{ background: '#16A34A', marginBottom: '12px' }}>+ Invoice this job</button>
               {coOf(selectedProject.id) > 0 && (
                 <div className="card">
                   <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>CONTRACT + EXTRAS</p>
@@ -2820,6 +3048,14 @@ ${link}`
       ))}
     </div>
   )}
+                {/* JP asked for the by-worker split open by default and one tap
+                    to the place that changes it. The hours themselves live in
+                    Crew now, so this is the door through. */}
+                <button
+                  type="button"
+                  onClick={() => { setProjectTab('crew'); openHoursSheet(todayLocal()) }}
+                  style={{ marginTop: '12px', width: '100%', minHeight: 'var(--tap)', background: 'none', border: '1px solid #E5E7EB', borderRadius: '10px', color: '#E07B2A', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
+                >{timeEntries.length === 0 ? 'Nobody has logged hours — tick who worked →' : 'Tick who worked today →'}</button>
               </div>
               {sp.other > 0 && (
                 <div className="card" role="button" tabIndex={0} style={{ cursor: 'pointer' }}
@@ -2865,126 +3101,75 @@ ${link}`
             </div>
           )}
 
-          {projectTab === 'work' && (
+          {/* ===================== DOOR 2 · CREW =====================
+              The chat IS the page, not a sub-tab three rows down.
+
+              JP, 2026-08-30: the crew already talk about the job all day, just
+              in a group text the app cannot see. So the thread runs down the
+              middle, and the five things a job actually needs doing to it sit
+              as chips ABOVE the composer. Every chip opens a sheet OVER the
+              conversation — you never navigate away from it; you close the
+              sheet and the thread is still where you left it.
+
+              And every one of those actions drops a line back into the thread
+              (postSystemLine), so the chat writes the job's diary by itself. No
+              one has to remember to log anything; logging IS the conversation. */}
+          {projectTab === 'crew' && (
             <div>
-              <SubTabs
-                value={workSub}
-                onChange={(k) => { setWorkSub(k); if (k !== "receipts") setReceiptFilter(null) }}
-                items={[
-                  { key: 'time', label: 'Time', count: timeEntries.length },
-                  { key: 'daily', label: 'Daily notes', count: dailyLogs.length + jobPhotos.length },
-                  { key: 'receipts', label: 'Receipts', count: receipts.length },
-                  { key: 'mileage', label: 'Mileage', count: mileageEntries.length }
-                ]}
-              />
-              <JobSection active={workSub === "time"}>
-              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewTime(true); setInlineError(''); resetInvite(); setTimeForm({ worker_id: '', work_date: todayLocal(), start_time: '', end_time: '' }) }}>+ Add time</button>
-              {timeEntries.map(t => (
-                <div key={t.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <div>
-                      <h3>{t.profiles ? t.profiles.full_name : 'Worker'}</h3>
-                      <p>{new Date(t.clocked_in_at).toLocaleDateString()}</p>
-                      <p>{t.total_minutes ? formatTime(t.total_minutes) : 'Still clocked in'}</p>
-                      {/* Both ends of the shift, each its own map pin. Either
-                          can be missing (location blocked / no fix), so they
-                          render independently — never assume a start pin
-                          means there's an end pin. */}
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '4px' }}>
-                        {t.gps_lat != null && t.gps_lng != null && (
-                          <a
-                            href={`https://www.google.com/maps?q=${t.gps_lat},${t.gps_lng}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: '12px', color: '#E07B2A', textDecoration: 'none', display: 'inline-block' }}
-                          >
-                            📍 Clock-in location
-                          </a>
-                        )}
-                        {t.gps_out_lat != null && t.gps_out_lng != null && (
-                          <a
-                            href={`https://www.google.com/maps?q=${t.gps_out_lat},${t.gps_out_lng}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: '12px', color: '#E07B2A', textDecoration: 'none', display: 'inline-block' }}
-                          >
-                            🏁 Clock-out location
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    <p style={{ fontWeight: '700', color: '#1C2B3A' }}>{t.labor_cost ? formatCurrency(t.labor_cost) : '—'}</p>
-                  </div>
+              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '4px', WebkitOverflowScrolling: 'touch' }}>
+                {/* HOLD TO TALK, inside the job, so the job is already known.
+                    An inline chip and not a floating orb on purpose: anything a
+                    man has to tap has to still be reachable with position:fixed
+                    disabled, and a fixed orb is not.
+                    Whatever he says lands in this thread verbatim before the
+                    assistant touches it — see the note in AssistantPanel.send. */}
+                <button
+                  type="button"
+                  onPointerDown={() => startAskHold(selectedProject.id)}
+                  onPointerUp={endAskHold}
+                  onPointerCancel={endAskHold}
+                  onPointerLeave={endAskHold}
+                  onContextMenu={(e) => e.preventDefault()}
+                  aria-label={askHold ? 'Listening — let go to send' : 'Hold to talk'}
+                  style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '8px 14px', borderRadius: '999px', border: 'none', background: askHold ? '#DC2626' : '#1C2B3A', color: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', touchAction: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
+                >{askHold ? '🎙 Listening…' : '🎙 Hold to talk'}</button>
+                {[
+                  { key: 'days', icon: '🗓', label: 'Days', count: scheduleEntries.length },
+                  { key: 'buy', icon: '🛒', label: 'Buy', count: materialItems.filter(it => !it.bought).length },
+                  { key: 'fix', icon: '🔧', label: 'Fix', count: punchItems.filter(it => !it.done).length },
+                  { key: 'hours', icon: '⏱', label: 'Hours', count: 0 },
+                  { key: 'photo', icon: '📷', label: 'Photo', count: jobPhotos.length + dailyLogs.length },
+                ].map(c => (
                   <button
-                    onClick={() => deleteTimeEntry(t)}
-                    style={{
-                      marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626',
-                      fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px',
-                      borderRadius: '8px', minHeight: '40px'
-                    }}
+                    key={c.key}
+                    type="button"
+                    onClick={() => (c.key === 'hours' ? openHoursSheet(todayLocal()) : setChipSheet(c.key))}
+                    style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '8px 14px', borderRadius: '999px', border: '1px solid #E5E7EB', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
                   >
-                    Delete entry
+                    <span style={{ marginRight: '6px' }}>{c.icon}</span>{c.label}
+                    {c.count > 0 && <span style={{ marginLeft: '6px', background: '#FFF7ED', color: '#E07B2A', borderRadius: '999px', padding: '1px 7px', fontSize: '11px', fontWeight: 700 }}>{c.count}</span>}
                   </button>
-                </div>
-              ))}
-              {timeEntries.length === 0 && <div className="empty-state"><p>No hours logged yet. Crew hours show up here when they clock in — or tap below to add time yourself.</p></div>}
-              </JobSection>
-
-              {/* Photos and the daily log used to be two separate tabs. On site
-                  they're one act — "here's what happened today" — so they're one
-                  feed now, grouped by day, newest first. Add a photo, add a
-                  note, or both; they land on the same day card. */}
-              <JobSection active={workSub === "daily"}>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <label className="btn-primary" style={{ flex: 1, marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
-                    {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
-                    {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library (gallery), not camera-only. */}
-                    <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
-                  </label>
-                  <button className="btn-secondary" style={{ flex: 1, marginTop: 0 }} onClick={() => { setShowNewLog(true); setInlineError('') }}>📝 Add note</button>
-                </div>
-                <input
-                  type="text"
-                  value={photoNote}
-                  onChange={(e) => setPhotoNote(e.target.value)}
-                  placeholder="Optional caption for the next photo you add"
-                  maxLength={140}
-                  style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0 0', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
-                />
-                {buildDayFeed(dailyLogs, jobPhotos).map(day => (
-                  <div key={day.key} className="card">
-                    {/* 'T00:00:00' forces LOCAL midnight — a bare 'YYYY-MM-DD'
-                        parses as UTC and shows a day early west of London. */}
-                    <p className="schedule-day">{new Date(day.key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
-                    {day.logs.map(l => (
-                      <div key={l.id} style={{ marginTop: '8px' }}>
-                        {l.weather && <p style={{ fontSize: '12px', color: '#E07B2A' }}>{l.weather}</p>}
-                        <p style={{ marginTop: '2px', whiteSpace: 'pre-wrap' }}>{l.note}</p>
-                        <button onClick={() => deleteLog(l)} style={{ marginTop: '8px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px' }}>Delete note</button>
-                      </div>
-                    ))}
-                    {day.photos.length > 0 && (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '10px' }}>
-                        {day.photos.map(ph => (
-                          <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ cursor: 'pointer' }}>
-                            <JobPhoto path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption}
-                              style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px' }} />
-                            {ph.uploaded_by_name && ph.uploaded_by_name !== 'You' && (
-                              <p style={{ fontSize: '10px', color: '#717171', margin: '3px 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👷 {ph.uploaded_by_name}</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
                 ))}
-                {dailyLogs.length === 0 && jobPhotos.length === 0 && <div className="empty-state"><p>Nothing logged yet. Snap before/after shots and jot down what happened on site — great for clients, and it settles arguments later.</p></div>}
-              </JobSection>
+              </div>
+              <JobChat projectId={selectedProject.id} selfId={profile.id} placeholder={'Message the crew on ' + selectedProject.name + '…'} height="52vh" />
+              <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '10px', lineHeight: 1.5 }}>
+                Everyone assigned to this job sees this thread. Crew on your other jobs do not. Anything you tick above posts here by itself.
+              </p>
+            </div>
+          )}
 
-              <JobSection active={workSub === "receipts"}>
+          {/* ===================== DOOR 3 · PAPER =====================
+              JP called it "extras / others": the filing. Four things that used
+              to be split across two tabs in two different rows of navigation —
+              Work→Receipts, Work→Mileage, and the whole old Docs tab.
+              Collapsible with counts on the headers, so he can tell what is in
+              here WITHOUT opening any of it. */}
+          {projectTab === 'paper' && (
+            <div>
+              <JobSection title="Receipts" count={receipts.length} open={isOpen('receipts')} onToggle={() => toggleSection('receipts')}>
                 <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewReceipt(true); setInlineError('') }}>+ Add receipt</button>
                 {/* Set when the owner tapped the Materials or Other-costs total
-                    over in Money. Says out loud that he's looking at a slice, and
+                    over in Job. Says out loud that he's looking at a slice, and
                     gives him one tap back to all of them. */}
                 {receiptFilter && (
                   <div className="card" style={{ background: '#FFF7ED', border: '1px solid #FED7AA', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2999,10 +3184,9 @@ ${link}`
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
                         <h3>{r.description}</h3>
-                        <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ` · tax ${formatCurrency(r.tax_amount)}` : ''}</p>
-                        {/* Show the date ON the receipt when we have it. '+T00:00:00'
-                            forces LOCAL midnight — a bare 'YYYY-MM-DD' parses as UTC
-                            and would display a day early everywhere west of London. */}
+                        <p>{r.store} · {CATEGORY_LABELS[r.category] || r.category}{r.tax_amount > 0 ? ' · tax ' + formatCurrency(r.tax_amount) : ''}</p>
+                        {/* '+T00:00:00' forces LOCAL midnight — a bare 'YYYY-MM-DD'
+                            parses as UTC and would show a day early west of London. */}
                         <p style={{ fontSize: '11px', color: '#717171' }}>{r.purchase_date ? new Date(r.purchase_date + 'T00:00:00').toLocaleDateString() : new Date(r.created_at).toLocaleDateString()}</p>
                         {r.photo_url && <p style={{ fontSize: '11px', color: '#E07B2A', marginTop: '2px' }}>📷 Tap to view photo</p>}
                       </div>
@@ -3014,151 +3198,329 @@ ${link}`
                 {receipts.length === 0 && <div className="empty-state"><p>No receipts yet. Snap a receipt photo — JobTally reads the store, total, sales tax and date for you and adds it to this job's costs.</p></div>}
               </JobSection>
 
-              <JobSection active={workSub === "mileage"}>
-              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
-              {mileageEntries.length > 0 && (
-                <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
-                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Mileage Deduction</p>
-                  <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>
-                    {formatCurrency(mileageEntries.reduce((s, m) => s + (m.miles || 0) * (m.rate || 0), 0))}
-                  </p>
-                  <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>{mileageEntries.reduce((s, m) => s + (m.miles || 0), 0).toLocaleString()} miles tracked</p>
-                </div>
-              )}
-              {mileageEntries.map(m => (
-                <div key={m.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <h3>{(m.miles || 0).toLocaleString()} mi <span style={{ fontWeight: '400', color: '#888', fontSize: '13px' }}>@ {formatCurrency(m.rate)}/mi</span></h3>
-                      <p style={{ fontSize: '12px', color: '#717171' }}>{m.trip_date ? new Date(m.trip_date + 'T00:00:00').toLocaleDateString() : ''}{m.notes ? ` · ${m.notes}` : ''}</p>
-                    </div>
-                    <p style={{ fontWeight: '700', color: '#16A34A', fontSize: '16px' }}>{formatCurrency((m.miles || 0) * (m.rate || 0))}</p>
+              <JobSection title="Mileage" count={mileageEntries.length} open={isOpen('mileage')} onToggle={() => toggleSection('mileage')}>
+                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewMileage(true); setInlineError('') }}>+ Add mileage</button>
+                {mileageEntries.length > 0 && (
+                  <div className="card" style={{ background: '#1C2B3A', color: 'white' }}>
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px' }}>Mileage Deduction</p>
+                    <p style={{ fontSize: '24px', fontWeight: '800', color: '#16A34A' }}>
+                      {formatCurrency(mileageEntries.reduce((s, m) => s + (m.miles || 0) * (m.rate || 0), 0))}
+                    </p>
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>{mileageEntries.reduce((s, m) => s + (m.miles || 0), 0).toLocaleString()} miles tracked</p>
                   </div>
-                  <button onClick={() => deleteMileage(m)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
-                </div>
-              ))}
-              {mileageEntries.length === 0 && <div className="empty-state"><p>No mileage logged yet. Track miles driven for this job — it's a deduction.</p></div>}
-              </JobSection>
-            </div>
-          )}
-
-          {projectTab === 'docs' && (
-            <div>
-              <JobSection title="Documents" count={jobDocuments.length} open={isOpen('documents')} onToggle={() => toggleSection('documents')}>
-              <label className="btn-primary" style={{ display: 'block', marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
-                {uploadingDoc ? 'Uploading…' : '📎 Add document'}
-                <input type="file" onChange={addDocument} disabled={uploadingDoc} style={{ display: 'none' }} />
-              </label>
-              {jobDocuments.map(doc => (
-                <div key={doc.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ flex: 1, cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => openDocument(doc)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDocument(doc) } }}>
-                    <h3 style={{ color: '#E07B2A' }}>📄 {doc.name}</h3>
-                    <p style={{ fontSize: '11px', color: '#717171' }}>{doc.created_at ? new Date(doc.created_at).toLocaleDateString() : ''} · tap to open</p>
-                  </div>
-                  <button aria-label="Delete document" onClick={() => deleteDocument(doc)} style={{ background: 'white', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: 13, cursor: 'pointer', padding: '6px 12px', borderRadius: 8 }}>Delete</button>
-                </div>
-              ))}
-              {jobDocuments.length === 0 && <div className="empty-state"><p>No documents yet. Add the contract, permit, or plans for this job.</p></div>}
-              </JobSection>
-              {/* A permit IS a document — it was a whole separate tab because the
-                  old nav had room for twelve of them. Same page, one scroll down. */}
-              <JobSection title="Permits & inspections" count={permits.length} open={isOpen('permits')} onToggle={() => toggleSection('permits')}>
-              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add permit</button>
-              {permits.map(p => {
-                const sc = (p.status === 'passed' || p.status === 'approved') ? 'status-end' : p.status === 'failed' ? 'status-start' : 'status-mid'
-                return (
-                  <div key={p.id} className="card">
+                )}
+                {mileageEntries.map(m => (
+                  <div key={m.id} className="card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1, paddingRight: '10px' }}>
-                        <h3>{p.name}</h3>
-                        <p>{p.permit_number ? `#${p.permit_number}` : ''}{p.inspection_on ? ` · inspection ${new Date(p.inspection_on + 'T00:00:00').toLocaleDateString()}` : ''}</p>
-                        <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={`Status: ${p.status}. Activate to advance.`} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cyclePermitStatus(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cyclePermitStatus(p) } }}>{p.status} ↻</span>
+                      <div>
+                        <h3>{(m.miles || 0).toLocaleString()} mi <span style={{ fontWeight: '400', color: '#888', fontSize: '13px' }}>@ {formatCurrency(m.rate)}/mi</span></h3>
+                        <p style={{ fontSize: '12px', color: '#717171' }}>{m.trip_date ? new Date(m.trip_date + 'T00:00:00').toLocaleDateString() : ''}{m.notes ? ' · ' + m.notes : ''}</p>
                       </div>
-                      <button aria-label="Remove permit" onClick={() => deletePermit(p)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                      <p style={{ fontWeight: '700', color: '#16A34A', fontSize: '16px' }}>{formatCurrency((m.miles || 0) * (m.rate || 0))}</p>
                     </div>
-                  </div>
-                )
-              })}
-              {permits.length === 0 && <div className="empty-state"><p>Track permits and inspections for this job. Tap a status to advance it.</p></div>}
-              </JobSection>
-            </div>
-          )}
-
-          {/* Plan = everything that hasn't happened yet: who's coming, what to
-              buy, what's left to fix. Three lists that used to be three tabs
-              in two different rows of navigation. */}
-          {projectTab === 'plan' && (
-            <div>
-              <SubTabs
-                value={planSub}
-                onChange={(k) => { setPlanSub(k); if (k === 'chat') setJobChatUnread(false) }}
-                items={[
-                  { key: 'schedule', label: 'Schedule', count: scheduleEntries.length },
-                  { key: 'materials', label: 'Shopping list', count: materialItems.filter(it => !it.bought).length },
-                  { key: 'punch', label: 'Fix-it list', count: punchItems.filter(it => !it.done).length },
-                  { key: 'chat', label: 'Crew chat', dot: jobChatUnread && planSub !== 'chat' }
-                ]}
-              />
-              {/* The talk about the job, kept with the job. JP asked for it next
-                  to the lists rather than off in its own place: the crew reads
-                  "grab two more sheets" in the same tab as the shopping list
-                  it belongs to. */}
-              {planSub === 'chat' && (
-                <div>
-                  <JobChat projectId={selectedProject.id} selfId={profile.id} placeholder={`Message the crew on ${selectedProject.name}…`} />
-                  <p style={{ fontSize: '11px', color: '#6B7280', marginTop: '10px', lineHeight: 1.5 }}>
-                    Everyone assigned to this job sees this thread. Crew on your other jobs do not.
-                  </p>
-                </div>
-              )}
-              <JobSection active={planSub === "schedule"}>
-                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewSchedule(true); setInlineError(''); resetInvite() }}>+ Schedule worker</button>
-                {scheduleEntries.map(s => (
-                  <div key={s.id} className="card">
-                    <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                    <h3>{shiftWorkerName(s)}</h3>
-                    <p>{s.task_description}</p>
-                    {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
+                    <button onClick={() => deleteMileage(m)} style={{ marginTop: '10px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px', borderRadius: '8px', minHeight: '40px' }}>Delete</button>
                   </div>
                 ))}
-                {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Add a crew member and a day to plan who's working this job. They see their own days on their phone.</p></div>}
+                {mileageEntries.length === 0 && <div className="empty-state"><p>No mileage logged yet. Track miles driven for this job — it's a deduction.</p></div>}
               </JobSection>
 
-              <JobSection active={planSub === "materials"}>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                  <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                  <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                  <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
-                </div>
-                {materialItems.map(it => (
-                  <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
-                    <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
-                    <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
-                    <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
-                  </div>
-                ))}
-                {materialItems.length === 0 && <div className="empty-state"><p>Build your shopping list — check items off as you buy them. The crew on this job sees it too.</p></div>}
+              <JobSection title="Permits & inspections" count={permits.length} open={isOpen('permits')} onToggle={() => toggleSection('permits')}>
+                <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setShowNewPermit(true); setInlineError('') }}>+ Add permit</button>
+                {permits.map(p => {
+                  const sc = (p.status === 'passed' || p.status === 'approved') ? 'status-end' : p.status === 'failed' ? 'status-start' : 'status-mid'
+                  return (
+                    <div key={p.id} className="card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, paddingRight: '10px' }}>
+                          <h3>{p.name}</h3>
+                          <p>{p.permit_number ? '#' + p.permit_number : ''}{p.inspection_on ? ' · inspection ' + new Date(p.inspection_on + 'T00:00:00').toLocaleDateString() : ''}</p>
+                          <span className={'status-pill ' + sc} role="button" tabIndex={0} aria-label={'Status: ' + p.status + '. Activate to advance.'} style={{ marginTop: '4px', cursor: 'pointer' }} onClick={() => cyclePermitStatus(p)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cyclePermitStatus(p) } }}>{p.status} ↻</span>
+                        </div>
+                        <button aria-label="Remove permit" onClick={() => deletePermit(p)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                      </div>
+                    </div>
+                  )
+                })}
+                {permits.length === 0 && <div className="empty-state"><p>Track permits and inspections for this job. Tap a status to advance it.</p></div>}
               </JobSection>
 
-              <JobSection active={planSub === "punch"}>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                  <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
-                  <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
-                </div>
-                {punchItems.map(it => (
-                  <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
-                    <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
-                    <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
-                    <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+              <JobSection title="Documents" count={jobDocuments.length} open={isOpen('documents')} onToggle={() => toggleSection('documents')}>
+                <label className="btn-primary" style={{ display: 'block', marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
+                  {uploadingDoc ? 'Uploading…' : '📎 Add document'}
+                  <input type="file" onChange={addDocument} disabled={uploadingDoc} style={{ display: 'none' }} />
+                </label>
+                {jobDocuments.map(doc => (
+                  <div key={doc.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ flex: 1, cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => openDocument(doc)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDocument(doc) } }}>
+                      <h3 style={{ color: '#E07B2A' }}>📄 {doc.name}</h3>
+                      <p style={{ fontSize: '11px', color: '#717171' }}>{doc.created_at ? new Date(doc.created_at).toLocaleDateString() : ''} · tap to open</p>
+                    </div>
+                    <button aria-label="Delete document" onClick={() => deleteDocument(doc)} style={{ background: 'white', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: 13, cursor: 'pointer', padding: '6px 12px', borderRadius: 8 }}>Delete</button>
                   </div>
                 ))}
-                {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done — the crew sees these too.</p></div>}
+                {jobDocuments.length === 0 && <div className="empty-state"><p>No documents yet. Add the contract, permit, or plans for this job.</p></div>}
               </JobSection>
             </div>
           )}
           </>
           )}
         </div>
+
+        {/* ---------- WHERE IT IS AT · three plain sentences ----------
+            No cycling, no confirm dialog, no jargon. Tap the one that is true.
+            Backwards is allowed and unremarkable: a job that got marked done
+            and isn't is the most ordinary thing on a site, and making that
+            embarrassing to fix is how a status board stops being trusted. */}
+        {stagePicker && (
+          <div className="modal-overlay" onClick={() => setStagePicker(false)}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>Where is this job at?</h2>
+              {STAGE_SENTENCES.map(s => {
+                const current = (selectedProject.stage || 'start') === s.key
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setJobStage(selectedProject, s.key)}
+                    style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px', minHeight: 'var(--tap)', padding: '14px', marginBottom: '8px', borderRadius: '12px', cursor: 'pointer', background: current ? '#FFF7ED' : 'white', border: '1px solid ' + (current ? '#FED7AA' : '#E5E7EB') }}
+                  >
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: '16px', fontWeight: 700, color: '#1C2B3A' }}>{s.title}</span>
+                      <span style={{ display: 'block', fontSize: '13px', color: '#717171', marginTop: '2px' }}>{s.sub}</span>
+                    </span>
+                    {current && <span style={{ color: '#E07B2A', fontWeight: 800, fontSize: '18px' }}>✓</span>}
+                  </button>
+                )
+              })}
+              <button className="btn-secondary" onClick={() => setStagePicker(false)}>Close</button>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- 🗓 DAYS · who is coming, and when ---------- */}
+        {chipSheet === 'days' && (
+          <div className="modal-overlay" onClick={() => setChipSheet(null)}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>🗓 Days on this job</h2>
+              <button className="btn-primary" style={{ marginTop: 0 }} onClick={() => { setChipSheet(null); setShowNewSchedule(true); setInlineError(''); resetInvite() }}>+ Schedule worker</button>
+              {scheduleEntries.map(s => (
+                <div key={s.id} className="card">
+                  <p className="schedule-day">{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
+                  <h3>{shiftWorkerName(s)}</h3>
+                  <p>{s.task_description}</p>
+                  {s.start_time && <p style={{ fontSize: '12px', color: '#E07B2A', marginTop: '4px', fontWeight: '600' }}>{s.start_time} — {s.end_time}</p>}
+                </div>
+              ))}
+              {scheduleEntries.length === 0 && <div className="empty-state"><p>Nothing scheduled yet. Put a guy on a day and he sees it on his own phone.</p></div>}
+              <button className="btn-secondary" onClick={() => setChipSheet(null)}>Close</button>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- 🛒 BUY · the shopping list ---------- */}
+        {chipSheet === 'buy' && (
+          <div className="modal-overlay" onClick={() => setChipSheet(null)}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>🛒 What to buy</h2>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
+              </div>
+              {materialItems.map(it => (
+                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                  <input type="checkbox" checked={it.bought} onChange={() => toggleMaterial(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.bought ? 'line-through' : 'none', color: it.bought ? '#9CA3AF' : '#1C2B3A' }}>{it.name}{it.qty ? <span style={{ color: '#888' }}> · {it.qty}</span> : ''}</p>
+                  <button aria-label="Delete item" onClick={() => deleteMaterial(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                </div>
+              ))}
+              {materialItems.length === 0 && <div className="empty-state"><p>Nothing on the list. Add what you are out of — the crew on this job sees it too.</p></div>}
+              <button className="btn-secondary" onClick={() => setChipSheet(null)}>Close</button>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- 🔧 FIX · the punch list ---------- */}
+        {chipSheet === 'fix' && (
+          <div className="modal-overlay" onClick={() => setChipSheet(null)}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>🔧 What to fix</h2>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                <input value={punchInput} onChange={e => setPunchInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPunch() }} placeholder="Add a to-do (e.g. Caulk tub)" style={{ flex: 1, padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <button onClick={addPunch} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
+              </div>
+              {punchItems.map(it => (
+                <div key={it.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px' }}>
+                  <input type="checkbox" checked={it.done} onChange={() => togglePunch(it)} style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }} />
+                  <p style={{ flex: 1, fontSize: '14px', textDecoration: it.done ? 'line-through' : 'none', color: it.done ? '#9CA3AF' : '#1C2B3A' }}>{it.description}</p>
+                  <button aria-label="Delete item" onClick={() => deletePunch(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                </div>
+              ))}
+              {punchItems.length === 0 && <div className="empty-state"><p>Nothing left to fix. Add any touch-ups before you call the job done.</p></div>}
+              <button className="btn-secondary" onClick={() => setChipSheet(null)}>Close</button>
+            </div>
+          </div>
+        )}
+
+        {/* ---------- ⏱ HOURS · tick the guys who worked ----------
+            The replacement for a four-field form filled in once per man. See
+            the block comment on hoursRoster / saveHoursSheet for why nobody is
+            pre-ticked and why clocked time is read-only here. */}
+        {chipSheet === 'hours' && (() => {
+          const roster = hoursRoster(hoursDay)
+          const already = roster.filter(r => r.open || r.logged > 0)
+          const toDecide = roster.filter(r => !r.open && !r.logged)
+          const pickedCount = Object.keys(hoursDraft).length
+          return (
+            <div className="modal-overlay" onClick={() => setChipSheet(null)}>
+              <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+                <h2>⏱ Who worked?</h2>
+                <div className="input-group">
+                  <label htmlFor="hours-day">Day</label>
+                  <input id="hours-day" type="date" value={hoursDay} onChange={e => { setHoursDay(e.target.value); setHoursDraft({}); setInlineError('') }} />
+                </div>
+
+                {already.length > 0 && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <p style={sectionLabel}>Already on the clock</p>
+                    {already.map(r => (
+                      <div key={r.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                        <span style={{ fontSize: '16px' }}>{r.open ? '🟢' : '✓'}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontWeight: 700, fontSize: '14px', color: '#1C2B3A' }}>{r.name}</p>
+                          <p style={{ fontSize: '12px', color: '#15803D' }}>
+                            {r.open ? 'Still clocked in — started ' + new Date(r.open.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : formatTime(r.logged) + ' clocked'}
+                          </p>
+                        </div>
+                        {!r.open && r.cost > 0 && <p style={{ fontWeight: 700, fontSize: '14px', color: '#1C2B3A' }}>{formatCurrency(r.cost)}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {toDecide.length > 0 && (
+                  <div>
+                    <p style={sectionLabel}>Tap anyone who was there</p>
+                    {toDecide.map(r => {
+                      const on = !!hoursDraft[r.id]
+                      return (
+                        <div key={r.id} className="card" style={{ padding: '10px 14px', border: '1px solid ' + (on ? '#FED7AA' : '#E5E7EB'), background: on ? '#FFF7ED' : 'white' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <button
+                              type="button"
+                              onClick={() => toggleHoursWorker(r.id)}
+                              aria-pressed={on}
+                              aria-label={(on ? 'Remove ' : 'Add ') + r.name}
+                              style={{ flex: 1, minHeight: 'var(--tap)', display: 'flex', alignItems: 'center', gap: '10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0 }}
+                            >
+                              <span style={{ width: '22px', height: '22px', flexShrink: 0, borderRadius: '6px', border: '2px solid ' + (on ? '#E07B2A' : '#CBD5E1'), background: on ? '#E07B2A' : 'white', color: 'white', fontSize: '14px', fontWeight: 800, lineHeight: '19px', textAlign: 'center' }}>{on ? '✓' : ''}</span>
+                              <span style={{ minWidth: 0 }}>
+                                <span style={{ display: 'block', fontWeight: 700, fontSize: '14px', color: '#1C2B3A' }}>{r.name}</span>
+                                <span style={{ display: 'block', fontSize: '12px', color: '#888' }}>
+                                  {r.scheduled ? 'Was scheduled, never clocked in' : 'On this job'}
+                                  {r.rate ? ' · ' + formatCurrency(r.rate) + '/hr' : ' · no rate set'}
+                                </span>
+                              </span>
+                            </button>
+                            {on && (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                <input
+                                  type="number" inputMode="decimal" step="0.5" min="0" max="24"
+                                  value={hoursDraft[r.id].hours}
+                                  onChange={e => setHoursFor(r.id, e.target.value)}
+                                  aria-label={'Hours for ' + r.name}
+                                  style={{ width: '64px', padding: '10px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '15px', fontWeight: 700, textAlign: 'center' }}
+                                />
+                                <span style={{ fontSize: '13px', color: '#888', fontWeight: 700 }}>h</span>
+                              </span>
+                            )}
+                          </div>
+                          {on && !r.rate && <p style={{ fontSize: '11px', color: '#B45309', marginTop: '6px' }}>His hours will cost $0 until you set his rate on the Crew screen.</p>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {roster.length === 0 && (
+                  <div className="empty-state">
+                    <p>Nobody is on this job yet. Add a guy and he shows up here.</p>
+                  </div>
+                )}
+
+                {/* Same shared invite block used by Add Time and Schedule
+                    Worker — one form, three doors into it. */}
+                {inviteOpenBtn(workers.length === 0 ? '+ Add a new worker — sends him a link' : 'Someone missing? + Add a new worker')}
+                {inviteBlock('hours')}
+
+                {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+                <button className="btn-primary" onClick={saveHoursSheet} disabled={hoursSaving || pickedCount === 0}>
+                  {hoursSaving ? 'Saving…' : pickedCount === 0 ? 'Tap who worked' : pickedCount === 1 ? 'Log 1 guy' : 'Log ' + pickedCount + ' guys'}
+                </button>
+                <button className="btn-secondary" onClick={() => { setChipSheet(null); setHoursDraft({}); setInlineError(''); resetInvite() }}>Close</button>
+                <p style={{ fontSize: '11px', color: '#888', marginTop: '10px', lineHeight: 1.5 }}>
+                  Nobody is ticked until you tick them, so a quiet day costs nothing. Anyone who clocked in themselves is shown above and left alone.
+                </p>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* ---------- 📷 PHOTO · and the day-by-day diary ----------
+            Photos and written notes were two separate tabs; on a real job they
+            are one act ("here is what happened today"), so they are one feed. */}
+        {chipSheet === 'photo' && (
+          <div className="modal-overlay" onClick={() => setChipSheet(null)}>
+            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+              <h2>📷 Photos &amp; notes</h2>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <label className="btn-primary" style={{ flex: 1, marginTop: 0, textAlign: 'center', cursor: 'pointer' }}>
+                  {uploadingPhoto ? 'Uploading…' : '📷 Add photo'}
+                  {/* No `capture` attr → mobile offers BOTH Take Photo and Photo Library, not camera-only. */}
+                  <input type="file" accept="image/*" onChange={addJobPhoto} disabled={uploadingPhoto} style={{ display: 'none' }} />
+                </label>
+                <button className="btn-secondary" style={{ flex: 1, marginTop: 0 }} onClick={() => { setChipSheet(null); setShowNewLog(true); setInlineError('') }}>📝 Add note</button>
+              </div>
+              <input
+                type="text"
+                value={photoNote}
+                onChange={(e) => setPhotoNote(e.target.value)}
+                placeholder="Optional caption for the next photo you add"
+                maxLength={140}
+                style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0 0', padding: '10px 12px', border: '1px solid #E5E7EB', borderRadius: '8px', fontSize: '13px' }}
+              />
+              {buildDayFeed(dailyLogs, jobPhotos).map(day => (
+                <div key={day.key} className="card">
+                  {/* 'T00:00:00' forces LOCAL midnight — a bare 'YYYY-MM-DD'
+                      parses as UTC and shows a day early west of London. */}
+                  <p className="schedule-day">{new Date(day.key + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                  {day.logs.map(l => (
+                    <div key={l.id} style={{ marginTop: '8px' }}>
+                      {l.weather && <p style={{ fontSize: '12px', color: '#E07B2A' }}>{l.weather}</p>}
+                      <p style={{ marginTop: '2px', whiteSpace: 'pre-wrap' }}>{l.note}</p>
+                      <button onClick={() => deleteLog(l)} style={{ marginTop: '8px', background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px' }}>Delete note</button>
+                    </div>
+                  ))}
+                  {day.photos.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '10px' }}>
+                      {day.photos.map(ph => (
+                        <div key={ph.id} onClick={() => setPhotoLightbox(ph)} style={{ cursor: 'pointer' }}>
+                          <JobPhoto path={ph.photo_url} signedUrl={photoUrls[ph.photo_url]} alt={ph.caption}
+                            style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: '10px' }} />
+                          {ph.uploaded_by_name && ph.uploaded_by_name !== 'You' && (
+                            <p style={{ fontSize: '10px', color: '#717171', margin: '3px 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>👷 {ph.uploaded_by_name}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {dailyLogs.length === 0 && jobPhotos.length === 0 && <div className="empty-state"><p>Nothing logged yet. Snap before and after shots — great for clients, and it settles arguments later.</p></div>}
+              <button className="btn-secondary" onClick={() => setChipSheet(null)}>Close</button>
+            </div>
+          </div>
+        )}
 
         {showNewReceipt && (
           <div className="modal-overlay" onClick={() => { setShowNewReceipt(false); setScanResult(null); setScanError('') }}>
@@ -3363,6 +3725,10 @@ ${link}`
 
         {photoViewer && <PhotoViewer receipt={photoViewer} onClose={() => setPhotoViewer(null)} onDelete={deleteReceipt} />}
         {testimonialModal}
+        {/* The job screen has no bottom bar (it is a drill-down), so the sheet
+            the Hold-to-talk chip opens has to be mounted here too. Same
+            component, same state — just a second mount point. */}
+        <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} onDataChanged={fetchProjects} holdVoice={askHold} projectId={askProjectId} />
         <Toast message={toast} type={toastType} onClose={() => setToast('')} />
       </div>
     )
@@ -3385,14 +3751,166 @@ ${link}`
           </div>
         )}
 
-        {activeTab === 'crew' && (
-          <div>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>Your workers, their week, and their pay.</p>
-            <HubCard icon="📅" title="Today and this week" sub="Who is on the clock now, and who is scheduled which day" onClick={() => setActiveTab('crewweek')} />
-            <HubCard icon="👷" title="Workers" sub="Add crew, set rates, time-off requests" onClick={() => setActiveTab('workers')} />
-            <HubCard icon="💰" title="Crew Pay" sub="Weekly pay from clocked hours" onClick={() => setActiveTab('payroll')} />
-          </div>
-        )}
+        {/* ===================== CREW · TODAY FIRST =====================
+            This was three hub cards — "Today and this week", "Workers", "Crew
+            Pay" — a menu you had to read before you could learn anything. JP,
+            2026-08-30: adding a worker was buried "all the way here", three
+            taps in, and the answer to "who is working right now" was behind a
+            card that only promised to tell you.
+
+            So the screen answers first and navigates second: who is on the
+            clock this minute, a week you can read in one glance, the faces of
+            your crew with Add right there, and what the week costs. The three
+            old destinations still exist underneath for the detail. */}
+        {activeTab === 'crew' && (() => {
+          const todayKey = dateKey(new Date())
+          const todayWeek = weekStartKey(new Date())
+          const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDaysKey(crewWeekStart, i))
+          const clockedIds = new Set(onTheClock.map(t => t.worker_id))
+          const offOn = (key) => timeOff.filter(r => r.status === 'approved' && r.start_date <= key && r.end_date >= key)
+          // This week's pay so far, straight from the payroll rows already built
+          // for the Crew Pay screen. Same numbers, no second source of truth.
+          const thisWeekPay = payroll.filter(r => r.week_start === todayWeek)
+          const weekGross = thisWeekPay.reduce((s, r) => s + (r.gross || 0), 0)
+          const weekMinutes = thisWeekPay.reduce((s, r) => s + (r.minutes || 0), 0)
+          return (
+            <div>
+              {/* 1 · ON THE CLOCK RIGHT NOW */}
+              <div className="card" style={{ background: onTheClock.length ? '#F0FDF4' : 'white', border: '1px solid ' + (onTheClock.length ? '#BBF7D0' : '#E5E7EB'), marginBottom: '12px' }}>
+                <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: onTheClock.length ? '#15803D' : '#9CA3AF' }}>
+                  {onTheClock.length ? '🟢 On the clock right now' : 'On the clock right now'}
+                </p>
+                <p style={{ fontSize: '46px', fontWeight: 800, lineHeight: 1.05, color: onTheClock.length ? '#15803D' : '#9CA3AF', margin: '2px 0 0' }}>{onTheClock.length}</p>
+                {onTheClock.map(t => {
+                  const w = workers.find(x => x.id === t.worker_id)
+                  const pj = projects.find(p => p.id === t.project_id)
+                  const mins = Math.max(0, Math.floor((Date.now() - new Date(t.clocked_in_at).getTime()) / 60000))
+                  return (
+                    <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ fontWeight: 700, fontSize: '15px', color: '#1C2B3A' }}>{w ? w.full_name : 'Worker'}</p>
+                        <p style={{ fontSize: '12px', color: '#717171', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pj ? pj.name : 'No job'} · in at {new Date(t.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</p>
+                      </div>
+                      <p style={{ fontWeight: 800, fontSize: '16px', color: '#15803D', flexShrink: 0 }}>{formatTime(mins)}</p>
+                    </div>
+                  )
+                })}
+                {onTheClock.length === 0 && <p style={{ fontSize: '13px', color: '#717171', marginTop: '4px' }}>Nobody is clocked in. Their hours show here the second somebody taps Clock in.</p>}
+              </div>
+
+              {/* 2 · THE WEEK, AS DOTS
+                  Seven stacked cards meant scrolling to answer "is anyone in on
+                  Thursday". One narrow column per day, one dot per man, answers
+                  it without scrolling at all. Colour is the state, not decoration:
+                  green = on the clock now, blue = scheduled, grey = approved off. */}
+              <div className="card" style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <button aria-label="Previous week" onClick={() => { setCrewWeekStart(addDaysKey(crewWeekStart, -7)); setCrewDay(null) }} style={{ minHeight: '44px', minWidth: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '18px', fontWeight: 700, cursor: 'pointer' }}>‹</button>
+                  <div style={{ flex: 1, textAlign: 'center', minWidth: 0 }}>
+                    <p style={{ fontSize: '14px', fontWeight: 700, color: '#1C2B3A' }}>{formatDateRange(crewWeekStart, days[6])}</p>
+                    <p style={{ fontSize: '12px', color: '#888' }}>{crewWeekStart === todayWeek ? 'This week' : (crewWeekStart < todayWeek ? 'Past week' : 'Upcoming')}{crewWeekLoading ? ' · loading…' : ' · ' + crewWeek.length + ' shift' + (crewWeek.length === 1 ? '' : 's')}</p>
+                  </div>
+                  <button aria-label="Next week" onClick={() => { setCrewWeekStart(addDaysKey(crewWeekStart, 7)); setCrewDay(null) }} style={{ minHeight: '44px', minWidth: '44px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '18px', fontWeight: 700, cursor: 'pointer' }}>›</button>
+                </div>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {days.map(key => {
+                    const shifts = crewWeek.filter(s => s.scheduled_date === key)
+                    const out = offOn(key)
+                    const isToday = key === todayKey
+                    const selected = crewDay === key
+                    const d = new Date(key + 'T00:00:00')
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setCrewDay(selected ? null : key)}
+                        aria-label={d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) + ': ' + shifts.length + ' scheduled'}
+                        style={{ flex: 1, minWidth: 0, minHeight: '92px', padding: '8px 2px', cursor: 'pointer', borderRadius: '10px', background: selected ? '#FFF7ED' : 'white', border: (isToday ? '2px solid #1C2B3A' : '1px solid ' + (selected ? '#FED7AA' : '#EEE')) }}
+                      >
+                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isToday ? '#1C2B3A' : '#9CA3AF', textTransform: 'uppercase' }}>{d.toLocaleDateString('en-US', { weekday: 'narrow' })}</span>
+                        <span style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#1C2B3A', marginBottom: '5px' }}>{d.getDate()}</span>
+                        <span style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', justifyContent: 'center' }}>
+                          {shifts.slice(0, 6).map(s => (
+                            <span key={s.id} style={{ width: '8px', height: '8px', borderRadius: '50%', background: clockedIds.has(s.worker_id) && isToday ? '#16A34A' : '#2B4C6F' }} />
+                          ))}
+                          {out.slice(0, 3).map(r => (
+                            <span key={r.id} style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#CBD5E1' }} />
+                          ))}
+                          {shifts.length === 0 && out.length === 0 && <span style={{ fontSize: '11px', color: '#D1D5DB' }}>–</span>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                {crewDay && (() => {
+                  const shifts = crewWeek.filter(s => s.scheduled_date === crewDay)
+                  const out = offOn(crewDay)
+                  return (
+                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #f0f0f0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
+                        <p style={{ fontWeight: 700, fontSize: '14px', color: '#1C2B3A' }}>{new Date(crewDay + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
+                        <button onClick={() => { setScheduleForm({ worker_id: '', project_id: '', task_description: '', scheduled_date: crewDay, start_time: '', end_time: '' }); setInlineError(''); resetInvite(); setShowNewSchedule(true) }} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: 700, cursor: 'pointer', minHeight: '44px', padding: '0 2px' }}>+ Add</button>
+                      </div>
+                      {shifts.length === 0 && out.length === 0 && <p style={{ fontSize: '13px', color: '#aaa' }}>Nobody scheduled</p>}
+                      {shifts.map(s => (
+                        <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid #f6f6f6' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <p style={{ fontWeight: 600, fontSize: '14px' }}>{shiftWorkerName(s)}{s.start_time ? ' · ' + (s.start_time || '').slice(0, 5) + (s.end_time ? '–' + (s.end_time || '').slice(0, 5) : '') : ' · time not set'}</p>
+                            <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : 'No job'}{s.task_description ? ' · ' + s.task_description : ''}</p>
+                          </div>
+                          <button aria-label="Remove shift" onClick={() => deleteSchedule(s)} style={{ background: 'none', border: 'none', color: '#DC2626', fontSize: '13px', fontWeight: 600, cursor: 'pointer', minHeight: '44px', flexShrink: 0 }}>Remove</button>
+                        </div>
+                      ))}
+                      {out.map(r => {
+                        const wk = workers.find(x => x.id === r.worker_id)
+                        return <p key={r.id} style={{ fontSize: '13px', color: '#B45309', marginTop: '6px' }}>🌴 {wk ? wk.full_name : 'A worker'} is off{r.reason ? ' — ' + r.reason : ''}</p>
+                      })}
+                    </div>
+                  )
+                })()}
+                {!crewDay && <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '10px' }}>Tap a day to see who is on it. <span style={{ color: '#16A34A', fontWeight: 700 }}>●</span> on the clock · <span style={{ color: '#2B4C6F', fontWeight: 700 }}>●</span> scheduled · <span style={{ color: '#CBD5E1', fontWeight: 700 }}>●</span> off</p>}
+                <button onClick={() => setActiveTab('crewweek')} style={{ width: '100%', marginTop: '10px', minHeight: '44px', borderRadius: '10px', border: '1px solid #E5E7EB', background: 'white', color: '#E07B2A', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>See the whole week written out →</button>
+              </div>
+
+              {/* 3 · THE CREW, AND ADD ONE RIGHT HERE.
+                  This is the fix for "it's buried all the way here". */}
+              <div className="card" style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', marginBottom: '10px' }}>
+                  <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: '#9CA3AF' }}>Your crew · {workers.length}</p>
+                  <button onClick={() => setActiveTab('workers')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '13px', fontWeight: 700, cursor: 'pointer', minHeight: '44px', padding: '0 2px' }}>Rates &amp; time off ›</button>
+                </div>
+                {workers.length > 0 && (
+                  <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '6px', WebkitOverflowScrolling: 'touch' }}>
+                    {workers.map(w => {
+                      const on = clockedIds.has(w.id)
+                      const initials = (w.full_name || '?').split(' ').filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase()
+                      return (
+                        <button key={w.id} type="button" onClick={() => setActiveTab('workers')} style={{ flex: '0 0 auto', width: '68px', background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}>
+                          <span style={{ display: 'block', width: '48px', height: '48px', margin: '0 auto', borderRadius: '50%', background: on ? '#16A34A' : '#1C2B3A', color: 'white', fontWeight: 800, fontSize: '17px', lineHeight: '48px', textAlign: 'center' }}>{initials}</span>
+                          <span style={{ display: 'block', fontSize: '11px', color: '#4B5563', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(w.full_name || '').split(' ')[0]}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {!showInvite && (
+                  <button onClick={() => setShowInvite(true)} className="btn-primary" style={{ marginTop: workers.length ? '10px' : 0 }}>+ Add a worker</button>
+                )}
+                {inviteBlock('crewhome')}
+                {workers.length === 0 && !showInvite && <p style={{ fontSize: '13px', color: '#717171', marginTop: '8px', lineHeight: 1.5 }}>Nobody on the crew yet. Add a guy and we make him a link you can text — he taps it once and he is on, no password.</p>}
+              </div>
+
+              {/* 4 · CREW PAY THIS WEEK. JP said this one is already good, so
+                  it is a summary that opens the screen that already worked. */}
+              <div className="card" role="button" tabIndex={0} onClick={() => setActiveTab('payroll')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab('payroll') } }} style={{ cursor: 'pointer' }}>
+                <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: '#9CA3AF' }}>Crew pay this week</p>
+                <p style={{ fontSize: '34px', fontWeight: 800, lineHeight: 1.1, color: '#1C2B3A', margin: '2px 0 0' }}>{formatCurrency(weekGross)}</p>
+                <p style={{ fontSize: '13px', color: '#717171', marginTop: '2px' }}>{weekMinutes > 0 ? formatTime(weekMinutes) + ' clocked so far' : 'No hours clocked yet this week'}</p>
+                <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: 700, marginTop: '8px' }}>Mark weeks paid, record a payout →</p>
+              </div>
+            </div>
+          )
+        })()}
 
         {activeTab === 'crewweek' && (() => {
           const todayWeek = weekStartKey(new Date())
@@ -4668,7 +5186,7 @@ ${link}`
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
-      <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} onDataChanged={fetchProjects} />
+      <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} onDataChanged={fetchProjects} holdVoice={askHold} projectId={askProjectId} />
       <InstallPrompt />
 
       {/* Ask sits in the MIDDLE, raised out of the bar, because talking to it is
@@ -4682,9 +5200,22 @@ ${link}`
             <span>{label}</span>
           </button>
         ))}
-        <button className="nav-ask" onClick={() => setAssistantOpen(true)} aria-label="Ask JobTally">
-          <span className="nav-ask-orb">✨</span>
-          <span>Ask</span>
+        {/* PRESS AND HOLD. A tap still just opens the sheet, so nothing anyone
+            already learned stops working; holding it turns it into a walkie
+            talkie. See the block comment on askHold below for why. */}
+        <button
+          className="nav-ask"
+          onClick={() => setAssistantOpen(true)}
+          onPointerDown={askPressStart}
+          onPointerUp={askPressEnd}
+          onPointerCancel={askPressEnd}
+          onPointerLeave={askPressEnd}
+          onContextMenu={(e) => e.preventDefault()}
+          aria-label={askHold ? 'Listening — let go to send' : 'Ask JobTally. Hold to talk.'}
+          style={{ touchAction: 'none', WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}
+        >
+          <span className="nav-ask-orb" style={askHold ? { background: '#DC2626', transform: 'scale(1.12)' } : undefined}>{askHold ? '🎙' : '✨'}</span>
+          <span>{askHold ? 'Listening' : 'Ask'}</span>
         </button>
         {[['money', '💵', 'Money'], ['crew', '👷', 'Crew']].map(([key, icon, label]) => (
           <button key={key} className={(NAV_BUCKET[activeTab] || 'home') === key ? 'active' : ''} onClick={() => setActiveTab(key)} aria-label={label}>
