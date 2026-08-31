@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import OwnerDashboard from './OwnerDashboard'
 
 // WHY THIS FILE EXISTS.
@@ -87,12 +87,16 @@ describe('OwnerDashboard mounts', () => {
     expect(screen.getByRole('button', { name: /^crew$/i })).toBeInTheDocument()
   })
 
-  // The orb is the mic now. If the press-and-hold wiring throws on mount, or
-  // the label regresses to something that does not say it can be held, the
-  // whole voice path is gone and nothing else would tell us.
-  it('says the Ask orb can be held, because holding it is what records', async () => {
+  // The orb is a plain tap again. It was press-and-hold for a day, and the
+  // hold was unusable: the sheet it opens is inset:0 / z-950, so it covers the
+  // nav and the orb with it. The button he was told to hold vanished under his
+  // own thumb. Recording now lives inside the sheet — see
+  // AssistantPanel.mic.test.js — so all this has to prove is that the orb
+  // still opens the thing.
+  it('opens the Ask sheet on a plain tap', async () => {
     render(<OwnerDashboard profile={profile} sub={sub} billingEnforced={false} />)
-    const orb = await screen.findByRole('button', { name: /hold to talk/i })
-    expect(orb).toBeInTheDocument()
+    const orb = await screen.findByRole('button', { name: /ask jobtally/i })
+    fireEvent.click(orb)
+    expect(await screen.findByText(/JobTally Assistant/i)).toBeInTheDocument()
   })
 })
