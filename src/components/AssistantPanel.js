@@ -652,10 +652,16 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
               {/* Receipt scan — owner and crew both; a crew scan books to the boss server-side. */}
               <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
               <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
-              {/* The owner's mic is the ✨ orb he held to get here, so a second
-                  one next to the text box is just a control that can disagree
-                  with the first. The crew sheet has no orb, so it keeps this. */}
-              {SR && !controlled && (
+              {/* The owner's mic used to be ONLY the ✨ orb he held to get here,
+                  on the theory that a second one next to the text box is a
+                  control that can disagree with the first. That was wrong, and
+                  JP found it 2026-08-31: the sheet is inset:0 / z-950, so it
+                  covers the nav and the orb with it. Tap the orb instead of
+                  holding it and there is then no microphone anywhere on screen
+                  and no way to get one without backing out. The two controls
+                  cannot disagree, because the orb is not visible while this is.
+                  Both sheets keep the mic. */}
+              {SR && (
                 <button onClick={toggleMic} disabled={busy || scanning} aria-label={listening ? 'Stop listening' : 'Speak'} title={listening ? 'Stop listening' : 'Speak'} style={{ width: 44, border: listening ? 'none' : '1px solid #d1d5db', borderRadius: 10, background: listening ? '#dc2626' : 'white', fontSize: 18, cursor: 'pointer' }}>🎤</button>
               )}
               <input
