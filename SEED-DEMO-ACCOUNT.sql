@@ -1,22 +1,27 @@
 -- SEED THE SHOOT DEMO ACCOUNT — Capital Ridge Contracting
--- Built 2026-09-04 for the 09/06 video shoot. Run in the Supabase SQL editor.
+-- Built 2026-09-04 for the 09/06 video shoot.
+--
+-- HOW TO RUN — either way, the whole file goes in at once:
+--   • no browser:  node ~/the-sky/bin/sql.mjs SEED-DEMO-ACCOUNT.sql
+--   • dashboard:   paste into the Supabase SQL editor and Run
 --
 -- BEFORE RUNNING, two things must already be true:
 --   1. The demo owner account exists (signed up at getjobtally.com).
 --   2. One worker has tapped his invite link on the second phone, so a real
 --      crew profile exists. api/join-invite.js is the only thing that can make
---      one, so it cannot be faked here.
+--      one, so it cannot be faked here. Without it, the jobs and receipts still
+--      land and only the hours are skipped — fix the profile, re-run the file.
 --
--- Set these two, then run the whole file. Nothing else needs editing.
+-- EDIT EXACTLY ONE LINE: the email on the next statement. Nothing else.
+-- Re-running the whole file is safe: it clears its own three jobs first, so a
+-- second run does not put six jobs on the Jobs list an hour before the shoot.
 
-\set ON_ERROR_STOP on
+select set_config('seed.owner_email', 'REPLACE_ME@example.com', false);
 
 do $seed$
 declare
-  -- ── EDIT THESE TWO ──────────────────────────────────────────────────────
-  v_owner_email  text := 'REPLACE_ME@example.com';   -- the demo owner's login
-  v_worker_name  text := 'Dave Molinari';            -- the crew member who joined
-  -- ────────────────────────────────────────────────────────────────────────
+  v_owner_email text := current_setting('seed.owner_email');
+  v_worker_name text := 'Dave Molinari';
 
   v_owner   uuid;
   v_worker  uuid;
@@ -24,6 +29,7 @@ declare
   v_bath    uuid;
   v_kitchen uuid;
   d date := current_date;
+  v_names text[] := array['Fielding Ave bathroom','Miller Road deck','Ontario St kitchen'];
 begin
   select id into v_owner from auth.users where lower(email) = lower(v_owner_email);
   if v_owner is null then
@@ -33,17 +39,38 @@ begin
   -- 1 ── COMP THE SUBSCRIPTION ------------------------------------------------
   -- has_app_access() returns true on status='comp' with no Stripe row and no
   -- card. This is what lets three jobs be open at once. Zero dollars.
-  insert into public.subscriptions (owner_id, status, plan, current_period_end)
-  values (v_owner, 'comp', 'comp', now() + interval '10 years')
-  on conflict (owner_id) do update
-    set status = 'comp', plan = 'comp',
-        current_period_end = now() + interval '10 years', updated_at = now();
+  -- Written as exists/update/insert rather than ON CONFLICT because nothing has
+  -- ever proved there is a unique constraint on subscriptions.owner_id, and a
+  -- missing constraint turns ON CONFLICT into a hard error mid-shoot.
+  if exists (select 1 from public.subscriptions where owner_id = v_owner) then
+    update public.subscriptions
+       set status = 'comp', plan = 'comp',
+           current_period_end = now() + interval '10 years'
+     where owner_id = v_owner;
+  else
+    insert into public.subscriptions (owner_id, status, plan, current_period_end)
+    values (v_owner, 'comp', 'comp', now() + interval '10 years');
+  end if;
 
-  -- 2 ── CLEAR THE AUTO-SEEDED SAMPLE JOB -------------------------------------
+  -- 2 ── CLEAR THE SAMPLE JOB, AND ANY EARLIER RUN OF THIS FILE ---------------
   -- A fresh account draws a kitchen remodel wearing an "EXAMPLE — NOT YOUR JOB"
-  -- badge. It must not appear on camera.
+  -- badge. It must not appear on camera. Children go first in case the foreign
+  -- keys do not cascade.
+  delete from public.time_entries
+   where project_id in (select id from public.projects
+                         where owner_id = v_owner
+                           and (coalesce(is_sample,false) or name = any(v_names)));
+  delete from public.project_workers
+   where project_id in (select id from public.projects
+                         where owner_id = v_owner
+                           and (coalesce(is_sample,false) or name = any(v_names)));
+  delete from public.receipts
+   where project_id in (select id from public.projects
+                         where owner_id = v_owner
+                           and (coalesce(is_sample,false) or name = any(v_names)));
   delete from public.projects
-   where owner_id = v_owner and coalesce(is_sample, false) = true;
+   where owner_id = v_owner
+     and (coalesce(is_sample,false) or name = any(v_names));
 
   -- 3 ── THE THREE JOBS -------------------------------------------------------
   -- budget = materials + labor + profit, computed the same way the app does it.
@@ -108,7 +135,7 @@ begin
    limit 1;
 
   if v_worker is null then
-    raise notice 'SKIPPED HOURS: no crew profile named "%". Tap the invite link on the second phone, then re-run just section 5.', v_worker_name;
+    raise notice 'SKIPPED HOURS: no crew profile named "%". Tap the invite link on the second phone, then re-run this file.', v_worker_name;
   else
     -- Make sure he is actually ON the job. project_workers is what
     -- WorkerDashboard reads to decide what he can clock into. Assign, not
@@ -118,14 +145,17 @@ begin
     on conflict do nothing;
 
     -- 8-hour days, weekdays only, walking back three weeks.
+    -- generate_series with an interval step returns TIMESTAMP, and Postgres has
+    -- no `timestamp + time` operator — it has to be cast back to date first.
+    -- The earlier version of this file failed here.
     insert into public.time_entries
       (project_id, worker_id, clocked_in_at, clocked_out_at, total_minutes)
     select
       v_deck, v_worker,
-      (day + time '07:30') at time zone 'America/New_York',
-      (day + time '15:30') at time zone 'America/New_York',
+      (g.day::date + time '07:30') at time zone 'America/New_York',
+      (g.day::date + time '15:30') at time zone 'America/New_York',
       480
-    from generate_series(d - 19, d - 1, interval '1 day') as g(day)
+    from generate_series((d - 19)::timestamp, (d - 1)::timestamp, interval '1 day') as g(day)
     where extract(isodow from g.day) < 6;
   end if;
 
@@ -134,21 +164,24 @@ end
 $seed$;
 
 -- ── PROVE IT FROM THE CATALOG, NOT FROM THE TOAST ────────────────────────────
--- "Success. No rows returned" is not proof. These four are.
+-- "Success. No rows returned" is not proof. These four are. They key off the
+-- job names rather than the email, so they still work if the session setting
+-- did not survive the connection — there is nothing to edit down here.
 
 -- A. Access is comped and the app agrees.
 select s.status, s.plan, public.has_app_access(s.owner_id) as app_access
   from public.subscriptions s
-  join auth.users u on u.id = s.owner_id
- where lower(u.email) = lower('REPLACE_ME@example.com');
+ where s.owner_id = (select owner_id from public.projects
+                      where name = 'Miller Road deck' limit 1);
 
 -- B. Three jobs, and only two of them count against the free slot.
 select p.name, p.stage, p.budget, p.materials_budget, p.labor_budget
-  from public.projects p join auth.users u on u.id = p.owner_id
- where lower(u.email) = lower('REPLACE_ME@example.com')
+  from public.projects p
+ where p.owner_id = (select owner_id from public.projects
+                      where name = 'Miller Road deck' limit 1)
  order by p.created_at;
 
--- C. 🔴 THE ONE THAT MATTERS: the hero job must read 82%.
+-- C. 🔴 THE ONE THAT MATTERS: the hero job must read 82.0.
 select p.name,
        p.materials_budget,
        sum(r.amount) filter (where r.category = 'materials') as materials_spent,
@@ -156,12 +189,12 @@ select p.name,
              / nullif(p.materials_budget,0), 1) as pct
   from public.projects p
   left join public.receipts r on r.project_id = p.id
-  join auth.users u on u.id = p.owner_id
- where lower(u.email) = lower('REPLACE_ME@example.com')
-   and p.name = 'Miller Road deck'
+ where p.name = 'Miller Road deck'
  group by p.name, p.materials_budget;
 
--- D. Hours landed and the man is assigned.
+-- D. Hours landed and the man is assigned. The count is every weekday in the
+-- last 19 days, so it lands between 13 and 15 shifts (104-120 hours) depending
+-- on the day it is run. Seeded 09/04 it is 14 shifts, 112 hours.
 select pr.full_name, count(*) as shifts, sum(t.total_minutes)/60.0 as hours
   from public.time_entries t
   join public.profiles pr on pr.id = t.worker_id
