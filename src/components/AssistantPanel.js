@@ -19,6 +19,13 @@ const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.w
 const SS = typeof window !== 'undefined' ? window.speechSynthesis : null
 const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
+// 0:07, 1:42. A number that moves is the only proof a mic is really on;
+// "Listening…" sits there looking identical whether it works or not.
+function mmss(total) {
+  const s = Math.max(0, Math.floor(total))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 // Talk-back. The rule is deliberately narrow: it speaks ONLY when the turn it is
 // answering came in through the mic. Talk to it and it talks back; type at it and
 // it stays quiet. That keeps a guy with his hands full hands-free without making
@@ -132,7 +139,7 @@ async function authHeader() {
 // owns the ✨ button now, because talking to it is meant to read as a place you
 // go, not a helper hovering over the screen you're already on. Left uncontrolled
 // (the crew side) it keeps its own floating button and behaves exactly as before.
-export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange, holdVoice = false, projectId = null }) {
+export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange, autoTalk = false, projectId = null }) {
   const isOwner = role !== 'worker'
   const controlled = typeof openProp === 'boolean'
   const [openState, setOpenState] = useState(false)
@@ -148,8 +155,8 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
       // do far better than a paragraph does. Anything not on a card still
       // works by typing or talking.
       text: isOwner
-        ? "Hey — hold the ✨ button and just talk. Say the whole thing in one go (jobs, money, crew, receipts, invoices, permits, punch lists) and I'll sort it out. Nothing saves until you hit Confirm."
-        : "Hey — tap one of these, or hit 🎤 and just say it. Ask out loud and I'll answer out loud. Nothing saves until you hit Confirm.",
+        ? "Hey — hit the big 🎤 and say the whole thing in one go: the job, the guys, the hours, what you spent, what you still need. It keeps listening while you think, until you tap stop. I'll sort it into the right places. Nothing saves until you hit Confirm."
+        : "Hey — hit the big 🎤 and just say it, all in one go. It keeps listening while you think, until you tap stop. Ask out loud and I'll answer out loud. Nothing saves until you hit Confirm.",
     },
   ])
   const [input, setInput] = useState('')
@@ -317,32 +324,66 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
   }, [pending, busy, activity, onDataChanged, say])
 
   // ---------------------------------------------------------------------
-  // THE MIC IS THE BUTTON NOW
+  // ONE BIG BUTTON. TAP IT, TALK, TAP IT AGAIN.
   //
-  // JP, 2026-08-30: "I don't like the microphone." The old shape was a 44px 🎤
-  // next to the text box that you tapped to start and tapped again to stop —
-  // two taps, an ambiguous state in between, and on iOS the FIRST attempt of a
-  // session very often returned nothing at all, which reads as a broken app
-  // rather than a warm-up.
+  // JP, 2026-08-31: "it says hold the star button to talk, but when I hit it,
+  // it disappears... the way it works is clunky. I don't want it to have to ask
+  // for each one of the pieces of information bit by bit. I want it to ask for
+  // the whole pile."
   //
-  // So the ✨ orb in the bottom bar became the mic, and it is press-and-hold:
-  // hold it, talk, let go, it sends. No mode to be in, no second tap to
-  // remember, and letting go is a thing hands do without looking.
+  // Two different things were making it bit-by-bit. Both are fixed here.
   //
-  // CHECKED, NOT ASSUMED (2026-08-30): Apple's Web Speech engine in a page
-  // stops on its own, throttles interim results, and misses the first attempt.
-  // Push-to-talk is documented as more stable than continuous, and
-  // `continuous = true` on iOS is a known dead end — do not reintroduce it.
-  // The warm-up below is the fix for the dead first try: the recognizer is
-  // CONSTRUCTED when the sheet opens (no permission prompt, no listening), so
-  // by the time a thumb lands on the orb the engine is already loaded.
+  // 1. THE HOLD IS GONE. The button he was told to hold is the orb in the
+  //    bottom nav, and this sheet is inset:0 / z-950, so it covers the nav and
+  //    the orb with it. The thing the copy named vanished the instant he
+  //    touched it. Press-and-hold is deleted outright: the record button lives
+  //    IN the sheet, full width, tap on and tap off. Nothing to hold, nothing
+  //    to release at the right moment, and it cannot be hidden by the sheet
+  //    because it is part of it.
+  //
+  // 2. THE RECOGNIZER QUIT ON HIM MID-PILE. Web Speech with continuous=false
+  //    ends the run at the first real pause, and a man listing four things out
+  //    loud pauses between them. That first fragment got sent on its own, the
+  //    model answered the fragment, and the whole thing became an
+  //    interrogation. Now a run that ends while the button is still armed rolls
+  //    the finalized text forward and starts another run. He talks until HE
+  //    taps stop; the pauses cost nothing and the model gets the whole pile in
+  //    one message.
+  //
+  // continuous stays FALSE on purpose. It is a documented dead end on iOS
+  // (Apple's engine stops on its own, throttles interim results, and misses the
+  // first attempt of a session). The restart loop is the supported way to hold
+  // a long dictation open there. The recognizer is also CONSTRUCTED when the
+  // sheet opens, which loads the engine without asking for the mic, so the
+  // first tap is not the dead one.
   // ---------------------------------------------------------------------
 
+  // Hard ceiling on one recording, so a phone left face-up in a truck does not
+  // sit there listening. Long enough that nobody talking normally hits it.
+  const MAX_TALK_MS = 180000
+  // How many runs in a row may end with nothing said before we call it quits.
+  // A silent run ends in about 5s, so this is roughly a minute of dead air.
+  const MAX_EMPTY_RUNS = 12
+
   // Live transcript, mirrored into a ref. onend fires with a stale closure over
-  // `input`, so the auto-send on release has to read this instead.
+  // `input`, so the send on stop has to read this instead.
   const dictatedRef = useRef('')
-  // True while a press-and-hold is in flight: release should SEND, not just stop.
-  const autoSendRef = useRef(false)
+  // Everything finalized by PREVIOUS runs of this recording. Each run's
+  // e.results starts empty, so without this a restart erases what he said.
+  const baseRef = useRef('')
+  // True from the moment he taps record until he taps stop. This is what makes
+  // an ended run restart instead of send.
+  const recordingRef = useRef(false)
+  // Bumped on every new recording. A handler from an older session checks this
+  // and does nothing, so a stale onend can never restart a mic he closed.
+  const sessionRef = useRef(0)
+  const emptyRunsRef = useRef(0)
+  const capTimerRef = useRef(null)
+  const restartTimerRef = useRef(null)
+  // Seconds on the button. He can watch it count, so "is this thing on" is
+  // never a question he has to answer by guessing.
+  const [talkSecs, setTalkSecs] = useState(0)
+  const secsTimerRef = useRef(null)
   // Latest `send`, so onend can call it without re-registering handlers.
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send }, [send])
@@ -364,92 +405,169 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
     recogRef.current = buildRecognizer()
   }, [open, buildRecognizer])
 
-  const stopMic = useCallback(() => {
-    try { if (recogRef.current) recogRef.current.stop() } catch { /* already stopped */ }
+  const clearTalkTimers = useCallback(() => {
+    clearTimeout(capTimerRef.current)
+    clearTimeout(restartTimerRef.current)
+    clearInterval(secsTimerRef.current)
   }, [])
 
-  // `hold` = started by press-and-hold, so releasing sends it.
-  const startMic = useCallback((hold) => {
-    if (!SR || listening) return
-    // Barge-in: stop talking the instant the mic opens, or the assistant's own
-    // voice ends up in the transcript.
-    hush()
+  // Tap stop (or hit the cap, or a dead mic). Ends the session; onend sends.
+  // Declared as a ref-backed function because runMic's handlers call it and it
+  // in turn depends on nothing they own.
+  const stopRecording = useCallback(() => {
+    if (!recordingRef.current) return
+    recordingRef.current = false
+    clearTalkTimers()
+    try { if (recogRef.current) recogRef.current.stop() } catch { /* already stopped */ }
+  }, [clearTalkTimers])
+
+  // Start ONE run of the recognizer inside an already-open recording session.
+  // Called on the first tap and again after every pause-triggered end.
+  const runMic = useCallback((mySession) => {
     const rec = recogRef.current || buildRecognizer()
-    if (!rec) return
+    if (!rec) return false
     recogRef.current = rec
-    autoSendRef.current = !!hold
-    // Keep whatever they'd already typed; append the dictation live on top of it.
-    const base = input ? input.trim() + ' ' : ''
-    dictatedRef.current = base
+
     rec.onresult = (e) => {
+      if (sessionRef.current !== mySession) return
       let finalText = ''
       let interim = ''
       for (let i = 0; i < e.results.length; i++) {
         const seg = e.results[i][0] ? e.results[i][0].transcript : ''
-        if (e.results[i].isFinal) finalText += seg
+        if (e.results[i].isFinal) finalText += seg + ' '
         else interim += seg
       }
       // They actually spoke — this turn earns a spoken answer back.
-      if (finalText.trim()) voiceTurnRef.current = true
-      const composed = (base + (finalText + interim)).replace(/\s+/g, ' ').trimStart()
+      if (finalText.trim()) { voiceTurnRef.current = true; emptyRunsRef.current = 0 }
+      const composed = (baseRef.current + finalText + interim).replace(/\s+/g, ' ').trimStart()
       dictatedRef.current = composed
       setInput(composed)
     }
+
     rec.onend = () => {
-      setListening(false)
-      const text = (dictatedRef.current || '').trim()
-      if (autoSendRef.current) {
-        autoSendRef.current = false
-        // He spoke, so the answer comes back out loud. `keepVoice` stops the
-        // override-text path from silencing talk-back the way a template tap does.
-        if (text) { voiceTurnRef.current = true; setInput(''); sendRef.current(text, true) }
+      if (sessionRef.current !== mySession) return
+      // Still armed → that was a pause, not a finish. Bank what he has said so
+      // far and open another run. He stops when he taps stop, and not before.
+      if (recordingRef.current) {
+        baseRef.current = dictatedRef.current ? dictatedRef.current.trim() + ' ' : ''
+        emptyRunsRef.current += 1
+        if (emptyRunsRef.current > MAX_EMPTY_RUNS) { stopRecording(); return }
+        // start() throws if the engine is still winding down, so give it a beat
+        // and fall back to a fresh instance the once.
+        restartTimerRef.current = setTimeout(() => {
+          if (sessionRef.current !== mySession || !recordingRef.current) return
+          try { rec.start() } catch {
+            const fresh = buildRecognizer()
+            if (!fresh) { stopRecording(); return }
+            fresh.onresult = rec.onresult; fresh.onend = rec.onend; fresh.onerror = rec.onerror
+            recogRef.current = fresh
+            try { fresh.start() } catch { stopRecording() }
+          }
+        }, 150)
+        return
       }
-    }
-    rec.onerror = (e) => {
+      // He tapped stop. The whole pile goes out as ONE message.
       setListening(false)
-      autoSendRef.current = false
-      voiceTurnRef.current = false
+      clearTalkTimers()
+      const text = (dictatedRef.current || '').trim()
+      if (text) { voiceTurnRef.current = true; setInput(''); sendRef.current(text, true) }
+    }
+
+    rec.onerror = (e) => {
+      if (sessionRef.current !== mySession) return
       const err = e && e.error
+      // A pause reads as 'no-speech'. While he is still recording that is not
+      // an error, it is him thinking — onend restarts and nothing is said.
+      if (err === 'no-speech' && recordingRef.current) return
       if (err === 'not-allowed' || err === 'service-not-allowed') {
-        pushMsg({ role: 'assistant', text: 'I need microphone access to hear you — allow the mic for this site in your browser settings, then hold the ✨ button again. You can always just type instead.' })
-      } else if (err === 'no-speech') {
-        pushMsg({ role: 'assistant', text: "Didn't catch anything — hold the ✨ button while you talk, or just type it." })
+        recordingRef.current = false
+        setListening(false)
+        clearTalkTimers()
+        voiceTurnRef.current = false
+        pushMsg({ role: 'assistant', text: 'I need microphone access to hear you — allow the mic for this site in your browser settings, then tap the 🎤 again. You can always just type instead.' })
       } else if (err === 'audio-capture') {
+        recordingRef.current = false
+        setListening(false)
+        clearTalkTimers()
+        voiceTurnRef.current = false
         pushMsg({ role: 'assistant', text: "Can't find a microphone on this device — go ahead and type it instead." })
       }
+      // Anything else falls through to onend, which decides restart vs send.
     }
+
     try {
       rec.start()
-      setListening(true)
+      return true
     } catch {
-      // start() throws if the engine is still winding down from the last turn.
-      // A fresh instance is the documented way out; one retry, then give up
-      // quietly rather than leaving a button that looks armed and is not.
       try {
         const fresh = buildRecognizer()
-        if (!fresh) { setListening(false); return }
+        if (!fresh) return false
         fresh.onresult = rec.onresult; fresh.onend = rec.onend; fresh.onerror = rec.onerror
         recogRef.current = fresh
         fresh.start()
-        setListening(true)
-      } catch { setListening(false); autoSendRef.current = false }
+        return true
+      } catch { return false }
     }
-  }, [listening, input, hush, buildRecognizer])
+  }, [buildRecognizer, clearTalkTimers, stopRecording])
 
-  // The crew sheet keeps a tap-to-toggle 🎤 next to its text box: they have no
-  // bottom-bar orb to hold, so deleting it would strand them with typing only.
+  const startRecording = useCallback(() => {
+    if (!SR || recordingRef.current) return
+    // Barge-in: stop talking the instant the mic opens, or the assistant's own
+    // voice ends up in the transcript.
+    hush()
+    const mySession = sessionRef.current + 1
+    sessionRef.current = mySession
+    recordingRef.current = true
+    emptyRunsRef.current = 0
+    // Keep whatever they'd already typed; append the dictation live on top of it.
+    baseRef.current = input ? input.trim() + ' ' : ''
+    dictatedRef.current = baseRef.current
+    setTalkSecs(0)
+    if (!runMic(mySession)) {
+      recordingRef.current = false
+      pushMsg({ role: 'assistant', text: "Couldn't start the mic just then — tap it again, or type it instead." })
+      return
+    }
+    setListening(true)
+    clearInterval(secsTimerRef.current)
+    secsTimerRef.current = setInterval(() => setTalkSecs((s) => s + 1), 1000)
+    clearTimeout(capTimerRef.current)
+    capTimerRef.current = setTimeout(() => stopRecording(), MAX_TALK_MS)
+  }, [input, hush, runMic, stopRecording])
+
   const toggleMic = useCallback(() => {
-    if (listening) stopMic()
-    else startMic(false)
-  }, [listening, startMic, stopMic])
+    if (recordingRef.current) stopRecording()
+    else startRecording()
+  }, [startRecording, stopRecording])
 
-  // The parent (the ✨ orb in the owner's bottom bar, and the Hold-to-talk chip
-  // on a job's Crew tab) drives this: true on press, false on release.
+  // A recording that outlives its own sheet is the fastest way to make someone
+  // distrust the mic. Closing the sheet kills it outright.
   useEffect(() => {
-    if (!SR) return
-    if (holdVoice && open && !listening) startMic(true)
-    if (!holdVoice && listening && autoSendRef.current) stopMic()
-  }, [holdVoice, open, listening, startMic, stopMic])
+    if (open) return
+    sessionRef.current += 1
+    recordingRef.current = false
+    clearTalkTimers()
+    setListening(false)
+    try { if (recogRef.current) recogRef.current.abort() } catch { /* nothing running */ }
+  }, [open, clearTalkTimers])
+  useEffect(() => () => {
+    sessionRef.current += 1
+    recordingRef.current = false
+    clearTimeout(capTimerRef.current)
+    clearTimeout(restartTimerRef.current)
+    clearInterval(secsTimerRef.current)
+  }, [])
+
+  // The job's Crew tab opens this sheet already meaning to talk. One shot per
+  // open — reopening from the bottom nav must never start recording by itself.
+  const autoTalkedRef = useRef(false)
+  useEffect(() => {
+    if (!open) { autoTalkedRef.current = false; return }
+    if (!autoTalk || !SR || autoTalkedRef.current) return
+    autoTalkedRef.current = true
+    startRecording()
+  }, [open, autoTalk, startRecording])
+
 
   // Receipt photo (owner or crew): photo → /api/scan-receipt (Haiku vision) →
   // auto-send the store/amount/date so the normal add_expense confirm flow takes
@@ -648,30 +766,58 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
                 <Templates items={templates} compact disabled={busy || scanning} onPick={pickTemplate} />
               </div>
             )}
-            <div style={{ display: 'flex', gap: 8, padding: 12, paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: msgs.length > 1 && !pending ? 'none' : '1px solid #e5e7eb', background: 'white' }}>
-              {/* Receipt scan — owner and crew both; a crew scan books to the boss server-side. */}
-              <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
-              <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
-              {/* The owner's mic used to be ONLY the ✨ orb he held to get here,
-                  on the theory that a second one next to the text box is a
-                  control that can disagree with the first. That was wrong, and
-                  JP found it 2026-08-31: the sheet is inset:0 / z-950, so it
-                  covers the nav and the orb with it. Tap the orb instead of
-                  holding it and there is then no microphone anywhere on screen
-                  and no way to get one without backing out. The two controls
-                  cannot disagree, because the orb is not visible while this is.
-                  Both sheets keep the mic. */}
+            {/* THE COMPOSER IS THE RECORD BUTTON.
+                A 44px 🎤 tucked between a receipt icon and a text box is a
+                control you have to go looking for, and JP was looking for it
+                while the sheet told him to hold something that wasn't on the
+                screen. So the mic is now the widest, tallest thing down here —
+                one tap arms it, one tap sends it, and it says both of those
+                things in words on its own face. Typing still works underneath
+                it for anyone who'd rather. */}
+            <div style={{ padding: 12, paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: msgs.length > 1 && !pending ? 'none' : '1px solid #e5e7eb', background: 'white' }}>
               {SR && (
-                <button onClick={toggleMic} disabled={busy || scanning} aria-label={listening ? 'Stop listening' : 'Speak'} title={listening ? 'Stop listening' : 'Speak'} style={{ width: 44, border: listening ? 'none' : '1px solid #d1d5db', borderRadius: 10, background: listening ? '#dc2626' : 'white', fontSize: 18, cursor: 'pointer' }}>🎤</button>
+                <button
+                  onClick={toggleMic}
+                  disabled={busy || scanning}
+                  aria-label={listening ? 'Stop recording and send' : 'Tap and talk'}
+                  style={{
+                    width: '100%', minHeight: 62, padding: '10px 14px', marginBottom: 10,
+                    border: 'none', borderRadius: 14,
+                    background: listening ? '#DC2626' : NAVY, color: 'white',
+                    cursor: 'pointer', opacity: busy || scanning ? 0.55 : 1,
+                    boxShadow: listening ? '0 0 0 4px rgba(220,38,38,0.18)' : '0 2px 8px rgba(28,43,58,0.25)',
+                    display: 'block', textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: 0.2 }}>
+                    {listening ? `⏹  Stop and send  ·  ${mmss(talkSecs)}` : '🎤  Tap and talk'}
+                  </div>
+                  {/* The subtitle is the whole instruction. While it's armed it
+                      has to say that a pause is safe, because the old build
+                      quit on the first one and that is what taught him to
+                      feed it one fact at a time. */}
+                  <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85, marginTop: 3 }}>
+                    {listening ? 'Keep going — take your time, pauses are fine' : 'Say the whole thing in one go'}
+                  </div>
+                </button>
               )}
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') send() }}
-                placeholder={listening ? 'Listening…' : isOwner ? 'Ask or tell me to do something…' : 'Clock in, check hours, time off…'}
-                style={{ flex: 1, minWidth: 0, padding: '11px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 15, outline: 'none' }}
-              />
-              <button onClick={send} disabled={busy || !input.trim()} style={{ padding: '0 16px', border: 'none', borderRadius: 10, background: input.trim() && !busy ? ORANGE : '#d1d5db', color: 'white', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Send</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {/* Receipt scan — owner and crew both; a crew scan books to the boss server-side. */}
+                <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
+                <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning || listening} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !listening) send() }}
+                  readOnly={listening}
+                  placeholder={listening ? 'Listening…' : isOwner ? 'Or type it…' : 'Clock in, check hours, time off…'}
+                  style={{ flex: 1, minWidth: 0, padding: '11px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 15, outline: 'none', background: listening ? '#F3F4F6' : 'white' }}
+                />
+                {/* Send is off while the mic is armed. There is exactly one way
+                    to finish a spoken pile and it is the big red button — two
+                    ways to send is how half a sentence goes out. */}
+                <button onClick={send} disabled={busy || listening || !input.trim()} style={{ padding: '0 16px', border: 'none', borderRadius: 10, background: input.trim() && !busy && !listening ? ORANGE : '#d1d5db', color: 'white', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Send</button>
+              </div>
             </div>
           </>
         ) : (

@@ -519,41 +519,32 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Which day of the dot strip is expanded on the Crew screen. null = none.
   const [crewDay, setCrewDay] = useState(null)
 
-  // ---- PRESS AND HOLD TO TALK ----
-  // JP: "I don't like the microphone." It was a small 🎤 inside the assistant
-  // sheet that you tapped on and tapped off — you had to be IN the sheet to
-  // start talking, and then remember you were recording.
+  // ---- TALK TO IT ----
+  // JP, 2026-08-31: "it says hold the star button to talk, but when I hit it,
+  // it disappears."
   //
-  // Now the ✨ orb IS the mic. Hold it and it opens the sheet already
-  // listening; let go and it sends. A short tap keeps the old behaviour — just
-  // open the sheet — so nothing anyone already learned breaks.
+  // He was right and it was never fixable from this side. The Ask sheet is
+  // inset:0 / z-950, so it paints over this whole bottom nav — including the
+  // orb the copy told him to hold. Press-and-hold is gone: the orb is a plain
+  // tap that opens the sheet, and the record button lives IN the sheet where
+  // nothing can cover it. See the block comment in AssistantPanel.
   //
-  // HOLD_MS is the line between the two. 220ms is long enough that a normal
-  // tap never trips it, short enough that a deliberate press feels instant.
-  const HOLD_MS = 220
-  const [askHold, setAskHold] = useState(false)
+  // `askTalk` is the one thing left here: the Crew tab's Talk chip means "I
+  // opened this to speak", so the sheet arms its mic on the way in. Opening
+  // from the nav never does.
+  const [askTalk, setAskTalk] = useState(false)
   // Which job's thread the raw spoken sentence gets copied into, if any. Set
-  // when he holds the button from inside a job; null from the bottom bar.
+  // when he opens the sheet from inside a job; null from the bottom bar.
   const [askProjectId, setAskProjectId] = useState(null)
-  const holdTimerRef = useRef(null)
-  // Start a press. `pid` is the job to attribute it to, if we're inside one.
-  const startAskHold = useCallback((pid) => {
+  const openAsk = useCallback((pid, talk) => {
     setAskProjectId(pid || null)
+    setAskTalk(!!talk)
     setAssistantOpen(true)
-    clearTimeout(holdTimerRef.current)
-    holdTimerRef.current = setTimeout(() => setAskHold(true), HOLD_MS)
   }, [])
-  // End a press. Dropping holdVoice is what tells the panel to stop and send;
-  // if the timer never fired this was a tap and the sheet is simply open.
-  const endAskHold = useCallback(() => {
-    clearTimeout(holdTimerRef.current)
-    setAskHold(false)
+  const closeAsk = useCallback((v) => {
+    setAssistantOpen(v)
+    if (!v) setAskTalk(false)
   }, [])
-  const askPressStart = useCallback(() => startAskHold(null), [startAskHold])
-  const askPressEnd = useCallback(() => endAskHold(), [endAskHold])
-  // A press that is still held when the component unmounts would leave the
-  // recognizer running with nothing listening to it.
-  useEffect(() => () => clearTimeout(holdTimerRef.current), [])
   const [complianceItems, setComplianceItems] = useState([])
   const [warranties, setWarranties] = useState([])
   const [permits, setPermits] = useState([])
@@ -3125,14 +3116,10 @@ ${link}`
                     assistant touches it — see the note in AssistantPanel.send. */}
                 <button
                   type="button"
-                  onPointerDown={() => startAskHold(selectedProject.id)}
-                  onPointerUp={endAskHold}
-                  onPointerCancel={endAskHold}
-                  onPointerLeave={endAskHold}
-                  onContextMenu={(e) => e.preventDefault()}
-                  aria-label={askHold ? 'Listening — let go to send' : 'Hold to talk'}
-                  style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '8px 14px', borderRadius: '999px', border: 'none', background: askHold ? '#DC2626' : '#1C2B3A', color: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', touchAction: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
-                >{askHold ? '🎙 Listening…' : '🎙 Hold to talk'}</button>
+                  onClick={() => openAsk(selectedProject.id, true)}
+                  aria-label="Talk it out — the mic opens listening"
+                  style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '8px 14px', borderRadius: '999px', border: 'none', background: '#1C2B3A', color: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >🎙 Talk it out</button>
                 {[
                   { key: 'days', icon: '🗓', label: 'Days', count: scheduleEntries.length },
                   { key: 'buy', icon: '🛒', label: 'Buy', count: materialItems.filter(it => !it.bought).length },
@@ -3728,7 +3715,7 @@ ${link}`
         {/* The job screen has no bottom bar (it is a drill-down), so the sheet
             the Hold-to-talk chip opens has to be mounted here too. Same
             component, same state — just a second mount point. */}
-        <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} onDataChanged={fetchProjects} holdVoice={askHold} projectId={askProjectId} />
+        <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
         <Toast message={toast} type={toastType} onClose={() => setToast('')} />
       </div>
     )
@@ -5186,7 +5173,7 @@ ${link}`
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
-      <AssistantPanel open={assistantOpen} onOpenChange={setAssistantOpen} onDataChanged={fetchProjects} holdVoice={askHold} projectId={askProjectId} />
+      <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
       <InstallPrompt />
 
       {/* Ask sits in the MIDDLE, raised out of the bar, because talking to it is
@@ -5200,22 +5187,15 @@ ${link}`
             <span>{label}</span>
           </button>
         ))}
-        {/* PRESS AND HOLD. A tap still just opens the sheet, so nothing anyone
-            already learned stops working; holding it turns it into a walkie
-            talkie. See the block comment on askHold below for why. */}
+        {/* A plain tap. This orb cannot be a mic — the sheet it opens covers
+            it — so the recording button lives inside the sheet instead. */}
         <button
           className="nav-ask"
-          onClick={() => setAssistantOpen(true)}
-          onPointerDown={askPressStart}
-          onPointerUp={askPressEnd}
-          onPointerCancel={askPressEnd}
-          onPointerLeave={askPressEnd}
-          onContextMenu={(e) => e.preventDefault()}
-          aria-label={askHold ? 'Listening — let go to send' : 'Ask JobTally. Hold to talk.'}
-          style={{ touchAction: 'none', WebkitUserSelect: 'none', userSelect: 'none', WebkitTouchCallout: 'none' }}
+          onClick={() => openAsk(null, false)}
+          aria-label="Ask JobTally"
         >
-          <span className="nav-ask-orb" style={askHold ? { background: '#DC2626', transform: 'scale(1.12)' } : undefined}>{askHold ? '🎙' : '✨'}</span>
-          <span>{askHold ? 'Listening' : 'Ask'}</span>
+          <span className="nav-ask-orb">✨</span>
+          <span>Ask</span>
         </button>
         {[['money', '💵', 'Money'], ['crew', '👷', 'Crew']].map(([key, icon, label]) => (
           <button key={key} className={(NAV_BUCKET[activeTab] || 'home') === key ? 'active' : ''} onClick={() => setActiveTab(key)} aria-label={label}>
