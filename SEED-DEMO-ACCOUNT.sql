@@ -55,6 +55,7 @@ declare
   v_owner   uuid;
   v_dave    uuid;
   v_luis    uuid;
+  v_mike    uuid;
   v_deck    uuid;
   v_bath    uuid;
   v_kitchen uuid;
@@ -217,6 +218,10 @@ begin
   -- 8 ── THE CREW -------------------------------------------------------------
   select id into v_dave from public.profiles where lower(full_name) = 'dave molinari' limit 1;
   select id into v_luis from public.profiles where lower(full_name) = 'luis ferrara'  limit 1;
+  -- Mike Torres already existed on this account before the shoot was planned
+  -- (joined 2026-07-07 through the real invite flow). He is kept and given his
+  -- own job rather than deleted, so the Crew screen has no empty row on camera.
+  select id into v_mike from public.profiles where lower(full_name) = 'mike torres'   limit 1;
 
   if v_dave is null then
     raise notice 'SKIPPED Dave Molinari — no crew profile. Run api/join-invite.js for him, then re-run this file.';
@@ -237,6 +242,14 @@ begin
     values (v_deck, v_luis)
     on conflict do nothing;
   end if;
+  -- Mike runs the kitchen on his own. Deliberately NOT on the deck: the deck's
+  -- two budget bars are the frame of the whole video and a third man's hours
+  -- would move the labor bar off 76.3%.
+  if v_mike is not null then
+    insert into public.project_workers (project_id, worker_id)
+    values (v_kitchen, v_mike)
+    on conflict do nothing;
+  end if;
 
   -- 8a. HOURS ALREADY WORKED --------------------------------------------------
   -- ⚠️ trg_compute_time_entry_pay IS INSTALLED here — read out of pg_proc on
@@ -247,6 +260,7 @@ begin
   -- are also right on a database where that trigger is missing.
   update public.profiles set hourly_rate = 28.00 where id = v_dave;
   update public.profiles set hourly_rate = 26.00 where id = v_luis;
+  update public.profiles set hourly_rate = 38.00 where id = v_mike;
   --
   -- generate_series with an interval step returns TIMESTAMP, and Postgres has
   -- no `timestamp + time` operator, so it has to be cast back to date first.
@@ -283,6 +297,19 @@ begin
            (g.day::date + time '15:45') at time zone 'America/New_York',
            480, 208.00
       from generate_series((d - 6)::timestamp, (d - 1)::timestamp, interval '1 day') as g(day)
+     where extract(isodow from g.day) < 6;
+  end if;
+
+  if v_mike is not null then
+    -- Three days of demo on the kitchen: 3 x 8h x $38 = $912 of a $9,500 labor
+    -- budget, so the kitchen reads as started rather than as a blank card.
+    insert into public.time_entries
+      (project_id, worker_id, clocked_in_at, clocked_out_at, total_minutes, labor_cost)
+    select v_kitchen, v_mike,
+           (g.day::date + time '08:00') at time zone 'America/New_York',
+           (g.day::date + time '16:00') at time zone 'America/New_York',
+           480, 304.00
+      from generate_series((d - 3)::timestamp, (d - 1)::timestamp, interval '1 day') as g(day)
      where extract(isodow from g.day) < 6;
   end if;
 
@@ -333,6 +360,14 @@ begin
      where extract(isodow from g.day) < 6;
   end if;
 
+  if v_mike is not null then
+    insert into public.schedule_entries
+      (owner_id, worker_id, project_id, task_description, scheduled_date, start_time, end_time)
+    select v_owner, v_mike, v_kitchen, 'Cabinet layout', g.day::date, time '08:00', time '16:00'
+      from generate_series((d - 3)::timestamp, (d + 8)::timestamp, interval '1 day') as g(day)
+     where extract(isodow from g.day) < 6;
+  end if;
+
   -- Today gets a shift no matter what weekday it is, so "who is on today"
   -- answers on camera even on a Sunday shoot.
   if v_dave is not null then
@@ -348,6 +383,14 @@ begin
     select v_owner, v_luis, v_deck, 'Decking + stain prep', d, time '07:30', time '13:00'
      where not exists (select 1 from public.schedule_entries
                         where worker_id = v_luis and scheduled_date = d);
+  end if;
+
+  if v_mike is not null then
+    insert into public.schedule_entries
+      (owner_id, worker_id, project_id, task_description, scheduled_date, start_time, end_time)
+    select v_owner, v_mike, v_kitchen, 'Cabinet layout', d, time '08:00', time '14:00'
+     where not exists (select 1 from public.schedule_entries
+                        where worker_id = v_mike and scheduled_date = d);
   end if;
 
   -- 9 ── THE GROUP CHAT -------------------------------------------------------
@@ -374,8 +417,8 @@ begin
       (v_deck, v_owner, v_dave, 'on site, starting on the stringers', now() - interval '2 hours');
   end if;
 
-  raise notice 'Seeded. owner=% deck=% bath=% kitchen=% dave=% luis=%',
-    v_owner, v_deck, v_bath, v_kitchen, v_dave, v_luis;
+  raise notice 'Seeded. owner=% deck=% bath=% kitchen=% dave=% luis=% mike=%',
+    v_owner, v_deck, v_bath, v_kitchen, v_dave, v_luis, v_mike;
 end
 $seed$;
 
