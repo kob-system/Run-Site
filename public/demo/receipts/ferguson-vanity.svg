@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="752" viewBox="0 0 620 752" role="img" aria-label="FERGUSON receipt, $1,994.76">
+<defs>
+  <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfdfb"/><stop offset="1" stop-color="#f1f0ea"/></linearGradient>
+  <filter id="sh" x="-25%" y="-25%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.34"/></filter>
+</defs>
+<style>
+  .m{font:600 19px ui-monospace,Menlo,Consolas,monospace;fill:#2a2a28}
+  .s{font:500 15px ui-monospace,Menlo,Consolas,monospace;fill:#6b6b66}
+  .b{font:800 24px ui-monospace,Menlo,Consolas,monospace;fill:#151514}
+  .h{font:800 30px ui-monospace,Menlo,Consolas,monospace;fill:#151514;letter-spacing:1px}
+  .r{text-anchor:end}
+  .dash{stroke:#c9c7c0;stroke-width:2;stroke-dasharray:5 5}
+</style>
+<rect width="620" height="752" fill="#31353b"/>
+<g transform="rotate(-1.2 310 376) translate(22 40)" filter="url(#sh)">
+  <rect x="52" y="0" width="476" height="622" rx="3" fill="url(#p)"/>
+  <path d="M52,602 L52,602 L70,612 L88,602 L106,612 L124,602 L142,612 L160,602 L178,612 L196,602 L214,612 L232,602 L250,612 L268,602 L286,612 L304,602 L322,612 L340,602 L358,612 L376,602 L394,612 L412,602 L430,612 L448,602 L466,612 L484,602 L502,612 L520,602 L528,624 L52,624 Z" fill="#31353b"/>
+  <text x="270" y="66" class="h" text-anchor="middle">FERGUSON</text>
+  <text x="270" y="96" class="s" text-anchor="middle">20 Corporate Cir, Albany NY</text>
+  <text x="270" y="120" class="s" text-anchor="middle">(518) 555-0133</text>
+  <line x1="60" y1="150" x2="480" y2="150" class="dash"/>
+  <text x="60" y="182" class="s">08/16/26  09:26</text>
+  <text x="480" y="182" class="s r">REG 02</text>
+  <text x="60" y="208" class="s">CAPITAL RIDGE CONTRACTING</text>
+  <line x1="60" y1="226" x2="480" y2="226" class="dash"/>
+  <text x="60" y="250" class="m">48IN VANITY + TOP</text>
+  <text x="480" y="250" class="m r">$1,189.00</text>
+  <text x="60" y="280" class="m">SHOWER VALVE ROUGH</text>
+  <text x="480" y="280" class="m r">$384.40</text>
+  <text x="60" y="310" class="m">TRIM KIT BRUSHED NKL</text>
+  <text x="480" y="310" class="m r">$273.60</text>
+  <line x1="60" y1="346" x2="480" y2="346" class="dash"/>
+  <text x="60" y="376" class="m">SUBTOTAL</text>
+  <text x="480" y="376" class="m r">$1,847.00</text>
+  <text x="60" y="404" class="m">TAX</text>
+  <text x="480" y="404" class="m r">$147.76</text>
+  <line x1="60" y1="422" x2="480" y2="422" class="dash"/>
+  <text x="60" y="442" class="b">TOTAL</text>
+  <text x="480" y="442" class="b r">$1,994.76</text>
+  <text x="60" y="478" class="s">VISA ****4417</text>
+  <text x="480" y="478" class="s r">$1,994.76</text>
+  <text x="60" y="512" class="s">AUTH 00241   APPROVED</text>
+  <text x="270" y="552" class="s" text-anchor="middle">*** THANK YOU ***</text>
+  <text x="270" y="578" class="s" text-anchor="middle">KEEP FOR YOUR RECORDS</text>
+</g>
+</svg>

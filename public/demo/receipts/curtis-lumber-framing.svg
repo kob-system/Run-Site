@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="848" viewBox="0 0 620 848" role="img" aria-label="CURTIS LUMBER receipt, $2,848.90">
+<defs>
+  <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfdfb"/><stop offset="1" stop-color="#f1f0ea"/></linearGradient>
+  <filter id="sh" x="-25%" y="-25%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.34"/></filter>
+</defs>
+<style>
+  .m{font:600 19px ui-monospace,Menlo,Consolas,monospace;fill:#2a2a28}
+  .s{font:500 15px ui-monospace,Menlo,Consolas,monospace;fill:#6b6b66}
+  .b{font:800 24px ui-monospace,Menlo,Consolas,monospace;fill:#151514}
+  .h{font:800 30px ui-monospace,Menlo,Consolas,monospace;fill:#151514;letter-spacing:1px}
+  .r{text-anchor:end}
+  .dash{stroke:#c9c7c0;stroke-width:2;stroke-dasharray:5 5}
+</style>
+<rect width="620" height="848" fill="#31353b"/>
+<g transform="rotate(-1.2 310 424) translate(22 40)" filter="url(#sh)">
+  <rect x="52" y="0" width="476" height="718" rx="3" fill="url(#p)"/>
+  <path d="M52,698 L52,698 L70,708 L88,698 L106,708 L124,698 L142,708 L160,698 L178,708 L196,698 L214,708 L232,698 L250,708 L268,698 L286,708 L304,698 L322,708 L340,698 L358,708 L376,698 L394,708 L412,698 L430,708 L448,698 L466,708 L484,698 L502,708 L520,698 L528,720 L52,720 Z" fill="#31353b"/>
+  <text x="270" y="66" class="h" text-anchor="middle">CURTIS LUMBER</text>
+  <text x="270" y="96" class="s" text-anchor="middle">885 Loudon Rd, Latham NY</text>
+  <text x="270" y="120" class="s" text-anchor="middle">(518) 555-0119</text>
+  <line x1="60" y1="150" x2="480" y2="150" class="dash"/>
+  <text x="60" y="182" class="s">08/31/26  07:14</text>
+  <text x="480" y="182" class="s r">REG 03</text>
+  <text x="60" y="208" class="s">CAPITAL RIDGE CONTRACTING</text>
+  <line x1="60" y1="226" x2="480" y2="226" class="dash"/>
+  <text x="60" y="250" class="m">PT 2x8-16 JOIST</text>
+  <text x="480" y="250" class="m r">$1,315.20</text>
+  <text x="76" y="272" class="s">48 @ 27.40</text>
+  <text x="60" y="302" class="m">PT 2x10-16 LEDGER</text>
+  <text x="480" y="302" class="m r">$251.10</text>
+  <text x="76" y="324" class="s">6 @ 41.85</text>
+  <text x="60" y="354" class="m">5/4 DECKING 16FT</text>
+  <text x="480" y="354" class="m r">$982.80</text>
+  <text x="76" y="376" class="s">52 @ 18.90</text>
+  <text x="60" y="406" class="m">DELIVERY - JOBSITE</text>
+  <text x="480" y="406" class="m r">$88.77</text>
+  <line x1="60" y1="442" x2="480" y2="442" class="dash"/>
+  <text x="60" y="472" class="m">SUBTOTAL</text>
+  <text x="480" y="472" class="m r">$2,637.87</text>
+  <text x="60" y="500" class="m">TAX</text>
+  <text x="480" y="500" class="m r">$211.03</text>
+  <line x1="60" y1="518" x2="480" y2="518" class="dash"/>
+  <text x="60" y="538" class="b">TOTAL</text>
+  <text x="480" y="538" class="b r">$2,848.90</text>
+  <text x="60" y="574" class="s">VISA ****4417</text>
+  <text x="480" y="574" class="s r">$2,848.90</text>
+  <text x="60" y="608" class="s">AUTH 00341   APPROVED</text>
+  <text x="270" y="648" class="s" text-anchor="middle">*** THANK YOU ***</text>
+  <text x="270" y="674" class="s" text-anchor="middle">KEEP FOR YOUR RECORDS</text>
+</g>
+</svg>

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="744" viewBox="0 0 620 744" role="img" aria-label="STEWART'S SHOPS receipt, $96.20">
+<defs>
+  <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfdfb"/><stop offset="1" stop-color="#f1f0ea"/></linearGradient>
+  <filter id="sh" x="-25%" y="-25%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.34"/></filter>
+</defs>
+<style>
+  .m{font:600 19px ui-monospace,Menlo,Consolas,monospace;fill:#2a2a28}
+  .s{font:500 15px ui-monospace,Menlo,Consolas,monospace;fill:#6b6b66}
+  .b{font:800 24px ui-monospace,Menlo,Consolas,monospace;fill:#151514}
+  .h{font:800 30px ui-monospace,Menlo,Consolas,monospace;fill:#151514;letter-spacing:1px}
+  .r{text-anchor:end}
+  .dash{stroke:#c9c7c0;stroke-width:2;stroke-dasharray:5 5}
+</style>
+<rect width="620" height="744" fill="#31353b"/>
+<g transform="rotate(-1.2 310 372) translate(22 40)" filter="url(#sh)">
+  <rect x="52" y="0" width="476" height="614" rx="3" fill="url(#p)"/>
+  <path d="M52,594 L52,594 L70,604 L88,594 L106,604 L124,594 L142,604 L160,594 L178,604 L196,594 L214,604 L232,594 L250,604 L268,594 L286,604 L304,594 L322,604 L340,594 L358,604 L376,594 L394,604 L412,594 L430,604 L448,594 L466,604 L484,594 L502,604 L520,594 L528,616 L52,616 Z" fill="#31353b"/>
+  <text x="270" y="66" class="h" text-anchor="middle">STEWART'S SHOPS</text>
+  <text x="270" y="96" class="s" text-anchor="middle">424 Broadway, Menands NY</text>
+  <text x="270" y="120" class="s" text-anchor="middle">(518) 555-0107</text>
+  <line x1="60" y1="150" x2="480" y2="150" class="dash"/>
+  <text x="60" y="182" class="s">09/03/26  06:18</text>
+  <text x="480" y="182" class="s r">REG 01</text>
+  <text x="60" y="208" class="s">CAPITAL RIDGE CONTRACTING</text>
+  <line x1="60" y1="226" x2="480" y2="226" class="dash"/>
+  <text x="60" y="250" class="m">UNLEADED PUMP 4</text>
+  <text x="480" y="250" class="m r">$83.09</text>
+  <text x="76" y="272" class="s">26.9 GAL @ 3.089</text>
+  <text x="60" y="302" class="m">DEF 2.5 GAL</text>
+  <text x="480" y="302" class="m r">$13.11</text>
+  <line x1="60" y1="338" x2="480" y2="338" class="dash"/>
+  <text x="60" y="368" class="m">SUBTOTAL</text>
+  <text x="480" y="368" class="m r">$96.20</text>
+  <text x="60" y="396" class="m">TAX</text>
+  <text x="480" y="396" class="m r">$0.00</text>
+  <line x1="60" y1="414" x2="480" y2="414" class="dash"/>
+  <text x="60" y="434" class="b">TOTAL</text>
+  <text x="480" y="434" class="b r">$96.20</text>
+  <text x="60" y="470" class="s">VISA ****4417</text>
+  <text x="480" y="470" class="s r">$96.20</text>
+  <text x="60" y="504" class="s">AUTH 00141   APPROVED</text>
+  <text x="270" y="544" class="s" text-anchor="middle">*** THANK YOU ***</text>
+  <text x="270" y="570" class="s" text-anchor="middle">KEEP FOR YOUR RECORDS</text>
+</g>
+</svg>

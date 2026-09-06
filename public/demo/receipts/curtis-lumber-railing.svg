@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="796" viewBox="0 0 620 796" role="img" aria-label="CURTIS LUMBER receipt, $867.23">
+<defs>
+  <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfdfb"/><stop offset="1" stop-color="#f1f0ea"/></linearGradient>
+  <filter id="sh" x="-25%" y="-25%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.34"/></filter>
+</defs>
+<style>
+  .m{font:600 19px ui-monospace,Menlo,Consolas,monospace;fill:#2a2a28}
+  .s{font:500 15px ui-monospace,Menlo,Consolas,monospace;fill:#6b6b66}
+  .b{font:800 24px ui-monospace,Menlo,Consolas,monospace;fill:#151514}
+  .h{font:800 30px ui-monospace,Menlo,Consolas,monospace;fill:#151514;letter-spacing:1px}
+  .r{text-anchor:end}
+  .dash{stroke:#c9c7c0;stroke-width:2;stroke-dasharray:5 5}
+</style>
+<rect width="620" height="796" fill="#31353b"/>
+<g transform="rotate(-1.2 310 398) translate(22 40)" filter="url(#sh)">
+  <rect x="52" y="0" width="476" height="666" rx="3" fill="url(#p)"/>
+  <path d="M52,646 L52,646 L70,656 L88,646 L106,656 L124,646 L142,656 L160,646 L178,656 L196,646 L214,656 L232,646 L250,656 L268,646 L286,656 L304,646 L322,656 L340,646 L358,656 L376,646 L394,656 L412,646 L430,656 L448,646 L466,656 L484,646 L502,656 L520,646 L528,668 L52,668 Z" fill="#31353b"/>
+  <text x="270" y="66" class="h" text-anchor="middle">CURTIS LUMBER</text>
+  <text x="270" y="96" class="s" text-anchor="middle">885 Loudon Rd, Latham NY</text>
+  <text x="270" y="120" class="s" text-anchor="middle">(518) 555-0119</text>
+  <line x1="60" y1="150" x2="480" y2="150" class="dash"/>
+  <text x="60" y="182" class="s">09/04/26  07:02</text>
+  <text x="480" y="182" class="s r">REG 03</text>
+  <text x="60" y="208" class="s">CAPITAL RIDGE CONTRACTING</text>
+  <line x1="60" y1="226" x2="480" y2="226" class="dash"/>
+  <text x="60" y="250" class="m">RAILING POST 4x4</text>
+  <text x="480" y="250" class="m r">$265.65</text>
+  <text x="76" y="272" class="s">11 @ 24.15</text>
+  <text x="60" y="302" class="m">BALUSTER SQ 32IN</text>
+  <text x="480" y="302" class="m r">$382.20</text>
+  <text x="76" y="324" class="s">84 @ 4.55</text>
+  <text x="60" y="354" class="m">TOP CAP 2x6-12</text>
+  <text x="480" y="354" class="m r">$155.15</text>
+  <line x1="60" y1="390" x2="480" y2="390" class="dash"/>
+  <text x="60" y="420" class="m">SUBTOTAL</text>
+  <text x="480" y="420" class="m r">$803.00</text>
+  <text x="60" y="448" class="m">TAX</text>
+  <text x="480" y="448" class="m r">$64.23</text>
+  <line x1="60" y1="466" x2="480" y2="466" class="dash"/>
+  <text x="60" y="486" class="b">TOTAL</text>
+  <text x="480" y="486" class="b r">$867.23</text>
+  <text x="60" y="522" class="s">VISA ****4417</text>
+  <text x="480" y="522" class="s r">$867.23</text>
+  <text x="60" y="556" class="s">AUTH 00341   APPROVED</text>
+  <text x="270" y="596" class="s" text-anchor="middle">*** THANK YOU ***</text>
+  <text x="270" y="622" class="s" text-anchor="middle">KEEP FOR YOUR RECORDS</text>
+</g>
+</svg>

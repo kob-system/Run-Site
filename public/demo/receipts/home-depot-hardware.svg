@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="848" viewBox="0 0 620 848" role="img" aria-label="THE HOME DEPOT receipt, $1,613.87">
+<defs>
+  <linearGradient id="p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfdfb"/><stop offset="1" stop-color="#f1f0ea"/></linearGradient>
+  <filter id="sh" x="-25%" y="-25%" width="160%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.34"/></filter>
+</defs>
+<style>
+  .m{font:600 19px ui-monospace,Menlo,Consolas,monospace;fill:#2a2a28}
+  .s{font:500 15px ui-monospace,Menlo,Consolas,monospace;fill:#6b6b66}
+  .b{font:800 24px ui-monospace,Menlo,Consolas,monospace;fill:#151514}
+  .h{font:800 30px ui-monospace,Menlo,Consolas,monospace;fill:#151514;letter-spacing:1px}
+  .r{text-anchor:end}
+  .dash{stroke:#c9c7c0;stroke-width:2;stroke-dasharray:5 5}
+</style>
+<rect width="620" height="848" fill="#31353b"/>
+<g transform="rotate(-1.2 310 424) translate(22 40)" filter="url(#sh)">
+  <rect x="52" y="0" width="476" height="718" rx="3" fill="url(#p)"/>
+  <path d="M52,698 L52,698 L70,708 L88,698 L106,708 L124,698 L142,708 L160,698 L178,708 L196,698 L214,708 L232,698 L250,708 L268,698 L286,708 L304,698 L322,708 L340,698 L358,708 L376,698 L394,708 L412,698 L430,708 L448,698 L466,708 L484,698 L502,708 L520,698 L528,720 L52,720 Z" fill="#31353b"/>
+  <text x="270" y="66" class="h" text-anchor="middle">THE HOME DEPOT</text>
+  <text x="270" y="96" class="s" text-anchor="middle">161 Washington Ave Ext, Albany NY</text>
+  <text x="270" y="120" class="s" text-anchor="middle">(518) 555-0164</text>
+  <line x1="60" y1="150" x2="480" y2="150" class="dash"/>
+  <text x="60" y="182" class="s">09/02/26  06:41</text>
+  <text x="480" y="182" class="s r">REG 11</text>
+  <text x="60" y="208" class="s">CAPITAL RIDGE CONTRACTING</text>
+  <line x1="60" y1="226" x2="480" y2="226" class="dash"/>
+  <text x="60" y="250" class="m">SIMPSON LUS28 HANGER</text>
+  <text x="480" y="250" class="m r">$209.28</text>
+  <text x="76" y="272" class="s">96 @ 2.18</text>
+  <text x="60" y="302" class="m">STRUCT SCREW 5LB</text>
+  <text x="480" y="302" class="m r">$499.20</text>
+  <text x="76" y="324" class="s">8 @ 62.40</text>
+  <text x="60" y="354" class="m">FLASHING TAPE 4IN</text>
+  <text x="480" y="354" class="m r">$285.75</text>
+  <text x="76" y="376" class="s">9 @ 31.75</text>
+  <text x="60" y="406" class="m">GRK LEDGERLOK 250CT</text>
+  <text x="480" y="406" class="m r">$500.09</text>
+  <line x1="60" y1="442" x2="480" y2="442" class="dash"/>
+  <text x="60" y="472" class="m">SUBTOTAL</text>
+  <text x="480" y="472" class="m r">$1,494.32</text>
+  <text x="60" y="500" class="m">TAX</text>
+  <text x="480" y="500" class="m r">$119.55</text>
+  <line x1="60" y1="518" x2="480" y2="518" class="dash"/>
+  <text x="60" y="538" class="b">TOTAL</text>
+  <text x="480" y="538" class="b r">$1,613.87</text>
+  <text x="60" y="574" class="s">VISA ****4417</text>
+  <text x="480" y="574" class="s r">$1,613.87</text>
+  <text x="60" y="608" class="s">AUTH 01141   APPROVED</text>
+  <text x="270" y="648" class="s" text-anchor="middle">*** THANK YOU ***</text>
+  <text x="270" y="674" class="s" text-anchor="middle">KEEP FOR YOUR RECORDS</text>
+</g>
+</svg>
