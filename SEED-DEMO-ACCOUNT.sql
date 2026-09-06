@@ -32,12 +32,15 @@
 -- here — the block below takes a uuid or an address. The id route exists
 -- because reading auth.users is not always possible and profiles.id is the
 -- same value.
-select set_config('seed.owner', 'REPLACE_ME@example.com', false);
+-- Summit Remodeling — the demo owner JP films from, chosen 2026-09-06. Its four
+-- old jobs (Whitaker / Klein / Harmon / Delgado) carry no receipts, crew, chat
+-- or money, so they are cleared rather than left sitting empty on camera.
+select set_config('seed.owner', 'c9114903-61f7-4d2f-9cd7-d8c55d4b8b46', false);
 
 -- 'yes' deletes EVERY other job on that account first, so the Jobs list on
 -- camera is exactly the three below. 'no' leaves the account's existing jobs
 -- sitting alongside them.
-select set_config('seed.wipe_other_jobs', 'no', false);
+select set_config('seed.wipe_other_jobs', 'yes', false);
 
 do $seed$
 declare
