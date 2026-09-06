@@ -14,7 +14,7 @@
 --      and lists still land, and only that man's hours, shifts and chat lines
 --      are skipped with a notice. Fix the profile, re-run the file.
 --
--- EDIT EXACTLY ONE LINE: the email on the next statement. Nothing else.
+-- EDIT THE TWO set_config LINES BELOW AND NOTHING ELSE.
 -- Re-running is safe — it clears everything it made first, so a second run an
 -- hour before the shoot does not put six jobs on the Jobs list.
 --
@@ -28,11 +28,21 @@
 -- One amber bar next to one green bar is the frame the whole video is built on.
 -- Change a receipt and you change the bar.
 
-select set_config('seed.owner_email', 'REPLACE_ME@example.com', false);
+-- WHO to seed. Put EITHER the owner's sign-in email OR the owner's profile id
+-- here — the block below takes a uuid or an address. The id route exists
+-- because reading auth.users is not always possible and profiles.id is the
+-- same value.
+select set_config('seed.owner', 'REPLACE_ME@example.com', false);
+
+-- 'yes' deletes EVERY other job on that account first, so the Jobs list on
+-- camera is exactly the three below. 'no' leaves the account's existing jobs
+-- sitting alongside them.
+select set_config('seed.wipe_other_jobs', 'no', false);
 
 do $seed$
 declare
-  v_owner_email text := current_setting('seed.owner_email');
+  v_target text    := current_setting('seed.owner');
+  v_wipe   boolean := lower(coalesce(current_setting('seed.wipe_other_jobs', true), 'no')) in ('yes','true','y');
   -- The photos are served from our OWN origin on purpose: vercel.json sets
   -- img-src 'self' data: blob: https://*.supabase.co, so a receipt hotlinked
   -- from anywhere else is a broken image on camera. PhotoViewer uses a full
@@ -49,9 +59,17 @@ declare
   v_names text[] := array['Fielding Ave bathroom','Miller Road deck','Ontario St kitchen'];
   v_jobs  uuid[];
 begin
-  select id into v_owner from auth.users where lower(email) = lower(v_owner_email);
+  -- A uuid is read as a profile id, anything else as a sign-in address.
+  -- profiles.id IS the auth user id, so the uuid route never touches the auth
+  -- schema. owner_id is null is what distinguishes an owner from a crew member.
+  if v_target ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    select id into v_owner from public.profiles
+     where id = v_target::uuid and owner_id is null;
+  else
+    select id into v_owner from auth.users where lower(email) = lower(v_target);
+  end if;
   if v_owner is null then
-    raise exception 'No account for %. Create the owner first.', v_owner_email;
+    raise exception 'No owner account matches %. Pass a sign-in email or a profiles.id.', v_target;
   end if;
 
   -- 1 ── COMP THE SUBSCRIPTION ------------------------------------------------
@@ -77,7 +95,7 @@ begin
   select array_agg(id) into v_jobs
     from public.projects
    where owner_id = v_owner
-     and (coalesce(is_sample,false) or name = any(v_names));
+     and (v_wipe or coalesce(is_sample,false) or name = any(v_names));
 
   if v_jobs is not null then
     delete from public.time_entries     where project_id = any(v_jobs);
@@ -218,10 +236,14 @@ begin
   end if;
 
   -- 8a. HOURS ALREADY WORKED --------------------------------------------------
-  -- labor_cost is written here AND recomputed by trg_compute_time_entry_pay
-  -- from profiles.hourly_rate if that trigger is actually installed. Setting it
-  -- explicitly means the bars are right either way — do not assume the trigger
-  -- ran just because FIX-DATABASE-8 is sitting in the repo.
+  -- ⚠️ trg_compute_time_entry_pay IS INSTALLED here — read out of pg_proc on
+  -- 2026-09-06, not assumed from the repo. It OVERWRITES whatever labor_cost is
+  -- inserted with (minutes / 60) * profiles.hourly_rate, so the RATE is what
+  -- actually decides the labor bar. Pin both rates first: the invite may have
+  -- set them and may not have. labor_cost is still written below so the numbers
+  -- are also right on a database where that trigger is missing.
+  update public.profiles set hourly_rate = 28.00 where id = v_dave;
+  update public.profiles set hourly_rate = 26.00 where id = v_luis;
   --
   -- generate_series with an interval step returns TIMESTAMP, and Postgres has
   -- no `timestamp + time` operator, so it has to be cast back to date first.
