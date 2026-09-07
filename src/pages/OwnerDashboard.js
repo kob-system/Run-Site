@@ -518,6 +518,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [crewWeekLoading, setCrewWeekLoading] = useState(false)
   // Which day of the dot strip is expanded on the Crew screen. null = none.
   const [crewDay, setCrewDay] = useState(null)
+  // Which job is expanded in Home's "This week". One at a time on purpose —
+  // opening every job at once rebuilds the wall of rows this replaced.
+  const [homeWeekJob, setHomeWeekJob] = useState(null)
 
   // ---- TALK TO IT ----
   // JP, 2026-08-31: "it says hold the star button to talk, but when I hit it,
@@ -2697,6 +2700,27 @@ ${link}`
   })
   const weekEndKey = addDaysKey(dateKey(new Date()), 7)
   const thisWeekSchedule = upcomingSchedule.filter(s => s.scheduled_date && s.scheduled_date <= weekEndKey)
+  // JP, 2026-09-07: "too crowded, there's a big list and it's kind of
+  // confusing... maybe have each crew together under the same job so we can
+  // make it smaller, and see an expanded list instead of having them listed all
+  // the way down. Now they have to scroll like an hour to get to the bottom."
+  // One card per JOB instead of one per man per day. Five men over five days
+  // was twenty-five cards between the budget alerts and Everything else.
+  const thisWeekByJob = (() => {
+    const groups = new Map()
+    thisWeekSchedule.forEach(s => {
+      const key = s.project_id || 'nojob'
+      if (!groups.has(key)) groups.set(key, { key, name: s.projects ? s.projects.name : 'No job', shifts: [] })
+      groups.get(key).shifts.push(s)
+    })
+    return [...groups.values()].map(g => {
+      const dates = g.shifts.map(s => s.scheduled_date).sort()
+      // First names only. On a phone the surname costs a line and tells him
+      // nothing he does not already know about his own five guys.
+      const names = [...new Set(g.shifts.map(s => (shiftWorkerName(s) || '').trim().split(' ')[0]).filter(Boolean))]
+      return { ...g, first: dates[0], last: dates[dates.length - 1], names }
+    }).sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : a.name.localeCompare(b.name)))
+  })()
   const clientsMap = {}
   realProjects.forEach(p => {
     const name = (p.client_name || '').trim(); if (!name) return
@@ -4348,17 +4372,41 @@ ${link}`
             )}
             <p style={sectionLabel}>This week</p>
             {thisWeekSchedule.length === 0 && <div className="empty-state"><p>Nothing scheduled this week. Open a job and use its Plan tab to put crew on days — what you schedule shows up here and on their phones.</p></div>}
-            {thisWeekSchedule.map(s => (
-              <div key={s.id} className="card" style={{ padding: '12px 16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <p style={{ fontWeight: '600', fontSize: '14px' }}>{shiftWorkerName(s)} · {s.task_description}</p>
-                    <p style={{ fontSize: '12px', color: '#888' }}>{s.projects ? s.projects.name : ''}</p>
-                  </div>
-                  <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', whiteSpace: 'nowrap', marginLeft: '10px' }}>{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+            {thisWeekByJob.map(g => {
+              const open = homeWeekJob === g.key
+              const dayOf = (k, opts) => new Date(k + 'T00:00:00').toLocaleDateString('en-US', opts)
+              const span = g.first === g.last
+                ? dayOf(g.first, { weekday: 'short', month: 'short', day: 'numeric' })
+                : `${dayOf(g.first, { weekday: 'short', day: 'numeric' })} – ${dayOf(g.last, { weekday: 'short', day: 'numeric' })}`
+              const who = g.names.length <= 3 ? g.names.join(', ') : `${g.names.slice(0, 3).join(', ')} +${g.names.length - 3}`
+              return (
+                <div key={g.key} className="card" style={{ padding: 0, marginBottom: '8px', overflow: 'hidden' }}>
+                  <button
+                    type="button"
+                    onClick={() => setHomeWeekJob(open ? null : g.key)}
+                    aria-expanded={open}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', background: 'none', border: 'none', padding: '12px 16px', cursor: 'pointer', textAlign: 'left', minHeight: 'var(--tap)' }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontWeight: '700', fontSize: '15px', color: '#1C2B3A' }}>{g.name}</span>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#888', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{who} · {span}</span>
+                    </span>
+                    <span style={{ flexShrink: 0, fontSize: '11px', fontWeight: '700', color: '#E07B2A', background: '#FFF7ED', borderRadius: '999px', padding: '2px 8px' }}>{g.shifts.length}</span>
+                    <span style={{ flexShrink: 0, color: '#9CA3AF', fontSize: '13px' }}>{open ? '▾' : '▸'}</span>
+                  </button>
+                  {open && (
+                    <div style={{ padding: '0 16px 12px' }}>
+                      {g.shifts.map(s => (
+                        <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid #f0f0f0' }}>
+                          <p style={{ fontWeight: '600', fontSize: '14px', minWidth: 0 }}>{shiftWorkerName(s)}{s.task_description ? ' · ' + s.task_description : ''}</p>
+                          <p style={{ fontSize: '12px', color: '#E07B2A', fontWeight: '600', whiteSpace: 'nowrap' }}>{new Date(s.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
             {/* The old More bucket, rehomed. It's the least-visited corner of
                 the app (insurance, warranty, settings), so the bottom of Home
                 is a fairer place for it than a permanent nav slot. */}
