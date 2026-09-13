@@ -11,7 +11,7 @@
      cache fallback when offline.
    - Never cache API calls. */
 
-const CACHE = 'run-site-v2'
+const CACHE = 'run-site-v3'
 
 self.addEventListener('install', () => {
   self.skipWaiting()
@@ -32,6 +32,9 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
   if (url.pathname.startsWith('/api/')) return
+  // Video goes straight to the network: range requests (206) are what players use, and a
+  // full 200 would otherwise land a 10+ MB copy in the cache on a phone.
+  if (url.pathname.endsWith('.mp4')) return
 
   // Immutable hashed build assets: cache-first.
   if (url.pathname.startsWith('/static/')) {
