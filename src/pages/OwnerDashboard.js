@@ -10,6 +10,7 @@ import InstallPrompt from '../components/InstallPrompt'
 import Walkthrough, { walkthroughSeenKey } from '../components/Walkthrough'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
+import { toJpeg, imageErrorMessage, jpegName } from '../utils/imageToJpeg'
 import { isImage, attachmentProblem, attachmentType, attachmentPath } from '../utils/attachment'
 import JobChat, { lastChatRead } from '../components/JobChat'
 import { track, EV } from '../utils/analytics'
@@ -667,8 +668,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const { data, error } = await supabase.from('projects').select('*').eq('owner_id', profile.id).order('created_at', { ascending: false })
       if (error) throw error
       setProjects(data || [])
+      return data || []
     } catch (e) {
       showToast('Failed to load jobs', 'error')
+      return null
     }
   }, [profile.id])
 
@@ -1110,8 +1113,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     if (activeTab === 'insights') { if (!invoicesLoaded) fetchInvoices(); if (!estimatesLoaded) fetchEstimates() }
   }, [activeTab, invoicesLoaded, estimatesLoaded, fetchInvoices, fetchEstimates, fetchUpcomingSchedule, fetchCompliance, fetchWarranties])
 
+  // Which job is open RIGHT NOW. A load that finishes after he has moved to a
+  // different job must not paint the old job's lists onto the new one.
+  const openJobIdRef = useRef(null)
+  useEffect(() => { openJobIdRef.current = selectedProject ? selectedProject.id : null }, [selectedProject])
+
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
+    openJobIdRef.current = project.id
     // Clear the previous job's detail data first, so opening job B never
     // flashes job A's receipts/photos/etc. while these queries are in flight.
     setReceipts([]); setTimeEntries([]); setScheduleEntries([]); setMileageEntries([])
@@ -1124,7 +1133,20 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     // while these queries are in flight (T2.6).
     setDetailLoading(true)
     try {
-      const pid = project.id
+      await loadProjectDetail(project.id)
+    } catch (e) {
+      showToast('Failed to load job details', 'error')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  // Everything on one job's screen, loaded in place. Used on open (after the
+  // lists are cleared) and after the assistant saves something, when it must
+  // NOT clear anything, close the sheet he's in, or flip his tab. A table whose
+  // query errors keeps what is already on screen instead of going blank.
+  // Returns how many of the queries failed.
+  const loadProjectDetail = async (pid) => {
       // Load all 11 detail tables in parallel (was 11 serial round-trips → ~10x
       // faster job open). Same queries/filters/order; just no longer waterfalled.
       const [r, t, s, m, lg, cor, ph, pu, mt, dc, pm, pw] = await Promise.all([
@@ -1144,33 +1166,51 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         // appear in the tick list, or the catch-up can't catch him up.
         supabase.from('project_workers').select('worker_id').eq('project_id', pid),
       ])
-      setReceipts(r.data || [])
-      setTimeEntries(t.data || [])
-      setScheduleEntries(s.data || [])
-      setMileageEntries(m.data || [])
-      setDailyLogs(lg.data || [])
-      setChangeOrders(cor.data || [])
-      const photos = ph.data || []
-      setJobPhotos(photos)
-      setPunchItems(pu.data || [])
-      setMaterialItems(mt.data || [])
-      setJobDocuments(dc.data || [])
-      setPermits(pm.data || [])
-      setProjectWorkerIds((pw.data || []).map(x => x.worker_id))
+      // He moved on to another job while this was loading. Paint nothing.
+      if (openJobIdRef.current !== pid) return 0
+      let failed = 0
+      const put = (res, set, map) => {
+        if (!res || res.error) { failed += 1; return }
+        set(map ? map(res.data || []) : (res.data || []))
+      }
+      put(r, setReceipts)
+      put(t, setTimeEntries)
+      put(s, setScheduleEntries)
+      put(m, setMileageEntries)
+      put(lg, setDailyLogs)
+      put(cor, setChangeOrders)
+      put(ph, setJobPhotos)
+      put(pu, setPunchItems)
+      put(mt, setMaterialItems)
+      put(dc, setJobDocuments)
+      put(pm, setPermits)
+      put(pw, setProjectWorkerIds, rows => rows.map(x => x.worker_id))
       // Sign every storage-path photo in ONE request instead of one-per-photo
       // (T2.5). Full-URL seed/demo photos need no signing.
+      const photos = ph && !ph.error ? (ph.data || []) : []
       const paths = photos.map(p => p.photo_url).filter(u => u && !/^https?:\/\//.test(u))
       if (paths.length) {
         const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 3600)
         const map = {}
         ;(signed || []).forEach(s => { if (s && s.signedUrl && s.path) map[s.path] = s.signedUrl })
-        setPhotoUrls(map)
+        if (openJobIdRef.current === pid) setPhotoUrls(map)
       }
-    } catch (e) {
-      showToast('Failed to load job details', 'error')
-    } finally {
-      setDetailLoading(false)
-    }
+      return failed
+  }
+
+  // After the assistant saves something. The job list AND the job he has open
+  // both reload. Before this only the list did, so a 2x4 added by voice didn't
+  // show on the open job's Buy list (nor a receipt, hours, a fix item) until he
+  // backed out and opened the job again.
+  const refreshAfterAssistant = async () => {
+    const fresh = await fetchProjects()
+    const pid = openJobIdRef.current
+    if (!pid) return
+    const row = Array.isArray(fresh) ? fresh.find(p => p.id === pid) : null
+    if (row) setSelectedProject(prev => (prev && prev.id === pid ? { ...prev, ...row } : prev))
+    let failed = 0
+    try { failed = await loadProjectDetail(pid) } catch { failed = 1 }
+    if (failed) showToast("Saved. This job didn't refresh, so close it and open it again to see it.", 'error')
   }
 
   // Refetch a SINGLE detail table for the open job instead of re-running all 11
@@ -2100,43 +2140,52 @@ ${link}`
   }
 
   const scanReceipt = async (e) => {
-    const file = e.target.files[0]
+    const file = e.target.files && e.target.files[0]
+    if (e.target) e.target.value = '' // so picking the same photo again still fires
     if (!file) return
     setScanning(true)
     setScanResult(null)
     setScanError('')
+    // Any photo, an iPhone HEIC from the library included, is shrunk to 1600px
+    // and turned into a JPEG first (utils/imageToJpeg), the same as the
+    // assistant does. scan-receipt can't read HEIC, and a full-size phone photo
+    // is a slow upload on a jobsite signal. A photo this browser can't open
+    // gets a plain message instead of a scan that silently never comes back.
+    let img
     try {
-      const fileName = `${profile.id}/${Date.now()}_${file.name}`
-      const { error: uploadError } = await supabase.storage.from('receipts').upload(fileName, file)
+      img = await toJpeg(file)
+    } catch (err) {
+      setScanError(imageErrorMessage(err))
+      setScanning(false)
+      return
+    }
+    try {
+      const fileName = `${profile.id}/${Date.now()}_${jpegName(file.name)}`
+      const { error: uploadError } = await supabase.storage.from('receipts').upload(fileName, img.blob, { contentType: 'image/jpeg' })
       if (uploadError) throw uploadError
       // Store the storage PATH (not a public URL); the bucket is private and the
       // image is viewed via a short-lived signed URL in PhotoViewer.
       setReceiptForm(f => ({ ...f, photo_url: fileName }))
-
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        const base64 = event.target.result.split(',')[1]
-        try {
-          const { data: { session } } = await supabase.auth.getSession()
-          const response = await fetch('/api/scan-receipt', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(session ? { Authorization: `Bearer ${session.access_token}` } : {})
-            },
-            body: JSON.stringify({ imageBase64: base64, mediaType: file.type })
-          })
-          const result = await response.json().catch(() => ({}))
-          if (result.store || result.amount) setScanResult(result)
-          else setScanError(result.error || "Couldn't read this receipt — fill in the fields below.")
-        } catch { setScanError("Couldn't read this receipt — fill in the fields below.") }
-        setScanning(false)
-      }
-      reader.readAsDataURL(file)
-    } catch (e) {
-      setScanError("Photo upload failed. Fill in the fields manually.")
+    } catch (e2) {
+      setScanError('Photo upload failed. Fill in the fields manually.')
       setScanning(false)
+      return
     }
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const response = await fetch('/api/scan-receipt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session ? { Authorization: `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({ imageBase64: img.base64, mediaType: img.mediaType })
+      })
+      const result = await response.json().catch(() => ({}))
+      if (result.store || result.amount) setScanResult(result)
+      else setScanError(result.error || "Couldn't read this receipt. Fill in the fields below.")
+    } catch { setScanError("Couldn't read this receipt. Fill in the fields below.") }
+    setScanning(false)
   }
 
   const confirmScan = () => {
@@ -3446,7 +3495,7 @@ ${link}`
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
               <h2>🛒 What to buy</h2>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} enterKeyHint="done" placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
                 <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
                 <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
               </div>
@@ -3651,7 +3700,10 @@ ${link}`
               <h2>Add Receipt</h2>
               <div className="input-group">
                 <label>📷 Scan Receipt Photo</label>
-                <input type="file" accept="image/*" capture="environment" onChange={scanReceipt} style={{ padding: '8px 0' }} />
+                {/* No `capture`, so the phone offers the camera AND the photo
+                    library. Library photos (HEIC on an iPhone) are turned into
+                    JPEGs in scanReceipt before they go anywhere. */}
+                <input type="file" accept="image/*" onChange={scanReceipt} style={{ padding: '8px 0' }} />
                 {scanning && <p style={{ color: '#E07B2A', fontSize: '13px', marginTop: '6px' }}>🔍 Scanning receipt…</p>}
                 {scanError && <p style={{ color: '#DC2626', fontSize: '13px', marginTop: '6px' }}>{scanError}</p>}
               </div>
@@ -3851,7 +3903,7 @@ ${link}`
         {/* The job screen has no bottom bar (it is a drill-down), so the sheet
             the Hold-to-talk chip opens has to be mounted here too. Same
             component, same state — just a second mount point. */}
-        <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
+        <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={refreshAfterAssistant} autoTalk={askTalk} projectId={askProjectId} />
         <Toast message={toast} type={toastType} onClose={() => setToast('')} />
       </div>
     )
@@ -4599,9 +4651,12 @@ ${link}`
 
         {activeTab === 'jobs' && (
           <div>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <button style={{ flex: 1, minHeight: 'var(--tap)', padding: '10px', borderRadius: '10px', border: 'none', background: '#1C2B3A', color: 'white', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>🔨 Jobs</button>
-              <button onClick={() => setActiveTab('calendar')} style={{ flex: 1, minHeight: 'var(--tap)', padding: '10px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>📅 Schedule</button>
+            {/* "🔨 Jobs" is the title of this screen, not a control. It used to be
+                a dark filled button with no handler, so it looked tappable and
+                did nothing. The Schedule shortcut next to it is the real one. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <h2 style={{ flex: 1, margin: 0, fontSize: '20px', fontWeight: '800', color: '#1C2B3A' }}>🔨 Jobs</h2>
+              <button onClick={() => setActiveTab('calendar')} style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '10px 16px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>📅 Schedule</button>
             </div>
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <div className="stat-card"><div className="stat-value">{activeProjects.length}</div><div className="stat-label">Active Jobs</div></div>
@@ -5388,7 +5443,7 @@ ${link}`
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
-      <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
+      <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={refreshAfterAssistant} autoTalk={askTalk} projectId={askProjectId} />
       <InstallPrompt hold={!walkthroughChecked || !!walkthrough} />
       <Walkthrough open={!!walkthrough} start={walkthrough || 'owner'} onClose={closeWalkthrough} />
 

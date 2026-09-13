@@ -1347,7 +1347,7 @@ export default function WorkerDashboard({ profile }) {
         onCancel={() => setConfirmSheet(null)}
       />
 
-      <AssistantPanel role="worker" onDataChanged={() => { checkActiveEntry(); fetchHistory(); fetchSchedule(); fetchTimeOff(); fetchLists() }} />
+      <AssistantPanel role="worker" ownerId={profile.owner_id || null} onDataChanged={() => { checkActiveEntry(); fetchHistory(); fetchSchedule(); fetchTimeOff(); fetchLists() }} />
       {/* The crew is who this matters most for — a guy who adds it to his home
           screen stops re-finding a URL every morning and starts clocking in. */}
       <InstallPrompt />
