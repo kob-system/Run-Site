@@ -7,6 +7,7 @@ import { computeProfit, computeMargin, computeContractPrice, roundCents } from '
 import { downloadCsv } from '../utils/csv'
 import AssistantPanel from '../components/AssistantPanel'
 import InstallPrompt from '../components/InstallPrompt'
+import Walkthrough, { walkthroughSeenKey } from '../components/Walkthrough'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
 import JobChat, { lastChatRead } from '../components/JobChat'
@@ -359,6 +360,22 @@ function JobPhoto({ path, alt, style, onClick, signedUrl }) {
 export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [activeTab, setActiveTab] = useState('home')
   const [assistantOpen, setAssistantOpen] = useState(false)
+  // JP 09-13: a new owner lands and the walkthrough pops up in front of them, once.
+  // Owners who signed up before it existed are not ambushed with it; they find it under
+  // More. ?walkthrough=1 (or =worker) opens it on demand, for demos and for testing.
+  const [walkthrough, setWalkthrough] = useState(null) // null | 'owner' | 'worker'
+  useEffect(() => {
+    if (!profile?.id) return
+    const ask = new URLSearchParams(window.location.search).get('walkthrough')
+    if (ask) { setWalkthrough(ask === 'worker' ? 'worker' : 'owner'); return }
+    let seen = null
+    try { seen = localStorage.getItem(walkthroughSeenKey(profile.id)) } catch { /* private mode: treat as unseen */ }
+    if (!seen && profile.created_at && new Date(profile.created_at) >= new Date('2026-09-13T00:00:00Z')) setWalkthrough('owner')
+  }, [profile?.id, profile?.created_at])
+  const closeWalkthrough = useCallback(() => {
+    try { localStorage.setItem(walkthroughSeenKey(profile.id), new Date().toISOString()) } catch { /* nothing to do */ }
+    setWalkthrough(null)
+  }, [profile?.id])
   const [projects, setProjects] = useState([])
   const [removingSample, setRemovingSample] = useState(false) // demo-job cleanup in flight
   // Social proof. The ask only ever fires after a REAL job closes in the black —
@@ -4008,6 +4025,7 @@ ${link}`
           <div>
             <BackBtn label="Home" onClick={() => setActiveTab('home')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
+            <HubCard icon="▶️" title="Watch the walkthrough" sub="3 minutes on your side, 1 minute on what your crew sees" onClick={() => setWalkthrough('owner')} />
             <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
             <HubCard icon="🔧" title="Callbacks & warranty work" sub="Post-job follow-ups and fixes under warranty" onClick={() => setActiveTab('warranties')} />
             <HubCard icon="⚙️" title="Settings & Billing" sub="Your business info and subscription" onClick={() => { setSettingsForm({ company_name: profile.company_name || '', full_name: profile.full_name || '' }); setActiveTab('settings') }} />
@@ -5223,6 +5241,7 @@ ${link}`
 
       <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
       <InstallPrompt />
+      <Walkthrough open={!!walkthrough} start={walkthrough || 'owner'} onClose={closeWalkthrough} />
 
       {/* Ask sits in the MIDDLE, raised out of the bar, because talking to it is
           now the front door and not a shortcut. It costs no nav slot — the old
