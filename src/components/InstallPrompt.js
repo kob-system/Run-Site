@@ -21,7 +21,10 @@ import InstallButton from './InstallButton'
 const NAVY = '#1C2B3A'
 const DISMISS_KEY = 'jt_a2hs_dismissed'
 
-export default function InstallPrompt() {
+// `hold` keeps it off screen while something else has the owner's attention. JP 09-13:
+// a new owner got this card AND the walkthrough on first load, and it was too much.
+// So the walkthrough goes first, and this waits until it is closed.
+export default function InstallPrompt({ hold = false }) {
   const { mode } = useInstallPrompt()
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(DISMISS_KEY) === '1' } catch { return false }
@@ -32,7 +35,7 @@ export default function InstallPrompt() {
     try { localStorage.setItem(DISMISS_KEY, '1') } catch { /* private mode */ }
   }, [])
 
-  if (dismissed || mode === 'none') return null
+  if (hold || dismissed || mode === 'none') return null
 
   return (
     <div
@@ -47,12 +50,12 @@ export default function InstallPrompt() {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <div style={{ fontSize: 22, lineHeight: 1.1 }} aria-hidden="true">📲</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14.5, fontWeight: 800, color: NAVY }}>Put JobTally on your phone</div>
+          <div style={{ fontSize: 14.5, fontWeight: 800, color: NAVY }}>Add JobTally to your home screen</div>
           <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 2, lineHeight: 1.4 }}>
-            Nothing to download. It goes on your home screen and opens straight up.
+            Nothing to download. It sits on your home screen and opens with one tap.
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <InstallButton />
+            <InstallButton label="Add to home screen" />
             <button
               onClick={dismiss}
               style={{ padding: '10px 14px', border: '1px solid #d1d5db', borderRadius: 10, background: 'white', color: '#6b7280', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}
