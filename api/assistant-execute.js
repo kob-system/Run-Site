@@ -144,7 +144,11 @@ const estSubtotal = (items) => (Array.isArray(items) ? items : []).reduce((s, it
 // FIX-DATABASE-28 for the NY rules behind the three.
 const TAX_MODES = ['materials', 'repair', 'capital']
 const normalizeTaxMode = (m) => (TAX_MODES.includes(m) ? m : 'materials')
-const BLOCKED = 'Save was blocked (check your subscription is active).'
+// The free plan can do everything on one open job (FIX-DATABASE-38), so a
+// refused save is not "your subscription" any more. The one plan reason left is
+// more than one job open without a subscription.
+const BLOCKED = 'Save was blocked. Without a subscription you can run one open job at a time, so if more than one is open, finish one or subscribe.'
+const FREE_JOB_LIMIT = 'That would open a second job. On the free plan you can run one open job at a time: finish the open one, or subscribe to run more.'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // ---------- resolvers (all under the caller's RLS) ----------
@@ -527,7 +531,8 @@ async function runTool(tool, args, ctx) {
       profit_target: rc(contract - materials - labor),
       stage: 'start',
     })
-    if (!ok) return { error: 'Create was blocked (check your subscription is active).' }
+    // Almost always the one-open-job rule (FIX-30 policy + FIX-38 trigger).
+    if (!ok) return { error: FREE_JOB_LIMIT }
     const row = Array.isArray(data) ? data[0] : data
     return {
       ok: true,
@@ -599,7 +604,9 @@ async function runTool(tool, args, ctx) {
         ? { stage: 'mid', completed_at: null }
         : { stage, completed_at: null }
     const upd = await userReq(token, `projects?id=eq.${p.id}`, 'PATCH', patch)
-    if (!upd.ok) return { error: BLOCKED }
+    // Reopening a finished job opens a job, so on the free plan it hits the
+    // same one-open-job rule as creating one (FIX-DATABASE-38 trigger).
+    if (!upd.ok) return { error: p.stage === 'end' && patch.stage !== 'end' ? FREE_JOB_LIMIT : BLOCKED }
     const label = stage === 'end' ? 'marked done' : stage === 'reopen' ? 'reopened' : `moved to ${stage}`
     return { ok: true, message: `“${p.name}” ${label}.`, result: { id: p.id, stage: patch.stage } }
   }
