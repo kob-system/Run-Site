@@ -10,6 +10,7 @@ import InstallPrompt from '../components/InstallPrompt'
 import Walkthrough, { walkthroughSeenKey } from '../components/Walkthrough'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
+import { isImage, attachmentProblem, attachmentType, attachmentPath } from '../utils/attachment'
 import JobChat, { lastChatRead } from '../components/JobChat'
 import { track, EV } from '../utils/analytics'
 import { legacyFreeDaysLeft, canStartJob } from '../utils/trialWindow'
@@ -578,6 +579,21 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [showNewWarranty, setShowNewWarranty] = useState(false)
   const [showNewPermit, setShowNewPermit] = useState(false)
   const [complianceForm, setComplianceForm] = useState({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
+  // A photo or PDF of the certificate / license (FIX-DATABASE-36). The file is
+  // held here until Save, then uploaded BEFORE the row is written, so a failed
+  // upload never leaves an item that looks saved but has no file.
+  const [editingComplianceId, setEditingComplianceId] = useState(null)
+  const [complianceFile, setComplianceFile] = useState(null)             // new File picked in the sheet
+  const [complianceFileRemoved, setComplianceFileRemoved] = useState(false)
+  const [complianceExisting, setComplianceExisting] = useState(null)     // file already on the item being edited
+  const [complianceFilePreview, setComplianceFilePreview] = useState(null)
+  const [complianceUrls, setComplianceUrls] = useState({})               // file_path -> signed URL, for thumbnails
+  useEffect(() => {
+    if (!complianceFile || !isImage(complianceFile.type, complianceFile.name) || typeof URL.createObjectURL !== 'function') { setComplianceFilePreview(null); return }
+    const u = URL.createObjectURL(complianceFile)
+    setComplianceFilePreview(u)
+    return () => URL.revokeObjectURL(u)
+  }, [complianceFile])
   const [warrantyForm, setWarrantyForm] = useState({ project_id: '', description: '', status: 'open', due_on: '' })
   const [permitForm, setPermitForm] = useState({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
 
@@ -987,7 +1003,19 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { data, error } = await supabase.from('compliance_items').select('*').eq('owner_id', profile.id).order('expires_on', { ascending: true })
       if (error) throw error
-      setComplianceItems(data || [])
+      const rows = data || []
+      setComplianceItems(rows)
+      // Sign every photo thumbnail in ONE request. If this misses, each
+      // thumbnail signs itself (JobPhoto fallback), so it never blanks the list.
+      const paths = rows.filter(r => r.file_path && isImage(r.file_type, r.file_name)).map(r => r.file_path)
+      if (paths.length) {
+        try {
+          const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 3600)
+          const map = {}
+          ;(signed || []).forEach(s => { if (s && s.signedUrl && s.path) map[s.path] = s.signedUrl })
+          setComplianceUrls(map)
+        } catch (signErr) { console.error('Compliance thumbnail signing failed:', signErr) }
+      }
     } catch (e) { console.error('Compliance fetch failed:', e); showToast('Could not load insurance & licenses. Check your connection and try again.', 'error') }
   }, [profile.id])
 
@@ -1819,16 +1847,77 @@ ${link}`
   }
 
   // ---- Compliance (insurance / license) ----
-  const addCompliance = async () => {
+  const closeComplianceSheet = () => {
+    setShowNewCompliance(false); setInlineError(''); setEditingComplianceId(null)
+    setComplianceForm({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
+    setComplianceFile(null); setComplianceFileRemoved(false); setComplianceExisting(null)
+  }
+  const openNewCompliance = () => { closeComplianceSheet(); setShowNewCompliance(true) }
+  const openEditCompliance = (it) => {
+    closeComplianceSheet()
+    setEditingComplianceId(it.id)
+    setComplianceForm({ kind: it.kind || 'insurance', name: it.name || '', reference: it.reference || '', expires_on: it.expires_on || '', notes: it.notes || '' })
+    setComplianceExisting(it.file_path ? { file_path: it.file_path, file_name: it.file_name, file_type: it.file_type } : null)
+    setShowNewCompliance(true)
+  }
+  const pickComplianceFile = (e) => {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = '' // so picking the same file again still fires
+    if (!file) return
+    const problem = attachmentProblem(file)
+    if (problem) { showToast(problem, 'error'); setInlineError(problem); return }
+    setInlineError(''); setComplianceFile(file); setComplianceFileRemoved(false)
+  }
+  const removeComplianceFile = () => { setComplianceFile(null); setComplianceFileRemoved(true) }
+  const saveCompliance = async () => {
     if (!complianceForm.name) return setInlineError('Add a name')
+    const file = complianceFile
+    const fileChanged = !!file || (complianceFileRemoved && !!editingComplianceId)
     setLoading(true); setInlineError('')
     try {
-      const { error } = await supabase.from('compliance_items').insert({ owner_id: profile.id, kind: complianceForm.kind, name: complianceForm.name, reference: complianceForm.reference || null, expires_on: complianceForm.expires_on || null, notes: complianceForm.notes || null })
+      const row = { kind: complianceForm.kind, name: complianceForm.name, reference: complianceForm.reference || null, expires_on: complianceForm.expires_on || null, notes: complianceForm.notes || null }
+      // File columns only go in the write when the file changed, so a plain
+      // text save still works even before FIX-DATABASE-36 has run.
+      if (file) {
+        const path = attachmentPath(profile.id, file.name)
+        const { error: upErr } = await supabase.storage.from('receipts').upload(path, file)
+        if (upErr) {
+          console.error('Compliance file upload failed:', upErr)
+          const msg = 'The file did not upload, so nothing was saved. Check your signal and tap Save again.'
+          setInlineError(msg); showToast(msg, 'error'); setLoading(false); return
+        }
+        Object.assign(row, { file_path: path, file_name: file.name, file_type: attachmentType(file) })
+      } else if (complianceFileRemoved && editingComplianceId) {
+        Object.assign(row, { file_path: null, file_name: null, file_type: null })
+      }
+      const { error } = editingComplianceId
+        ? await supabase.from('compliance_items').update(row).eq('id', editingComplianceId)
+        : await supabase.from('compliance_items').insert({ owner_id: profile.id, ...row })
       if (error) throw error
-      setShowNewCompliance(false); setComplianceForm({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
-      await fetchCompliance(); showToast('Saved ✓')
-    } catch (e) { setInlineError('Failed to save. Try again.') }
+      closeComplianceSheet()
+      await fetchCompliance(); showToast(file ? 'Saved with the file ✓' : 'Saved ✓')
+    } catch (e) {
+      console.error('Compliance save failed:', e)
+      if (fileChanged) {
+        const msg = 'Could not save the file with this item, so nothing was saved. Try again.'
+        setInlineError(msg); showToast(msg, 'error')
+      } else setInlineError('Failed to save. Try again.')
+    }
     setLoading(false)
+  }
+  const openComplianceFile = async (it) => {
+    // Open the tab inside the tap itself: iPhone Safari blocks a window.open
+    // that only happens after an await. Then point it at the signed URL.
+    const win = window.open('', '_blank')
+    try {
+      const { data } = await supabase.storage.from('receipts').createSignedUrl(it.file_path, 300)
+      if (!data || !data.signedUrl) throw new Error('No signed URL')
+      if (win) { win.opener = null; win.location.href = data.signedUrl }
+      else if (!window.open(data.signedUrl, '_blank')) showToast('Could not open the file. Allow pop-ups and try again.', 'error')
+    } catch (e) {
+      if (win) win.close()
+      showToast('Could not open the file. Check your connection and try again.', 'error')
+    }
   }
   const deleteCompliance = async (item) => {
     if (!window.confirm('Delete this item?')) return
@@ -4155,25 +4244,39 @@ ${link}`
         {activeTab === 'compliance' && (
           <div>
             <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
-            <button className="btn-primary" onClick={() => { setShowNewCompliance(true); setInlineError('') }}>+ Add insurance / license</button>
+            <button className="btn-primary" onClick={openNewCompliance}>+ Add insurance / license</button>
             {complianceItems.map(it => {
               const days = it.expires_on ? Math.ceil((new Date(it.expires_on + 'T00:00:00') - new Date()) / 86400000) : null
               const color = days == null ? '#888' : days < 0 ? '#DC2626' : days <= 30 ? '#E07B2A' : '#16A34A'
               const label = days == null ? '' : days < 0 ? 'EXPIRED' : days <= 30 ? `${days}d left` : 'OK'
+              const fileLabel = it.file_name || 'File'
               return (
                 <div key={it.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                    {it.file_path && (
+                      <button type="button" aria-label={`Open ${fileLabel}`} onClick={() => openComplianceFile(it)} style={{ width: '64px', height: '64px', flexShrink: 0, padding: 0, border: '1px solid #E5E7EB', borderRadius: '10px', overflow: 'hidden', background: '#F9FAFB', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '30px' }}>
+                        {isImage(it.file_type, it.file_name)
+                          ? <JobPhoto path={it.file_path} signedUrl={complianceUrls[it.file_path]} alt={fileLabel} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : <span aria-hidden="true">📄</span>}
+                      </button>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <h3>{it.name}</h3>
                       <p style={{ textTransform: 'capitalize' }}>{it.kind}{it.reference ? ` · ${it.reference}` : ''}</p>
                       {it.expires_on && <p style={{ fontSize: '12px', color, fontWeight: '600', marginTop: '2px' }}>Expires {new Date(it.expires_on + 'T00:00:00').toLocaleDateString()}{label ? ` · ${label}` : ''}</p>}
+                      {it.file_path
+                        ? <button type="button" onClick={() => openComplianceFile(it)} style={{ background: 'none', border: 'none', padding: '8px 0', minHeight: '40px', color: '#E07B2A', fontSize: '13px', fontWeight: '600', cursor: 'pointer', textAlign: 'left', wordBreak: 'break-word' }}>📎 {fileLabel} · tap to open</button>
+                        : <button type="button" onClick={() => openEditCompliance(it)} style={{ background: 'none', border: 'none', padding: '8px 0', minHeight: '40px', color: '#E07B2A', fontSize: '13px', fontWeight: '600', cursor: 'pointer', textAlign: 'left' }}>+ Add photo or file</button>}
                     </div>
-                    <button aria-label="Delete item" onClick={() => deleteCompliance(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+                      <button aria-label="Edit item" onClick={() => openEditCompliance(it)} style={{ background: 'none', border: '1px solid #E07B2A', color: '#E07B2A', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0 14px', minHeight: '44px', borderRadius: '8px' }}>Edit</button>
+                      <button aria-label="Delete item" onClick={() => deleteCompliance(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0 14px', minHeight: '44px', borderRadius: '8px' }}>Delete</button>
+                    </div>
                   </div>
                 </div>
               )
             })}
-            {complianceItems.length === 0 && <div className="empty-state"><p>Track your insurance and licenses here — get a heads-up before they expire.</p></div>}
+            {complianceItems.length === 0 && <div className="empty-state"><p>Track your insurance and licenses here. Get a heads-up before they expire, and keep a photo or PDF of each one.</p></div>}
           </div>
         )}
 
@@ -5133,17 +5236,57 @@ ${link}`
       )}
 
       {showNewCompliance && (
-        <div className="modal-overlay" onClick={() => { setShowNewCompliance(false); setInlineError('') }}>
+        <div className="modal-overlay" onClick={() => { if (!loading) closeComplianceSheet() }}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-            <h2>Insurance / License</h2>
+            <h2>{editingComplianceId ? 'Edit insurance / license' : 'Insurance / License'}</h2>
             <div className="input-group"><label>Type</label><select value={complianceForm.kind} onChange={e => setComplianceForm({ ...complianceForm, kind: e.target.value })}><option value="insurance">Insurance</option><option value="license">License</option><option value="certification">Certification</option></select></div>
             <div className="input-group"><label>Name</label><input value={complianceForm.name} onChange={e => setComplianceForm({ ...complianceForm, name: e.target.value })} placeholder="General Liability" /></div>
             <div className="input-group"><label>Policy / License #</label><input value={complianceForm.reference} onChange={e => setComplianceForm({ ...complianceForm, reference: e.target.value })} placeholder="GL-100482" /></div>
             <div className="input-group"><label>Expires</label><input type="date" value={complianceForm.expires_on} onChange={e => setComplianceForm({ ...complianceForm, expires_on: e.target.value })} /></div>
             <div className="input-group"><label>Notes (optional)</label><input value={complianceForm.notes} onChange={e => setComplianceForm({ ...complianceForm, notes: e.target.value })} placeholder="Carrier, agent, etc." /></div>
-            {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={addCompliance} disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
-            <button className="btn-secondary" onClick={() => { setShowNewCompliance(false); setInlineError('') }}>Cancel</button>
+            {(() => {
+              const shown = complianceFile
+                ? { name: complianceFile.name, image: isImage(complianceFile.type, complianceFile.name), preview: complianceFilePreview, isNew: true }
+                : (complianceExisting && !complianceFileRemoved)
+                  ? { name: complianceExisting.file_name || 'File', image: isImage(complianceExisting.file_type, complianceExisting.file_name), path: complianceExisting.file_path, isNew: false }
+                  : null
+              const pickStyle = { flex: '1 1 140px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '52px', marginTop: 0, cursor: loading ? 'default' : 'pointer', textAlign: 'center' }
+              return (
+                <div className="input-group">
+                  <p style={{ fontSize: '13px', fontWeight: '500', color: '#444', marginBottom: '5px' }}>Photo or file of it (optional)</p>
+                  {shown && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', border: '1.5px solid #ddd', borderRadius: '10px', marginBottom: '8px' }}>
+                      <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '8px', overflow: 'hidden', background: '#F9FAFB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px' }}>
+                        {!shown.image
+                          ? <span aria-hidden="true">📄</span>
+                          : shown.isNew
+                            ? (shown.preview ? <img src={shown.preview} alt="Picked file" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span aria-hidden="true">📷</span>)
+                            : <JobPhoto path={shown.path} signedUrl={complianceUrls[shown.path]} alt={shown.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0, fontSize: '13px', color: '#1C2B3A', wordBreak: 'break-word' }}>
+                        {shown.name}
+                        {shown.isNew && <div style={{ fontSize: '11px', color: '#717171', marginTop: '2px' }}>Uploads when you tap Save</div>}
+                      </div>
+                      <button type="button" onClick={removeComplianceFile} disabled={loading} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0 14px', minHeight: '44px', borderRadius: '8px', flexShrink: 0 }}>Remove</button>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <label className="btn-secondary" style={pickStyle}>
+                      📷 {shown ? 'Retake photo' : 'Take a photo'}
+                      <input type="file" accept="image/*" capture="environment" onChange={pickComplianceFile} disabled={loading} style={{ display: 'none' }} />
+                    </label>
+                    <label className="btn-secondary" style={pickStyle}>
+                      📎 {shown ? 'Pick a different one' : 'Choose photo or PDF'}
+                      <input type="file" accept="image/*,application/pdf,.pdf" onChange={pickComplianceFile} disabled={loading} style={{ display: 'none' }} />
+                    </label>
+                  </div>
+                  {complianceFileRemoved && complianceExisting && !complianceFile && <p style={{ fontSize: '12px', color: '#717171', marginTop: '6px' }}>The file comes off when you tap Save.</p>}
+                </div>
+              )
+            })()}
+            {inlineError && <p role="alert" style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+            <button className="btn-primary" onClick={saveCompliance} disabled={loading}>{loading ? (complianceFile ? 'Uploading…' : 'Saving…') : 'Save'}</button>
+            <button className="btn-secondary" onClick={closeComplianceSheet} disabled={loading}>Cancel</button>
           </div>
         </div>
       )}
