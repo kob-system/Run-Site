@@ -14,6 +14,10 @@
 // v0.5: one confirm card can carry SEVERAL actions ("15 miles each way and put
 // Dave and Tony on it for six hours"). They run in order, each audited on its
 // own row; the single-action {tool, args} body still works for cached bundles.
+// v0.6: add_expense can carry a receipt PHOTO (a storage path the card uploaded
+// after Confirm) and a job id picked from the card's job list.
+import { isAllowedReceiptPhotoPath, receiptPhotoFolder } from './_receiptPhoto'
+
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY
@@ -141,6 +145,7 @@ const estSubtotal = (items) => (Array.isArray(items) ? items : []).reduce((s, it
 const TAX_MODES = ['materials', 'repair', 'capital']
 const normalizeTaxMode = (m) => (TAX_MODES.includes(m) ? m : 'materials')
 const BLOCKED = 'Save was blocked (check your subscription is active).'
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // ---------- resolvers (all under the caller's RLS) ----------
 const ilikeSafe = (s) => encodeURIComponent(String(s).replace(/[%*,()]/g, ''))
@@ -367,8 +372,30 @@ async function runTool(tool, args, ctx) {
     const isWorker = ctx.profile && ctx.profile.role === 'worker'
     const ownerId = isWorker ? (ctx.profile && ctx.profile.owner_id) : uid
     if (isWorker && !ownerId) return { error: 'You’re not linked to a boss yet.' }
-    const resolved = isWorker ? await resolveMyJob(token, args.job_name) : await resolveJob(token, args.job_name)
+    // The receipt card picks the job from a list, so it sends the job's id; the
+    // spoken path still sends a name. The id is re-checked under the caller's
+    // own RLS: an owner only sees his jobs, a worker only the ones he's on.
+    let resolved
+    if (typeof args.project_id === 'string' && UUID_RE.test(args.project_id)) {
+      const table = isWorker ? 'worker_projects' : 'projects'
+      const look = await userReq(token, `${table}?id=eq.${args.project_id}&select=id,name`, 'GET')
+      const row = look.ok && Array.isArray(look.data) ? look.data[0] : null
+      resolved = row ? { project: row } : { error: 'That job isn’t on your list anymore. Pick another one.' }
+    } else {
+      resolved = isWorker ? await resolveMyJob(token, args.job_name) : await resolveJob(token, args.job_name)
+    }
     if (resolved.error) return { error: resolved.error }
+    // The receipt photo, when the card sent one. It must sit in this tenant's
+    // own folder (see _receiptPhoto.js). A bad path fails the save out loud
+    // rather than saving a receipt that silently lost its picture.
+    let photo = null
+    if (args.photo_path != null && args.photo_path !== '') {
+      const folder = receiptPhotoFolder({ isWorker, uid, ownerId })
+      if (!isAllowedReceiptPhotoPath(args.photo_path, folder)) {
+        return { error: 'That photo couldn’t be attached. Take it again and retry.' }
+      }
+      photo = args.photo_path
+    }
     // receipts.description is NOT NULL with no default, and it's the HEADLINE on
     // the receipt card in the dashboard. Nobody dictating a receipt says "and the
     // description is…", so fall back to the category label rather than sending
@@ -393,6 +420,8 @@ async function runTool(tool, args, ctx) {
       store: clean(args.store, 120) || null,
       description,
       ...(dateOnReceipt ? { purchase_date: dateOnReceipt } : {}),
+      // Same column, same PATH shape the manual Add Receipt sheet stores.
+      ...(photo ? { photo_url: photo } : {}),
     })
     // The caller gets the generic message, but the real Postgres error goes to the
     // server log — otherwise every write failure looks like a billing problem.
@@ -403,8 +432,8 @@ async function runTool(tool, args, ctx) {
     const row = Array.isArray(data) ? data[0] : data
     return {
       ok: true,
-      message: `Added a ${money(amount + tax)} ${category} expense to “${resolved.project.name}.”`,
-      result: { id: row && row.id, project: resolved.project.name, amount, tax, category },
+      message: `Added a ${money(amount + tax)} ${category} expense to “${resolved.project.name}”${photo ? ', photo attached' : ''}.`,
+      result: { id: row && row.id, project: resolved.project.name, amount, tax, category, photo: !!photo },
     }
   }
 

@@ -15,6 +15,8 @@
 //
 // Two personas: owners get the full toolset; workers (crew) get a small
 // self-scoped toolset (own hours/schedule/jobs + clock in/out + time off).
+import { isNewJobIntent } from './_newJobIntent'
+
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY
@@ -1343,7 +1345,9 @@ async function withRetry(fn) {
   throw lastErr
 }
 
-async function callClaude(system, messages, tools) {
+// `toolChoice` is only passed to FORCE one tool (see the new-job guard in the
+// handler). Left out, the model picks freely, as it always has.
+async function callClaude(system, messages, tools, toolChoice) {
   return withRetry(async () => {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1358,6 +1362,7 @@ async function callClaude(system, messages, tools) {
         system,
         tools,
         messages,
+        ...(toolChoice ? { tool_choice: toolChoice } : {}),
       }),
     })
     const data = await r.json()
@@ -1370,6 +1375,10 @@ async function callClaude(system, messages, tools) {
     return data
   })
 }
+
+const proposesTool = (data, name) =>
+  !!data && data.stop_reason === 'tool_use' && Array.isArray(data.content) &&
+  data.content.some((b) => b && b.type === 'tool_use' && b.name === name)
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
@@ -1410,6 +1419,19 @@ export default async function handler(req, res) {
   const tz = Number.isFinite(body.tz) ? Math.max(-840, Math.min(840, body.tz)) : 0
   if (!userMessage) return res.status(400).json({ error: 'Empty message' })
   if (userMessage.length > 2000) return res.status(413).json({ error: 'Message too long' })
+
+  // The job on screen. "Talk it out" inside a job sends that job's id, so
+  // "add 2x4s to the buy list" lands on the job he is looking at instead of
+  // turning into "which job?". Looked up under HIS token (RLS): an id that
+  // isn't his, or isn't one a crew member is on, simply finds nothing.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  let onScreenJob = null
+  if (typeof body.project_id === 'string' && UUID_RE.test(body.project_id)) {
+    try {
+      const rows = await userGet(user.token, `${isOwner ? 'projects' : 'worker_projects'}?id=eq.${body.project_id}&select=id,name`)
+      if (Array.isArray(rows) && rows[0] && rows[0].name) onScreenJob = String(rows[0].name)
+    } catch { /* no context is fine; the model asks which job like before */ }
+  }
 
   const who = profile.full_name || (isOwner ? 'the owner' : 'a crew member')
   const company = profile.company_name ? ` at ${profile.company_name}` : ''
@@ -1483,8 +1505,15 @@ export default async function handler(req, res) {
     `- When they name a job loosely, pass the REAL job name from my_jobs — don't echo their words as the job name.\n` +
     `- A "[proposed for confirmation] …" line means you already put that on the confirm card — don't propose it again. A "[cancelled that…]" line means they said no: drop it and move on.`
 
-  const system = isOwner ? ownerSystem : workerSystem
+  const system = (isOwner ? ownerSystem : workerSystem) + (onScreenJob
+    ? `\n\nTHE JOB ON SCREEN: this was opened from inside the job “${onScreenJob}”. Anything said without naming a job is about “${onScreenJob}”: use that exact job name and don't ask which job. If a different job is named, use the one named.`
+    : '')
   const tools = isOwner ? [...READ_TOOLS, ...WRITE_TOOLS] : [...WORKER_READ_TOOLS, ...WORKER_WRITE_TOOLS]
+  // NEW JOB IS NEVER A LOOKUP. "New job, Smith deck, twelve thousand" used to
+  // come back as "I don't see a job called Smith deck", because the model read
+  // it as a question about an existing job. The prompt says not to; this makes
+  // it a rule the code enforces. See api/_newJobIntent.js for what counts.
+  const forceNewJob = isOwner && isNewJobIntent(userMessage)
   const writeNames = isOwner ? WRITE_NAMES : WORKER_WRITE_NAMES
   // Defense-in-depth: the model can only emit tools we hand it, but guard the
   // exec loop with the role's allowlist anyway so a future change (or an
@@ -1496,7 +1525,15 @@ export default async function handler(req, res) {
   try {
     // Up to 5 tool round-trips (read tools chain); a write short-circuits out.
     for (let i = 0; i < 5; i++) {
-      const data = await callClaude(system, messages, tools)
+      let data = await callClaude(system, messages, tools)
+      // The first pass runs free, so a sentence that is a new job AND more
+      // ("new job Smith deck 12k, put Dave on it Monday") still lands as one
+      // card. If that pass did anything other than propose create_job (a
+      // lookup, a "which job?", a write against a job that doesn't exist yet),
+      // it is thrown away and the call is re-run with create_job forced.
+      if (forceNewJob && i === 0 && !proposesTool(data, 'create_job')) {
+        data = await callClaude(system, messages, tools, { type: 'tool', name: 'create_job' })
+      }
       const blocks = Array.isArray(data.content) ? data.content : []
 
       if (data.stop_reason === 'tool_use') {
@@ -1513,7 +1550,25 @@ export default async function handler(req, res) {
         // lands on ONE confirm card as a numbered list and saves together.
         const writes = toolUses.filter((b) => writeNames.has(b.name))
         if (writes.length) {
-          const batch = writes.slice(0, MAX_BATCH)
+          // A job has to exist before anything can be booked to it, and the
+          // execute endpoint runs a card top to bottom. create_job goes first.
+          const ordered = [
+            ...writes.filter((w) => w.name === 'create_job'),
+            ...writes.filter((w) => w.name !== 'create_job'),
+          ]
+          const batch = ordered.slice(0, MAX_BATCH)
+
+          // A forced create_job can come back with no name. A card reading
+          // Create a new job “” is worse than asking.
+          if (batch.some((w) => w.name === 'create_job' && !String((w.input && w.input.name) || '').trim())) {
+            return res.json({ type: 'reply', reply: "What's the new job called, and what's the contract price?" })
+          }
+          // Jobs this same card is about to create. "New job Smith deck, put
+          // Dave on it Monday" names a job that won't exist until Confirm, so
+          // looking it up now can only fail with "I don't see a job called…".
+          const newJobNames = batch
+            .filter((w) => w.name === 'create_job')
+            .map((w) => String(w.input.name).trim())
 
           // Every confirm card has to name a REAL job. The model echoes
           // whatever the owner said ("the Klein bathroom"), which used to sail
@@ -1530,6 +1585,11 @@ export default async function handler(req, res) {
               : ''
             if (!wantedJob) continue
             const key = wantedJob.toLowerCase()
+            const madeHere = newJobNames.find((n) => {
+              const k = n.toLowerCase()
+              return k === key || k.includes(key) || key.includes(k)
+            })
+            if (madeHere) { write.input.job_name = madeHere; continue }
             if (!jobCache.has(key)) jobCache.set(key, (await finder(user.token, wantedJob)) || [])
             const matches = jobCache.get(key)
             const exact = matches.find(
