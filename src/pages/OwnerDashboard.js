@@ -3,7 +3,11 @@ import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
 import { todayLocal } from '../utils/todayLocal'
-import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
+import { computeProfit, computeMargin, computeContractPrice, roundCents, profitPicture } from '../utils/money'
+import {
+  toLocalInputs, fromLocalInputs, shiftProblem, shiftMinutes, shiftPay,
+  clockTime, shiftDay, sinceLabel, MAX_SHIFT_MINUTES, LONG_OPEN_MINUTES
+} from '../utils/shiftEdit'
 import { downloadCsv } from '../utils/csv'
 import AssistantPanel from '../components/AssistantPanel'
 import InstallPrompt from '../components/InstallPrompt'
@@ -473,8 +477,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [mileageEntries, setMileageEntries] = useState([])
   const [showNewMileage, setShowNewMileage] = useState(false)
   const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
-  const [showNewTime, setShowNewTime] = useState(false)
-  const [timeForm, setTimeForm] = useState({ worker_id: '', work_date: '', start_time: '', end_time: '' })
+  // The shift the owner is fixing (forgot to clock out, wrong time, a shift
+  // that should not exist). null = the fix sheet is closed. See openShiftFix.
+  const [shiftFix, setShiftFix] = useState(null)
+  // Which worker's shifts are unfolded under the open job's Labor card, and
+  // which worker-week is unfolded on Crew Pay ('workerId|YYYY-MM-DD').
+  const [laborWorkerOpen, setLaborWorkerOpen] = useState(null)
+  const [payWeekOpen, setPayWeekOpen] = useState(null)
   const [payroll, setPayroll] = useState([])
   const [paychecks, setPaychecks] = useState([])
   // Money paid out on a job to somebody who never clocks in — a sub, a day
@@ -804,7 +813,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       // Page past the 1000-row cap so weekly gross is complete on busy crews.
       const [times, { data: checks }] = await Promise.all([
-        fetchAllRows((from, to) => supabase.from('time_entries').select('worker_id, total_minutes, labor_cost, clocked_in_at').in('worker_id', workerIds).not('clocked_out_at', 'is', null).range(from, to)),
+        fetchAllRows((from, to) => supabase.from('time_entries').select('id, worker_id, project_id, total_minutes, labor_cost, clocked_in_at, clocked_out_at').in('worker_id', workerIds).not('clocked_out_at', 'is', null).range(from, to)),
         supabase.from('paychecks').select('*').eq('owner_id', profile.id)
       ])
       setPaychecks(checks || [])
@@ -812,10 +821,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       ;(times || []).forEach(t => {
         const ws = weekStartKey(t.clocked_in_at)
         const key = t.worker_id + '|' + ws
-        if (!rows[key]) rows[key] = { worker_id: t.worker_id, week_start: ws, minutes: 0, gross: 0 }
+        if (!rows[key]) rows[key] = { worker_id: t.worker_id, week_start: ws, minutes: 0, gross: 0, shifts: [] }
         rows[key].minutes += t.total_minutes || 0
         rows[key].gross += t.labor_cost || 0
+        // The shifts ride along so a week can unfold into the rows the owner
+        // taps to fix one.
+        rows[key].shifts.push(t)
       })
+      Object.values(rows).forEach(r => r.shifts.sort((a, b) => new Date(b.clocked_in_at) - new Date(a.clocked_in_at)))
       setPayroll(Object.values(rows).sort((a, b) => b.week_start.localeCompare(a.week_start)))
     } catch (e) {
       console.error('Payroll fetch failed:', e)
@@ -1367,44 +1380,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     }
   }
 
-  // Owner manually logs a worker's time on a job (for crew who don't clock in
-  // via the worker app). Mirrors the worker clock-out cost math:
-  // labor_cost = (minutes / 60) * the worker's hourly_rate.
-  const addTimeEntry = async () => {
-    if (!timeForm.worker_id) return setInlineError('Pick a worker')
-    if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return setInlineError('Date, start and end time are required')
-    const startAt = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
-    const endAt = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
-    if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) return setInlineError('Invalid date or time')
-    if (endAt <= startAt) return setInlineError('End time must be after start time')
-    const worker = workers.find(w => w.id === timeForm.worker_id)
-    const totalMinutes = Math.floor((endAt - startAt) / 60000)
-    // Round to cents on the way in — otherwise float noise ((m/60)*rate) persists
-    // to the DB and shows up as $123.4560001 in sums. Matches roundCents everywhere else.
-    const laborCost = roundCents((totalMinutes / 60) * (worker?.hourly_rate || 0))
-    setLoading(true)
-    setInlineError('')
-    try {
-      const { error } = await supabase.from('time_entries').insert({
-        project_id: selectedProject.id,
-        worker_id: timeForm.worker_id,
-        clocked_in_at: startAt.toISOString(),
-        clocked_out_at: endAt.toISOString(),
-        total_minutes: totalMinutes,
-        labor_cost: laborCost
-      })
-      if (error) throw error
-      setShowNewTime(false)
-      setTimeForm({ worker_id: '', work_date: '', start_time: '', end_time: '' })
-      track(EV.TIME_ADDED)
-      await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
-      showToast('Time added ✓')
-    } catch (e) {
-      setInlineError('Failed to add time. Try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
+  // (The old Add Time form and its addTimeEntry lived here. Nothing ever
+  // opened it: the Hours sheet above replaced it. Removed with the owner
+  // shift fix, which is the thing an owner actually needed from it.)
 
   // Remove a worker from the owner's crew. Soft-unlink (owner_id → null) rather
   // than delete: the worker's account and any hours already logged on jobs stay
@@ -2732,17 +2710,145 @@ ${link}`
     }
   }
 
-  const deleteTimeEntry = async (entry) => {
-    if (!window.confirm('Delete this time entry? Labor cost recalculates automatically.')) return
+  // ---------------------------------------------------------------------
+  // FIX A SHIFT
+  //
+  // A man forgets to clock out and his shift runs all night. Before this there
+  // was no screen anywhere to fix it: the owner could see the bad shift and the
+  // pay piling up on it, and could not touch it.
+  //
+  // Every place a shift shows (the job's Labor card, Crew Pay's weeks, both
+  // "on the clock" cards) opens this one sheet. It writes ONLY clocked_in_at
+  // and clocked_out_at. The payroll trigger (FIX-DATABASE-8, extended in 29)
+  // recomputes total_minutes and labor_cost from the worker's own rate, and the
+  // row comes straight back from the database, so the sheet shows what was
+  // actually saved rather than what we hoped.
+  //
+  // The Hours sheet deliberately never touches a real clock record. This is
+  // the other case: the owner saying on purpose that the clock is wrong.
+  // ---------------------------------------------------------------------
+  const openShiftFix = (entry) => {
+    const open = !entry.clocked_out_at
+    const now = new Date()
+    const w = workers.find(x => x.id === entry.worker_id)
+    const pj = projects.find(p => p.id === entry.project_id)
+    const inP = toLocalInputs(entry.clocked_in_at)
+    // Clocking out an open shift starts at right now, unless now would make it
+    // a 24-hour-plus shift. Then he went home and forgot, "now" is the one time
+    // that is certainly wrong, and the owner has to pick when he left.
+    const stale = open && shiftMinutes(entry.clocked_in_at, now) > MAX_SHIFT_MINUTES
+    const outP = open ? (stale ? { date: inP.date, time: '' } : toLocalInputs(now)) : toLocalInputs(entry.clocked_out_at)
+    setShiftFix({
+      entry, open, stale,
+      name: (w && w.full_name) || entry.profiles?.full_name || 'Worker',
+      rate: (w && w.hourly_rate) || 0,
+      jobName: pj ? pj.name : '',
+      inDate: inP.date, inTime: inP.time, outDate: outP.date, outTime: outP.time,
+      error: '', saving: false, confirmDelete: false, saved: null,
+    })
+  }
+
+  // Everything that shows hours or labor dollars, re-read after a shift changes.
+  const refreshAfterShiftChange = async () => {
+    const jobs = [fetchSpend(projects), fetchOnTheClock(workers)]
+    if (selectedProject) jobs.push(refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)'))
+    if (workers.length) jobs.push(fetchPayroll(), fetchWorkerStats(workers))
+    await Promise.all(jobs)
+  }
+
+  const saveShiftFix = async () => {
+    const f = shiftFix
+    if (!f || f.saving) return
+    const inAt = fromLocalInputs(f.inDate, f.inTime)
+    const outAt = fromLocalInputs(f.outDate, f.outTime)
+    const problem = shiftProblem(inAt, outAt)
+    if (problem) return setShiftFix({ ...f, error: problem })
+    setShiftFix({ ...f, saving: true, error: '' })
+    let row
     try {
-      const { error } = await supabase.from('time_entries').delete().eq('id', entry.id)
+      const { data, error } = await supabase.from('time_entries')
+        .update({ clocked_in_at: inAt.toISOString(), clocked_out_at: outAt.toISOString() })
+        .eq('id', f.entry.id)
+        .select('id, worker_id, project_id, clocked_in_at, clocked_out_at, total_minutes, labor_cost')
       if (error) throw error
-      await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
-      await fetchProjects()
-      showToast('Time entry deleted ✓')
+      row = data && data[0]
+      // Zero rows back is not a save. The database refused it (not his job) or
+      // the shift is already gone. A quiet "Saved" here would be a lie.
+      if (!row) throw new Error('No shift came back from the save')
     } catch (e) {
-      showToast('Failed to delete time entry', 'error')
+      console.error('Shift fix failed:', e)
+      setShiftFix(s => (s ? { ...s, saving: false, error: 'That shift did not save. Check your signal and try again.' } : s))
+      return
     }
+    // The trigger fills these on every save. Empty means the times landed but
+    // the hours and pay were not worked out, and he must not pay off them.
+    if (row.total_minutes == null || row.labor_cost == null) {
+      setShiftFix(s => (s ? { ...s, saving: false, error: 'The times saved, but the hours and pay did not update. Close this and check the job before you pay on it.' } : s))
+    } else {
+      setShiftFix(s => (s ? { ...s, saving: false, saved: row } : s))
+    }
+    await refreshAfterShiftChange()
+  }
+
+  // The old delete, never called until now. Its confirm is a second tap
+  // inside the fix sheet instead of a browser pop-up.
+  const deleteTimeEntry = async () => {
+    const f = shiftFix
+    if (!f || f.saving) return
+    setShiftFix({ ...f, saving: true, error: '' })
+    try {
+      // .select() so a delete the database quietly refused (zero rows) is caught.
+      const { data, error } = await supabase.from('time_entries').delete().eq('id', f.entry.id).select('id')
+      if (error) throw error
+      if (!data || !data.length) throw new Error('Nothing was deleted')
+    } catch (e) {
+      console.error('Shift delete failed:', e)
+      setShiftFix(s => (s ? { ...s, saving: false, error: 'That shift did not delete. Try again.' } : s))
+      return
+    }
+    setShiftFix(null)
+    showToast('Shift deleted ✓')
+    await refreshAfterShiftChange()
+  }
+
+  // One finished shift as a row you tap to fix. The Labor card and Crew Pay
+  // both use it, so a tap anywhere opens the same sheet.
+  const shiftRow = (t, showJob) => {
+    const pj = showJob ? projects.find(p => p.id === t.project_id) : null
+    return (
+      <button
+        key={t.id}
+        type="button"
+        onClick={() => openShiftFix(t)}
+        aria-label={`Fix the shift on ${shiftDay(t.clocked_in_at)}, ${clockTime(t.clocked_in_at)} to ${clockTime(t.clocked_out_at)}`}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', padding: '8px 10px', marginTop: '6px', background: '#F9FAFB', border: '1px solid #EEE', borderRadius: '10px', cursor: 'pointer', textAlign: 'left' }}
+      >
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#1C2B3A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiftDay(t.clocked_in_at)}{pj ? ' · ' + pj.name : ''}</span>
+          <span style={{ display: 'block', fontSize: '12px', color: '#717171' }}>{clockTime(t.clocked_in_at)} to {clockTime(t.clocked_out_at)} · {formatTime(t.total_minutes)}</span>
+        </span>
+        <span style={{ fontSize: '13px', fontWeight: 700, color: '#1C2B3A', flexShrink: 0 }}>{formatCurrency(t.labor_cost)}</span>
+        <span style={{ fontSize: '13px', fontWeight: 700, color: '#E07B2A', flexShrink: 0 }}>Fix ›</span>
+      </button>
+    )
+  }
+
+  // A shift with no clock-out, said out loud, with the button that ends it.
+  // Past 12 hours it also says what almost certainly happened.
+  const stillOnClock = (t) => {
+    const mins = shiftMinutes(t.clocked_in_at, new Date())
+    const long = mins > LONG_OPEN_MINUTES
+    return (
+      <div key={'open-' + t.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px 10px', padding: '10px 12px', marginTop: '6px', background: 'white', border: '1px solid ' + (long ? '#FCD34D' : '#BBF7D0'), borderRadius: '10px' }}>
+        <span style={{ flex: '1 1 160px', minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: '14px', fontWeight: 700, color: '#15803D' }}>Still on the clock since {sinceLabel(t.clocked_in_at)}</span>
+          <span style={{ display: 'block', fontSize: '12px', color: long ? '#B45309' : '#4B5563', fontWeight: long ? 700 : 400 }}>
+            {formatTime(mins)} so far{long ? '. He probably forgot to clock out.' : ''}
+          </span>
+        </span>
+        <button type="button" onClick={() => openShiftFix(t)} style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '10px 16px', borderRadius: '10px', border: 'none', background: '#15803D', color: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Clock him out</button>
+      </div>
+    )
   }
 
   const openEditJob = () => {
@@ -3047,6 +3153,85 @@ ${link}`
     </div>
   )
 
+  // The fix-a-shift sheet. Like scheduleModal, one definition rendered on both
+  // sides of the job-screen early return below. Three faces: the times, the
+  // delete confirm, and what the database saved.
+  const shiftFixSheet = shiftFix && (() => {
+    const f = shiftFix
+    const first = (f.name || 'him').split(' ')[0]
+    const close = () => setShiftFix(null)
+    const set = (k) => (e) => { const v = e.target.value; setShiftFix(s => (s ? { ...s, [k]: v, error: '' } : s)) }
+    const inAt = fromLocalInputs(f.inDate, f.inTime)
+    const outAt = fromLocalInputs(f.outDate, f.outTime)
+    const problem = inAt && outAt ? shiftProblem(inAt, outAt) : ''
+    const mins = inAt && outAt && !problem ? shiftMinutes(inAt, outAt) : null
+    const half = { flex: '1 1 140px', minWidth: 0, marginBottom: '10px' }
+    const errText = { color: '#DC2626', fontSize: '14px', fontWeight: 600, marginBottom: '8px' }
+    return (
+      <div className="modal-overlay" onClick={f.saving ? undefined : close}>
+        <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+          {f.saved ? (
+            <>
+              <h2>Saved ✓</h2>
+              <div className="card" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                <p style={{ fontSize: '12px', fontWeight: 700, color: '#15803D', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{f.name}{f.jobName ? ' · ' + f.jobName : ''}</p>
+                <p style={{ fontSize: '32px', fontWeight: 800, color: '#1C2B3A', lineHeight: 1.1, marginTop: '4px' }}>{formatTime(f.saved.total_minutes)}</p>
+                <p style={{ fontSize: '22px', fontWeight: 800, color: '#15803D' }}>{formatCurrency(f.saved.labor_cost)}</p>
+                <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '6px' }}>{shiftDay(f.saved.clocked_in_at)} · {clockTime(f.saved.clocked_in_at)} to {clockTime(f.saved.clocked_out_at)}</p>
+              </div>
+              <p style={{ fontSize: '13px', color: '#717171', marginBottom: '8px' }}>The job’s labor and his pay for that week are updated.</p>
+              <button className="btn-primary" onClick={close}>Done</button>
+            </>
+          ) : f.confirmDelete ? (
+            <>
+              <h2>Delete this shift?</h2>
+              <p style={{ fontSize: '15px', color: '#1C2B3A', lineHeight: 1.5, marginBottom: '16px' }}>
+                {f.name}, {shiftDay(f.entry.clocked_in_at)}{f.open ? ', still on the clock' : `, ${formatTime(f.entry.total_minutes)} and ${formatCurrency(f.entry.labor_cost)}`}. It comes off the job and off his pay, and it can’t be brought back.
+              </p>
+              {f.error && <p style={errText}>{f.error}</p>}
+              <button className="btn-danger" onClick={deleteTimeEntry} disabled={f.saving}>{f.saving ? 'Deleting…' : 'Yes, delete it'}</button>
+              <button className="btn-secondary" onClick={() => setShiftFix(s => ({ ...s, confirmDelete: false, error: '' }))} disabled={f.saving}>Keep it</button>
+            </>
+          ) : (
+            <>
+              <h2>{f.open ? `Clock ${first} out` : `Fix ${first}’s shift`}</h2>
+              {f.jobName && <p style={{ fontSize: '13px', color: '#717171', margin: '-6px 0 12px' }}>{f.jobName}</p>}
+              {f.open && (
+                <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '10px 12px', marginBottom: '12px' }}>
+                  <p style={{ fontSize: '15px', fontWeight: 700, color: '#15803D' }}>Still on the clock since {sinceLabel(f.entry.clocked_in_at)}</p>
+                  {f.stale && <p style={{ fontSize: '13px', color: '#B45309', fontWeight: 600, marginTop: '4px' }}>That is more than a day. Pick the time he actually left.</p>}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div className="input-group" style={half}><label htmlFor="fix-in-date">Clock-in day</label><input id="fix-in-date" type="date" value={f.inDate} onChange={set('inDate')} /></div>
+                <div className="input-group" style={half}><label htmlFor="fix-in-time">Clock-in time</label><input id="fix-in-time" type="time" value={f.inTime} onChange={set('inTime')} /></div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div className="input-group" style={half}><label htmlFor="fix-out-date">Clock-out day</label><input id="fix-out-date" type="date" value={f.outDate} onChange={set('outDate')} /></div>
+                <div className="input-group" style={half}><label htmlFor="fix-out-time">Clock-out time</label><input id="fix-out-time" type="time" value={f.outTime} onChange={set('outTime')} /></div>
+              </div>
+              {mins != null && (
+                <p style={{ fontSize: '15px', fontWeight: 700, color: '#1C2B3A', marginBottom: '8px' }}>
+                  {formatTime(mins)} · about {formatCurrency(shiftPay(mins, f.rate))}
+                  {!f.rate && <span style={{ display: 'block', fontSize: '12px', fontWeight: 400, color: '#B45309' }}>His pay rate isn’t set, so these hours cost $0 until you set it.</span>}
+                </p>
+              )}
+              {(f.error || problem) && <p style={errText}>{f.error || problem}</p>}
+              <button className="btn-primary" onClick={saveShiftFix} disabled={f.saving || !!problem}>{f.saving ? 'Saving…' : f.open ? 'Clock him out' : 'Save shift'}</button>
+              <button className="btn-secondary" onClick={close} disabled={f.saving}>Cancel</button>
+              <button
+                type="button"
+                onClick={() => setShiftFix(s => ({ ...s, confirmDelete: true, error: '' }))}
+                disabled={f.saving}
+                style={{ width: '100%', minHeight: 'var(--tap)', marginTop: '16px', background: 'none', border: '1px solid #FCA5A5', borderRadius: '8px', color: '#DC2626', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}
+              >Delete this shift</button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  })()
+
   // Tapping a cost total in Money jumps to Work → Receipts with that bucket
   // already filtered. Returns the handler so both onClick and onKeyDown use one
   // definition.
@@ -3070,7 +3255,14 @@ ${link}`
     const sp = spendOf(selectedProject.id)
     const matPct = getBudgetPct(sp.materials, selectedProject.materials_budget)
     const labPct = getBudgetPct(sp.labor, selectedProject.labor_budget)
-    const projProfit = profitOf(selectedProject)
+    const pic = profitPicture({
+      contract: contractOf(selectedProject),
+      materialsBudget: selectedProject.materials_budget,
+      laborBudget: selectedProject.labor_budget,
+      profitTarget: selectedProject.profit_target,
+      spend: sp,
+      finished: selectedProject.stage === 'end',
+    })
 
     return (
       <div>
@@ -3139,28 +3331,46 @@ ${link}`
           {projectTab === 'job' && (
             <div>
               <JobSection title="Budget & profit" open={isOpen('budget')} onToggle={() => toggleSection('budget')}>
-              {/* Profit hero — the one number that matters, surfaced at the top
-                  instead of buried as the last of six cards. If no budget was
-                  set yet, don't show a scary $0/over-budget — prompt to add one. */}
-              {contractOf(selectedProject) > 0 ? (
-                <div className="card" style={{ background: projProfit >= 0 ? '#F0FDF4' : '#FEF2F2', border: '1px solid ' + (projProfit >= 0 ? '#BBF7D0' : '#FECACA') }}>
-                  <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Projected Profit</p>
-                  <p style={{ fontSize: '32px', fontWeight: 800, lineHeight: 1.1, color: projProfit >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
-                  <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
-                    {(() => {
-                      // Guard against absurd margins on tiny contracts (e.g. a $50
-                      // job losing $190 → -380%). Below -100% the loss exceeds the
-                      // whole contract, so say "over budget" instead of a wild number.
-                      const margin = Math.round((projProfit / contractOf(selectedProject)) * 100)
-                      return margin >= -100 ? margin + '% margin · ' : 'over budget · '
-                    })()}target {formatCurrency(selectedProject.profit_target)}
-                  </p>
-                  {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px', fontWeight: 600 }}>⚠️ Projected to go over budget</p>}
-                </div>
-              ) : (
+              {/* Profit hero, the one number that matters. It used to be
+                  contract minus spend at every stage, so a new $13,500 job with
+                  nothing spent read "$13,500 profit, 100% margin": the whole
+                  contract as profit. Now it is his own target until a cost
+                  lands, then where the job is heading against that target, and
+                  the real number only once it is finished. The math and the
+                  reasoning live in profitPicture (utils/money.js).
+                  No split set yet: no number at all, just the prompt. */}
+              {contractOf(selectedProject) > 0 && pic.mode !== 'noTarget' ? (() => {
+                const contract = contractOf(selectedProject)
+                const behind = pic.mode === 'target' ? 0 : pic.target - pic.amount
+                const losing = pic.amount < 0
+                const short = !losing && behind > 0.005
+                const tone = losing
+                  ? { bg: '#FEF2F2', bd: '#FECACA', fg: '#DC2626' }
+                  : short ? { bg: '#FFFBEB', bd: '#FDE68A', fg: '#B45309' } : { bg: '#F0FDF4', bd: '#BBF7D0', fg: '#15803D' }
+                const eyebrow = pic.mode === 'target' ? 'Target profit' : pic.mode === 'final' ? 'Final profit' : 'On track for'
+                // Guard against absurd margins on tiny contracts (a $50 job
+                // losing $190 is -380%). Past -100% just say over budget.
+                const margin = computeMargin(pic.amount, contract)
+                return (
+                  <div className="card" style={{ background: tone.bg, border: '1px solid ' + tone.bd }}>
+                    <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{eyebrow}</p>
+                    <p style={{ fontSize: '36px', fontWeight: 800, lineHeight: 1.1, color: tone.fg }}>{formatCurrency(pic.amount)}</p>
+                    <p style={{ fontSize: '14px', color: '#1C2B3A', fontWeight: 600, marginTop: '4px' }}>
+                      {pic.mode === 'target' && 'No costs logged yet'}
+                      {pic.mode === 'onTrack' && `Your target ${formatCurrency(pic.target)} · ${formatCurrency(pic.spent)} spent so far`}
+                      {pic.mode === 'final' && `${margin >= -100 ? margin + '% margin' : 'Over budget'} · target ${formatCurrency(pic.target)}`}
+                    </p>
+                    {pic.mode === 'target' && (
+                      <p style={{ fontSize: '12px', color: '#4B5563', marginTop: '4px' }}>{computeMargin(pic.target, contract)}% of the {formatCurrency(contract)} contract. This moves as receipts and hours come in.</p>
+                    )}
+                    {short && <p style={{ fontSize: '13px', color: tone.fg, marginTop: '6px', fontWeight: 700 }}>⚠️ {formatCurrency(behind)} under your target</p>}
+                    {losing && <p style={{ fontSize: '13px', color: tone.fg, marginTop: '6px', fontWeight: 700 }}>⚠️ This job is losing money</p>}
+                  </div>
+                )
+              })() : (
                 <div className="card" role="button" tabIndex={0} onClick={openEditJob} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditJob() } }} style={{ cursor: 'pointer', background: '#FFF7ED', border: '1px solid #FED7AA' }}>
-                  <p style={{ fontSize: '12px', color: '#9A3412', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Set your budget to track profit</p>
-                  <p style={{ fontSize: '15px', color: '#4B5563', lineHeight: 1.4 }}>Add materials, labor, and profit target for this job — then JobTally shows your live profit as costs come in. <span style={{ color: '#E07B2A', fontWeight: 700 }}>Add budget →</span></p>
+                  <p style={{ fontSize: '12px', color: '#9A3412', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Set your profit target</p>
+                  <p style={{ fontSize: '15px', color: '#4B5563', lineHeight: 1.4 }}>Split this job into materials, labor and the profit you want out of it. Then this shows whether you are on track as costs come in.{pic.spent > 0 ? ` ${formatCurrency(pic.spent)} spent so far.` : ''} <span style={{ color: '#E07B2A', fontWeight: 700 }}>Add it →</span></p>
                 </div>
               )}
               {(selectedProject.client_name || selectedProject.client_phone || selectedProject.client_email || selectedProject.client_address) && (
@@ -3202,28 +3412,53 @@ ${link}`
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>LABOR</p>
                 <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(sp.labor)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.labor_budget)}</span></p>
                 <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(labPct)} style={{ width: labPct + '%' }} /></div>
-                {timeEntries.length > 0 && (
-    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
-      <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>By Worker</p>
-      {Object.values(
-        timeEntries.filter(t => t.clocked_out_at).reduce((acc, t) => {
-          const name = t.profiles?.full_name || 'Unknown'
-          if (!acc[name]) acc[name] = { name, minutes: 0, cost: 0 }
-          acc[name].minutes += t.total_minutes || 0
-          acc[name].cost += t.labor_cost || 0
-          return acc
-        }, {})
-      ).map(w => (
-        <div key={w.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f9f9f9' }}>
-          <div>
-            <p style={{ fontWeight: '600', fontSize: '14px' }}>{w.name}</p>
-            <p style={{ fontSize: '12px', color: '#888' }}>{formatTime(w.minutes)}</p>
-          </div>
-          <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '14px' }}>{formatCurrency(w.cost)}</p>
-        </div>
-      ))}
-    </div>
-  )}
+                {/* By worker, and the way in to fixing a shift. Tap a man to
+                    unfold his shifts on this job, tap a shift to fix or delete
+                    it. A shift with no clock-out is never folded away: it shows
+                    under his name with the button that ends it. */}
+                {timeEntries.length > 0 && (() => {
+                  const groups = {}
+                  timeEntries.forEach(t => {
+                    const k = t.worker_id || 'unknown'
+                    if (!groups[k]) {
+                      const w = workers.find(x => x.id === t.worker_id)
+                      groups[k] = { id: k, name: t.profiles?.full_name || (w && w.full_name) || 'Unknown', minutes: 0, cost: 0, closed: [], open: [] }
+                    }
+                    const g = groups[k]
+                    if (t.clocked_out_at) { g.minutes += t.total_minutes || 0; g.cost += t.labor_cost || 0; g.closed.push(t) }
+                    else g.open.push(t)
+                  })
+                  return (
+                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                      <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>By worker · tap to fix a shift</p>
+                      {Object.values(groups).map(w => {
+                        const unfolded = laborWorkerOpen === w.id
+                        return (
+                          <div key={w.id} style={{ padding: '2px 0 8px', borderBottom: '1px solid #f3f3f3' }}>
+                            <button
+                              type="button"
+                              onClick={() => setLaborWorkerOpen(unfolded ? null : w.id)}
+                              aria-expanded={unfolded}
+                              style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', textAlign: 'left' }}
+                            >
+                              <span style={{ minWidth: 0 }}>
+                                <span style={{ display: 'block', fontWeight: 600, fontSize: '14px', color: '#1C2B3A' }}>{w.name}</span>
+                                <span style={{ display: 'block', fontSize: '12px', color: '#888' }}>{formatTime(w.minutes)} · {w.closed.length} shift{w.closed.length === 1 ? '' : 's'}</span>
+                              </span>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                                <span style={{ fontWeight: 700, color: '#1C2B3A', fontSize: '14px' }}>{formatCurrency(w.cost)}</span>
+                                <span style={{ color: '#9CA3AF', fontSize: '13px' }}>{unfolded ? '▾' : '▸'}</span>
+                              </span>
+                            </button>
+                            {w.open.map(t => stillOnClock(t))}
+                            {unfolded && w.closed.map(t => shiftRow(t))}
+                            {unfolded && w.closed.length === 0 && <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>No finished shifts on this job yet.</p>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
                 {/* JP asked for the by-worker split open by default and one tap
                     to the place that changes it. The hours themselves live in
                     Crew now, so this is the door through. */}
@@ -3620,8 +3855,8 @@ ${link}`
                   </div>
                 )}
 
-                {/* Same shared invite block used by Add Time and Schedule
-                    Worker — one form, three doors into it. */}
+                {/* Same shared invite block used by Schedule Worker and the
+                    crew screen: one form, several doors into it. */}
                 {inviteOpenBtn(workers.length === 0 ? '+ Add a new worker — sends him a link' : 'Someone missing? + Add a new worker')}
                 {inviteBlock('hours')}
 
@@ -3747,6 +3982,7 @@ ${link}`
         )}
 
         {scheduleModal}
+        {shiftFixSheet}
 
         {showNewPayout && (
           <div className="modal-overlay" onClick={() => { setShowNewPayout(false); setInlineError('') }}>
@@ -3785,37 +4021,6 @@ ${link}`
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addMileage} disabled={loading}>{loading ? 'Saving…' : 'Add mileage'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewMileage(false); setInlineError('') }}>Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {showNewTime && (
-          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>
-            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-              <h2>Add Time</h2>
-              <div className="input-group">
-                <label>Worker</label>
-                <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — ${formatCurrency(w.hourly_rate)}/hr` : ''}</option>)}</select>
-                {inviteOpenBtn(workers.length === 0 ? '+ Add a new worker — sends him a link' : 'Don’t see him? + Add a new worker')}
-              </div>
-              {inviteBlock('time')}
-              <div className="input-group"><label>Date</label><input type="date" value={timeForm.work_date} onChange={e => setTimeForm({ ...timeForm, work_date: e.target.value })} /></div>
-              <div className="input-group"><label>Start time</label><input type="time" value={timeForm.start_time} onChange={e => setTimeForm({ ...timeForm, start_time: e.target.value })} /></div>
-              <div className="input-group"><label>End time</label><input type="time" value={timeForm.end_time} onChange={e => setTimeForm({ ...timeForm, end_time: e.target.value })} /></div>
-              {(() => {
-                if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return null
-                const s = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
-                const en = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
-                if (isNaN(s.getTime()) || isNaN(en.getTime()) || en <= s) return null
-                const mins = Math.floor((en - s) / 60000)
-                const w = workers.find(x => x.id === timeForm.worker_id)
-                const cost = (mins / 60) * (w?.hourly_rate || 0)
-                return <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>{formatTime(mins)} · {formatCurrency(cost)}{(w && !w.hourly_rate) ? ' — set this worker’s hourly rate (Workers tab) to track labor cost' : ''}</p>
-              })()}
-              {workers.length === 0 && !showInvite && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>No workers yet — tap “Invite a worker” above to send someone a sign-up link. Once they join, you can log their time here.</p>}
-              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving…' : 'Add time'}</button>
-              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>Cancel</button>
             </div>
           </div>
         )}
@@ -3956,17 +4161,17 @@ ${link}`
                   {onTheClock.length ? '🟢 On the clock right now' : 'On the clock right now'}
                 </p>
                 <p style={{ fontSize: '46px', fontWeight: 800, lineHeight: 1.05, color: onTheClock.length ? '#15803D' : '#9CA3AF', margin: '2px 0 0' }}>{onTheClock.length}</p>
+                {/* Each open shift carries its own way out: a man who forgot
+                    to clock out gets clocked out from right here. */}
                 {onTheClock.map(t => {
                   const w = workers.find(x => x.id === t.worker_id)
                   const pj = projects.find(p => p.id === t.project_id)
-                  const mins = Math.max(0, Math.floor((Date.now() - new Date(t.clocked_in_at).getTime()) / 60000))
                   return (
-                    <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <p style={{ fontWeight: 700, fontSize: '15px', color: '#1C2B3A' }}>{w ? w.full_name : 'Worker'}</p>
-                        <p style={{ fontSize: '12px', color: '#717171', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pj ? pj.name : 'No job'} · in at {new Date(t.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</p>
-                      </div>
-                      <p style={{ fontWeight: 800, fontSize: '16px', color: '#15803D', flexShrink: 0 }}>{formatTime(mins)}</p>
+                    <div key={t.id} style={{ paddingTop: '8px', marginTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                      <p style={{ fontWeight: 700, fontSize: '15px', color: '#1C2B3A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {w ? w.full_name : 'Worker'}<span style={{ fontWeight: 400, fontSize: '12px', color: '#717171' }}> · {pj ? pj.name : 'No job'}</span>
+                      </p>
+                      {stillOnClock(t)}
                     </div>
                   )
                 })}
@@ -4496,28 +4701,33 @@ ${link}`
                 driveway at 7am actually wants off this screen. Only renders when
                 somebody is clocked in — an empty "0 on the clock" card every
                 evening is noise. */}
+            {/* The header opens Crew; each man is his own button that opens
+                the fix sheet, so a forgotten clock-out is one tap from Home.
+                (It was one big card-button, which left no room for that.) */}
             {onTheClock.length > 0 && (
-              <div className="card" role="button" tabIndex={0} onClick={() => setActiveTab('workers')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab('workers') } }}
-                style={{ border: '2px solid #16A34A', background: '#F0FDF4', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-                  <p style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>
+              <div className="card" style={{ border: '2px solid #16A34A', background: '#F0FDF4' }}>
+                <button type="button" onClick={() => setActiveTab('crew')} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>
                     🟢 {onTheClock.length} on the clock right now
-                  </p>
+                  </span>
                   <span style={{ color: '#16A34A', fontSize: '18px' }}>›</span>
-                </div>
-                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                </button>
+                <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {onTheClock.slice(0, 4).map(t => {
                     const w = workers.find(x => x.id === t.worker_id)
                     const job = projects.find(p => p.id === t.project_id)
+                    const long = shiftMinutes(t.clocked_in_at, new Date()) > LONG_OPEN_MINUTES
                     return (
-                      <p key={t.id} style={{ fontSize: '13px', color: '#1C2B3A' }}>
-                        <strong>{w ? w.full_name : 'Worker'}</strong>
-                        {job ? ` · ${job.name}` : ''}
-                        <span style={{ color: '#717171' }}> · since {new Date(t.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
-                      </p>
+                      <button key={t.id} type="button" onClick={() => openShiftFix(t)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', padding: '6px 10px', background: 'white', border: '1px solid ' + (long ? '#FCD34D' : '#BBF7D0'), borderRadius: '10px', cursor: 'pointer', textAlign: 'left' }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: '13px', color: '#1C2B3A' }}>
+                          <strong>{w ? w.full_name : 'Worker'}</strong>{job ? ` · ${job.name}` : ''}
+                          <span style={{ display: 'block', color: long ? '#B45309' : '#717171', fontWeight: long ? 700 : 400 }}>Since {sinceLabel(t.clocked_in_at)}{long ? '. Forgot to clock out?' : ''}</span>
+                        </span>
+                        <span style={{ color: '#15803D', fontSize: '13px', fontWeight: 700, flexShrink: 0 }}>Clock out ›</span>
+                      </button>
                     )
                   })}
-                  {onTheClock.length > 4 && <p style={{ fontSize: '13px', color: '#717171' }}>+{onTheClock.length - 4} more</p>}
+                  {onTheClock.length > 4 && <p style={{ fontSize: '13px', color: '#717171' }}>+{onTheClock.length - 4} more on the Crew screen</p>}
                 </div>
               </div>
             )}
@@ -4938,7 +5148,7 @@ ${link}`
           <div>
             <BackBtn label="Crew" onClick={() => setActiveTab('crew')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
-              Weekly pay per worker, straight from their clocked hours. Tap "Mark Paid" each week to record a paycheck.
+              Weekly pay per worker, straight from their clocked hours. Tap "Mark paid" each week to record a paycheck. Tap a week to see its shifts and fix a wrong one.
             </p>
             {/* Moved up here from the bottom of the page at JP's call. Paying a
                 sub in cash is the thing an owner opens this screen to DO; the
@@ -4965,19 +5175,26 @@ ${link}`
                   {rows.map(r => {
                     const paid = paychecks.find(c => c.worker_id === r.worker_id && c.week_start === r.week_start)
                     const paidExtra = paid ? r.gross - (paid.gross_pay || 0) : 0 // hours added since the paycheck was recorded
+                    // Tap the week to unfold its shifts; tap a shift to fix it.
+                    const weekKey = r.worker_id + '|' + r.week_start
+                    const unfolded = payWeekOpen === weekKey
+                    const shifts = r.shifts || []
                     return (
-                      <div key={r.week_start} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
-                        <div>
-                          <p style={{ fontWeight: '600', fontSize: '14px' }}>Week of {new Date(r.week_start + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-                          <p style={{ fontSize: '12px', color: '#717171' }}>{formatTime(r.minutes)} · {formatCurrency(r.gross)}</p>
-                        </div>
+                      <div key={r.week_start} style={{ padding: '4px 0 8px', borderTop: '1px solid #f0f0f0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <button type="button" onClick={() => setPayWeekOpen(unfolded ? null : weekKey)} aria-expanded={unfolded} style={{ flex: 1, minWidth: 0, minHeight: 'var(--tap)', background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', textAlign: 'left' }}>
+                          <span style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#1C2B3A' }}>Week of {new Date(r.week_start + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} <span style={{ color: '#9CA3AF', fontSize: '12px' }}>{unfolded ? '▾' : '▸'}</span></span>
+                          <span style={{ display: 'block', fontSize: '12px', color: '#717171' }}>{formatTime(r.minutes)} · {formatCurrency(r.gross)} · {shifts.length} shift{shifts.length === 1 ? '' : 's'}</span>
+                        </button>
                         {paid
                           ? <div style={{ textAlign: 'right' }}>
                               <span style={{ fontSize: '12px', fontWeight: '700', color: '#16A34A' }}>Paid ✓</span>
                               {paidExtra > 0.005 && <p style={{ fontSize: '11px', fontWeight: '700', color: '#DC2626', marginTop: '2px' }}>+{formatCurrency(paidExtra)} added since paid</p>}
                             </div>
-                          : <button onClick={() => recordPaycheck(r)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark paid</button>
+                          : <button onClick={() => recordPaycheck(r)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: 'var(--tap)' }}>Mark paid</button>
                         }
+                      </div>
+                      {unfolded && shifts.map(t => shiftRow(t, true))}
                       </div>
                     )
                   })}
@@ -5438,6 +5655,7 @@ ${link}`
       )}
 
       {scheduleModal}
+      {shiftFixSheet}
 
       {testimonialModal}
 
