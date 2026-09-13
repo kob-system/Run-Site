@@ -85,6 +85,16 @@ const EXPORT_TABLES = [
   // owner_id filter is not redundant belt-and-braces — it is load-bearing.
   ['testimonials', 'Your review', 'owner_id'],
 ]
+// Tables whose rows point at a file in the private `receipts` bucket, and the
+// column holding that file's path. Each one gets a signed download_link in the
+// export. Receipts were missing from this list, so the export (and the your-data
+// page) promised receipt pictures and handed over a storage path nobody could open.
+const EXPORT_LINK_COLS = {
+  job_photos: 'photo_url',
+  job_documents: 'file_url',
+  receipts: 'photo_url',
+  compliance_items: 'file_path',
+}
 // THREE DOORS. This was four tabs with eight sub-tabs behind them — twelve
 // places a man in a truck had to guess between. JP, 2026-08-30: he wanted to
 // open a job and see three things, not a filing cabinet.
@@ -2559,7 +2569,7 @@ ${link}`
       rows.push(['Generated', new Date().toLocaleString()])
       rows.push([])
       rows.push(['This is every record on your account, one section per kind.'])
-      rows.push(['Photos and documents have a "download_link" column. Those links open the real file, and they expire 7 days after this file was made — re-download this export any time to get fresh ones.'])
+      rows.push(['Photos, receipt pictures and documents have a "download_link" column. Those links open the real file, and they expire 7 days after this file was made. Re-download this export any time to get fresh ones.'])
       rows.push([])
 
       let failed = 0
@@ -2597,18 +2607,20 @@ ${link}`
         // right trade here — long enough to hand the file to an accountant,
         // short enough that a CSV emailed around isn't a permanent public key
         // to every receipt photo in the business.
-        const linkCol = table === 'job_documents' ? 'file_url' : table === 'job_photos' ? 'photo_url' : null
+        const linkCol = EXPORT_LINK_COLS[table] || null
         const links = new Map()
         if (linkCol) {
           // Rows written before the bucket went private still hold a full URL;
           // those are already openable and must not be re-signed as if they
           // were paths.
-          const paths = data.map(r => r[linkCol]).filter(u => u && !/^https?:\/\//.test(u))
-          if (paths.length) {
+          const paths = [...new Set(data.map(r => r[linkCol]).filter(u => u && !/^https?:\/\//.test(u)))]
+          // Signed in batches: a busy account has thousands of receipt photos,
+          // and one giant request is the likeliest way to lose every link at once.
+          for (let i = 0; i < paths.length; i += 500) {
             try {
-              const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 604800)
+              const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths.slice(i, i + 500), 604800)
               ;(signed || []).forEach(s => { if (s && s.path && s.signedUrl) links.set(s.path, s.signedUrl) })
-            } catch { /* fall through — the path column is still exported below */ }
+            } catch { /* fall through: the path column is still exported below */ }
           }
         }
 
@@ -4216,7 +4228,7 @@ ${link}`
               <ul style={{ fontSize: '13px', color: '#4B5563', lineHeight: '1.55', margin: '0 0 14px', paddingLeft: '18px' }}>
                 <li style={{ marginBottom: '6px' }}>Everything you enter — jobs, receipts, hours, photos, invoices — is stored on servers in the <b>United States</b>.</li>
                 <li style={{ marginBottom: '6px' }}><b>No other company can see any of it.</b> The database checks who's asking on every single request, so one business can never read another's jobs, clients, crew or files.</li>
-                <li style={{ marginBottom: '6px' }}>Receipt photos are read by Claude to pull out the store and the total, so you don't have to type them. That's the only thing the picture is used for.</li>
+                <li style={{ marginBottom: '6px' }}>Receipt photos, and whatever you ask the assistant, are sent to Anthropic's Claude so it can do what you asked. We use them for nothing else.</li>
                 <li style={{ marginBottom: '6px' }}>Card numbers are handled by <b>Stripe</b> and never touch JobTally.</li>
                 <li style={{ marginBottom: '6px' }}><b>We don't sell your data, to anyone, ever.</b></li>
                 <li>Cancelling doesn't erase anything — your records stay put.</li>
@@ -4241,9 +4253,10 @@ ${link}`
             <div className="card" style={{ borderColor: '#f1d4d4' }}>
               <h3 style={{ marginBottom: '4px' }}>Delete my account</h3>
               <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', lineHeight: '1.55' }}>
-                Erases your account and everything in it — every job, receipt, hour, photo, estimate and
-                invoice. It cannot be undone and we cannot get it back for you. <b>Download your data first
-                if you might want it.</b>
+                Cancels your billing, then erases your account and every job, receipt, hour, estimate and
+                invoice in it. Job photos and documents you uploaded are not wiped by this button yet: email
+                support@getjobtally.com and we'll delete them. It cannot be undone and we cannot get it back
+                for you. <b>Download your data first if you might want it.</b>
               </p>
               {!deleteOpen ? (
                 <button
