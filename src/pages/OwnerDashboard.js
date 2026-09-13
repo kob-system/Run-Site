@@ -2416,6 +2416,17 @@ ${link}`
     setStagePicker(false)
     if (!project || next === project.stage) return
     const wasEnd = project.stage === 'end'
+    // Reopening a finished job takes the free slot, the same as starting a new
+    // one, and the database refuses it when the slot is taken
+    // (FIX-DATABASE-38, projects_free_job_limit). Say that in plain English
+    // first, like createJob does, instead of "Could not change the status".
+    if (wasEnd && next !== 'end' && !project.is_sample && !canAddJob) {
+      showToast(
+        `You're on the free plan, one job open at a time. Finish “${activeProjects[0] ? activeProjects[0].name : 'your open job'}” first, or subscribe to run more.`,
+        'error'
+      )
+      return
+    }
     try {
       const { error } = await supabase.from('projects').update({
         stage: next,
