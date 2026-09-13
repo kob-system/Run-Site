@@ -364,13 +364,19 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   // Owners who signed up before it existed are not ambushed with it; they find it under
   // More. ?walkthrough=1 (or =worker) opens it on demand, for demos and for testing.
   const [walkthrough, setWalkthrough] = useState(null) // null | 'owner' | 'worker'
+  // The home-screen card waits its turn: it stays hidden until we know whether the
+  // walkthrough is opening, and for as long as it is open. Both at once was too much.
+  const [walkthroughChecked, setWalkthroughChecked] = useState(false)
   useEffect(() => {
     if (!profile?.id) return
     const ask = new URLSearchParams(window.location.search).get('walkthrough')
-    if (ask) { setWalkthrough(ask === 'worker' ? 'worker' : 'owner'); return }
-    let seen = null
-    try { seen = localStorage.getItem(walkthroughSeenKey(profile.id)) } catch { /* private mode: treat as unseen */ }
-    if (!seen && profile.created_at && new Date(profile.created_at) >= new Date('2026-09-13T00:00:00Z')) setWalkthrough('owner')
+    if (ask) setWalkthrough(ask === 'worker' ? 'worker' : 'owner')
+    else {
+      let seen = null
+      try { seen = localStorage.getItem(walkthroughSeenKey(profile.id)) } catch { /* private mode: treat as unseen */ }
+      if (!seen && profile.created_at && new Date(profile.created_at) >= new Date('2026-09-13T00:00:00Z')) setWalkthrough('owner')
+    }
+    setWalkthroughChecked(true)
   }, [profile?.id, profile?.created_at])
   const closeWalkthrough = useCallback(() => {
     try { localStorage.setItem(walkthroughSeenKey(profile.id), new Date().toISOString()) } catch { /* nothing to do */ }
@@ -5240,7 +5246,7 @@ ${link}`
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
       <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
-      <InstallPrompt />
+      <InstallPrompt hold={!walkthroughChecked || !!walkthrough} />
       <Walkthrough open={!!walkthrough} start={walkthrough || 'owner'} onClose={closeWalkthrough} />
 
       {/* Ask sits in the MIDDLE, raised out of the bar, because talking to it is
