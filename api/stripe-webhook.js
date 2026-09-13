@@ -119,7 +119,19 @@ async function upsertSubscription(row) {
     },
     body: JSON.stringify(row),
   })
-  if (!r.ok) throw new Error('subscriptions upsert failed: ' + r.status + ' ' + (await r.text()))
+  if (r.ok) return
+  const text = await r.text()
+  // 23503 = foreign key violation: subscriptions.owner_id points at a profile
+  // that no longer exists. That only happens when the owner deleted their
+  // account: delete-account cancels the Stripe subscription first, and the
+  // resulting customer.subscription.deleted event lands after the profile is
+  // gone. There is nobody left to write a row for. Throwing here would 500,
+  // make Stripe retry for days and page JP about a "customer with no access".
+  if (r.status === 409 && text.includes('23503')) {
+    console.warn('stripe-webhook: owner no longer exists, subscription row skipped:', row.owner_id)
+    return
+  }
+  throw new Error('subscriptions upsert failed: ' + r.status + ' ' + text)
 }
 
 // The guard field (last_event_at) for an owner's current subscription row.
