@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { track, trackOnce, EV } from '../utils/analytics'
 import InstallButton from '../components/InstallButton'
+import { useVideoSpeed, SpeedPicker } from '../components/VideoSpeed'
 import './Remodelers.css'
 
 // Public marketing page at /remodelers — remodelers & GCs running a 2–10 man
@@ -93,6 +94,10 @@ export default function Remodelers() {
     track(EV.LANDING_CTA, { where: 'intro-video-play', page: 'remodelers' })
   }
 
+  // One saved speed drives both videos: pick 2x on either and the other follows.
+  const introSpeed = useVideoSpeed()
+  const pitchSpeed = useVideoSpeed()
+
   return (
     <div className="rl">
       {/* Top bar */}
@@ -152,6 +157,7 @@ export default function Remodelers() {
           </p>
           <div className="rl-video-frame">
             <video
+              ref={introSpeed.videoRef}
               controls
               playsInline
               preload="none"
@@ -161,6 +167,9 @@ export default function Remodelers() {
             >
               Your browser can't play this video.
             </video>
+          </div>
+          <div style={{ marginTop: '14px' }}>
+            <SpeedPicker speed={introSpeed.speed} onChange={introSpeed.setSpeed} />
           </div>
           <div className="rl-video-after">
             <a className="rl-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start free — no card</a>
@@ -182,6 +191,7 @@ export default function Remodelers() {
           </p>
           <div className="rl-video-frame">
             <video
+              ref={pitchSpeed.videoRef}
               controls
               playsInline
               preload="none"
@@ -191,6 +201,9 @@ export default function Remodelers() {
             >
               Your browser can't play this video.
             </video>
+          </div>
+          <div style={{ marginTop: '14px' }}>
+            <SpeedPicker speed={pitchSpeed.speed} onChange={pitchSpeed.setSpeed} />
           </div>
           <div className="rl-video-after">
             <a className="rl-cta" href={SIGNUP_URL} onClick={cta('video')}>Start free — no card</a>

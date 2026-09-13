@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import './Landing.css'
 import { track, trackOnce, EV } from '../utils/analytics'
+import { useVideoSpeed, SpeedPicker } from '../components/VideoSpeed'
 
 // Public landing page at / — what a stranger sees before they have an account.
 // Rendered before the Login screen (App.js) for logged-out visitors; logged-in
@@ -93,6 +94,7 @@ export default function Landing() {
     introPlayedRef.current = true
     track(EV.LANDING_CTA, { where: 'intro-video-play' })
   }
+  const introSpeed = useVideoSpeed()
 
   return (
     <div className="ld">
@@ -155,6 +157,7 @@ export default function Landing() {
           <p className="ld-kicker">John Paul Kobrossi, founder of JobTally. I built the whole thing myself.</p>
           <div className="ld-video-frame">
             <video
+              ref={introSpeed.videoRef}
               controls
               playsInline
               preload="none"
@@ -164,6 +167,9 @@ export default function Landing() {
             >
               Your browser can't play this video.
             </video>
+          </div>
+          <div style={{ marginTop: '14px' }}>
+            <SpeedPicker speed={introSpeed.speed} onChange={introSpeed.setSpeed} />
           </div>
         </div>
       </section>

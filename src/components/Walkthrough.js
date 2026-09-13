@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useVideoSpeed, SpeedPicker } from './VideoSpeed'
 
 // The two narrated walkthroughs JP recorded 2026-09-12: the owner side (3 min) and the
 // worker side (1 min). Portrait crops of the phone, captions from what he actually said.
@@ -18,6 +19,8 @@ export default function Walkthrough({ open, start = 'owner', onClose }) {
   const [autoPlay, setAutoPlay] = useState(false)
   const trackRef = useRef(null)
   const closeRef = useRef(null)
+  // Lives up here, not on the video, so the speed survives a tab switch.
+  const { speed, setSpeed, videoRef } = useVideoSpeed()
 
   useEffect(() => {
     if (!open) return
@@ -66,7 +69,7 @@ export default function Walkthrough({ open, start = 'owner', onClose }) {
           ))}
         </div>
 
-        <video key={side} controls playsInline preload="metadata" autoPlay={autoPlay} poster={v.poster}
+        <video key={side} ref={videoRef} controls playsInline preload="metadata" autoPlay={autoPlay} poster={v.poster}
           onEnded={() => setEnded(true)} onPlay={() => setEnded(false)}
           style={{ display: 'block', height: 'min(60vh, 560px)', maxWidth: '100%', aspectRatio: '540 / 1040', background: '#000', borderRadius: '14px' }}>
           <source src={v.src} type="video/mp4" />
@@ -75,6 +78,11 @@ export default function Walkthrough({ open, start = 'owner', onClose }) {
         </video>
 
         <div aria-hidden="true" style={{ minHeight: '44px', width: '100%', textAlign: 'center', fontSize: '16px', lineHeight: 1.35, fontWeight: 600 }}>{caption}</div>
+
+        {/* Under the caption, not between it and the video, so the words stay
+            right under the picture. The caption box holds two lines, which is
+            the longest cue either file has, so these buttons never jump. */}
+        <SpeedPicker dark speed={speed} onChange={setSpeed} />
 
         {ended && side === 'owner' && (
           <div style={{ width: '100%', background: '#fff', color: '#1C2B3A', borderRadius: '14px', padding: '14px', textAlign: 'center' }}>
