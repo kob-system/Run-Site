@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#1C2B3A" />
+    <meta name="theme-color" content="#05070c" />
     <title>Kobrossi Systems, business consultant, Capital Region NY</title>
-    <meta name="description" content="Kobrossi Systems finds what's costing your business time or money and builds the fix: a website and local SEO, a CRM and texting system, or custom software. Local, direct, priced on the job." />
-    <meta name="keywords" content="capital region business consultant, local SEO albany ny, missed call text back, small business CRM, website and SEO bundle" />
+    <meta name="description" content="Kobrossi Systems finds what's costing your business time or money and builds the fix: a website and local SEO, a CRM and texting system, or custom software. Leans construction (a civil engineering student), works with any business. Local, direct, priced on the job." />
+    <meta name="keywords" content="capital region business consultant, contractor software capital region, local SEO albany ny, missed call text back, small business CRM, website and SEO bundle" />
     <link rel="canonical" href="https://www.getjobtally.com/" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
     <!-- iPhone home-screen behaviour still matters for the JobTally app itself
@@ -42,7 +42,7 @@
         "@type": "ProfessionalService",
         "name": "Kobrossi Systems",
         "url": "https://www.getjobtally.com/",
-        "description": "Business consulting for small businesses in New York's Capital Region. Finding where a business is losing time or money and building the fix, from websites and local SEO to CRM/texting systems to custom software.",
+        "description": "Business consulting for small businesses in New York's Capital Region. Finding where a business is losing time or money and building the fix, from websites and local SEO to CRM/texting systems to custom software. Leans construction and contractors (the founder is a civil engineering student) but works with any business type.",
         "areaServed": { "@type": "Place", "name": "Capital Region, NY (within about an hour of Menands, NY)" },
         "address": { "@type": "PostalAddress", "addressLocality": "Menands", "addressRegion": "NY", "addressCountry": "US" },
         "makesOffer": [
@@ -108,21 +108,23 @@
 
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f6f9; color: #1C2B3A; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #05070c; color: #f4f6fb; }
       /* Static fallback shown in raw HTML for search engines / AI crawlers and as
          a graceful loading splash. React (createRoot) clears #root and replaces
-         this the instant the app bundle runs — logged-in users never linger here. */
+         this the instant the app bundle runs — logged-in users never linger here.
+         Dark to match the real page (Landing.js/Landing.css) so there's no flash
+         of the old light template before the bundle takes over. */
       .seo-fallback { max-width: 820px; margin: 0 auto; padding: 40px 22px 64px; }
       .seo-fallback header { text-align: center; margin-bottom: 28px; }
       .seo-fallback .brand { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
       .seo-fallback h1 { font-size: 30px; line-height: 1.15; margin: 22px 0 12px; letter-spacing: -0.5px; }
       .seo-fallback h2 { font-size: 20px; margin: 28px 0 10px; }
-      .seo-fallback p { font-size: 16px; line-height: 1.6; margin: 0 0 12px; color: #33445a; }
+      .seo-fallback p { font-size: 16px; line-height: 1.6; margin: 0 0 12px; color: rgba(244,246,251,0.72); }
       .seo-fallback ul { margin: 0 0 12px 20px; }
-      .seo-fallback li { font-size: 16px; line-height: 1.7; color: #33445a; }
-      .seo-fallback a.cta { display: inline-block; background: #1C2B3A; color: #fff; text-decoration: none; padding: 13px 22px; border-radius: 10px; font-weight: 700; margin: 8px 0 4px; }
-      .seo-fallback .note { font-size: 13px; color: #6b7a8d; }
-      .seo-fallback .load { text-align: center; color: #9aa7b6; font-size: 13px; margin-top: 40px; }
+      .seo-fallback li { font-size: 16px; line-height: 1.7; color: rgba(244,246,251,0.72); }
+      .seo-fallback a.cta { display: inline-block; background: #3fe8e2; color: #051013; text-decoration: none; padding: 13px 22px; border-radius: 10px; font-weight: 700; margin: 8px 0 4px; }
+      .seo-fallback .note { font-size: 13px; color: rgba(244,246,251,0.5); }
+      .seo-fallback .load { text-align: center; color: rgba(244,246,251,0.4); font-size: 13px; margin-top: 40px; }
     </style>
 
     <!-- Catch `beforeinstallprompt` before React exists.

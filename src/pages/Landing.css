@@ -1,280 +1,322 @@
-/* Public landing page at /. Scoped with an ld- prefix so nothing leaks into
-   the app shell. Mobile-first; breakpoints widen it for desktop. Colors come
-   from the design tokens in index.css (navy/orange). Same visual language as
-   the /remodelers funnel page (Remodelers.css) so the brand reads as one. */
+/* Public landing page at / — full futuristic rebuild, 2026-09-21 evening.
+   JP's call after watching the previous pass live: "still fully JobTally,
+   still a template." This file is now a self-contained dark system — its own
+   tokens under .ld, nothing borrowed from index.css's navy/orange app theme —
+   so the rest of the logged-in app (untouched) keeps its own look.
 
-.ld { background: var(--surface); color: var(--text); line-height: 1.55; }
-.ld section { padding: 48px 20px; }
-.ld .ld-inner { max-width: 1020px; margin: 0 auto; }
+   Visual idea: a digital blueprint. JP is a civil-engineering student who
+   builds software — the page reads like an engineering drawing crossed with
+   an interface from the future: grid paper, corner brackets, coordinate-style
+   mono labels, glass panels, glow. Ties the construction niche and the
+   "futuristic" ask into one coherent system instead of two competing moods.
 
-/* Top bar */
-.ld-top { position: sticky; top: 0; z-index: 50; background: var(--navy); display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; }
-.ld-top .ld-logo { color: var(--orange); font-size: 20px; font-weight: 800; letter-spacing: 0.02em; text-decoration: none; }
-.ld-top nav { display: flex; align-items: center; gap: 14px; }
-.ld-top .ld-signin { color: rgba(255,255,255,0.75); font-size: 14px; font-weight: 600; text-decoration: none; padding: 8px 4px; }
-.ld-top .ld-cta-sm { background: var(--orange); color: #fff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 10px 14px; border-radius: 8px; min-height: 40px; display: inline-flex; align-items: center; }
-.ld-top .ld-cta-sm:hover { background: var(--orange-dark); }
+   Fonts are self-hosted (public/fonts) — the site's CSP is font-src 'self'
+   only, so a Google Fonts <link> would 404 silently in prod. See
+   csp-blocks-external-images-silently.md for the same class of bug on images. */
 
-/* Shared CTA */
-.ld-cta { display: inline-flex; align-items: center; justify-content: center; background: var(--orange); color: #fff; font-size: 17px; font-weight: 700; text-decoration: none; padding: 15px 28px; border-radius: 10px; min-height: var(--tap); margin-top: 24px; transition: background .15s ease, transform .05s ease; }
-.ld-cta:hover { background: var(--orange-dark); }
-.ld-cta:active { transform: translateY(1px); }
-
-/* Phone frame around real app screenshots */
-.ld-phone { width: min(300px, 78vw); margin: 0 auto; border: 8px solid #0e1822; border-radius: 34px; overflow: hidden; background: #0e1822; box-shadow: 0 24px 48px rgba(0,0,0,0.35); }
-.ld-phone img { display: block; width: 100%; height: auto; }
-.ld-phone-sm { width: min(260px, 72vw); box-shadow: 0 16px 36px rgba(0,0,0,0.22); }
-
-/* Hero — diagonal cut on the bottom edge + a soft orange glow behind the
-   copy so this reads as designed, not a template with new words in it. The
-   glow is a plain radial-gradient div, no image, so it costs nothing. */
-.ld-hero { position: relative; background: var(--navy); color: #fff; padding: 64px 20px 84px; overflow: hidden; clip-path: polygon(0 0, 100% 0, 100% 94%, 0 100%); }
-.ld-hero-glow { position: absolute; top: -120px; right: -140px; width: 480px; height: 480px; background: radial-gradient(circle, rgba(224,123,42,0.35) 0%, rgba(224,123,42,0) 70%); pointer-events: none; }
-.ld-hero-grid { position: relative; max-width: 1020px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 40px; align-items: center; }
-@media (min-width: 860px) { .ld-hero-grid { grid-template-columns: 7fr 5fr; } }
-.ld-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--orange); background: rgba(224,123,42,0.14); border: 1px solid rgba(224,123,42,0.4); border-radius: 999px; padding: 7px 14px; margin-bottom: 18px; }
-.ld-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
-.ld-hero h1 { font-size: clamp(32px, 6vw, 52px); font-weight: 800; line-height: 1.1; max-width: 640px; letter-spacing: -0.01em; }
-.ld-hero .ld-sub { color: rgba(255,255,255,0.78); font-size: clamp(16px, 2.5vw, 19px); max-width: 540px; margin-top: 18px; }
-.ld-hero .ld-cta-note { color: rgba(255,255,255,0.55); font-size: 13px; margin-top: 10px; }
-.ld-cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
-.ld-cta-row .ld-cta { margin-top: 0; }
-.ld-cta-row--center { justify-content: center; }
-.ld-cta-call { background: transparent; border: 1.5px solid var(--orange); color: var(--orange); }
-.ld-cta-call:hover { background: rgba(224,123,42,0.12); }
-.ld-final .ld-cta-call { border-color: rgba(255,255,255,0.5); color: #fff; }
-.ld-final .ld-cta-call:hover { border-color: #fff; background: rgba(255,255,255,0.1); }
-/* The offer, sized like the offer. Orange rule on the left because on this
-   page orange means "this is the thing", and it sits directly above the button
-   so the promise and the tap are one glance apart. */
-.ld-free { margin: 26px 0 22px; padding: 16px 0 16px 18px; border-left: 4px solid var(--orange); max-width: 540px; }
-.ld-free-big { font-size: clamp(26px, 5vw, 38px); font-weight: 800; line-height: 1.1; letter-spacing: -0.01em; }
-.ld-free-sub { color: rgba(255,255,255,0.72); font-size: clamp(14px, 2vw, 16px); margin-top: 8px; line-height: 1.45; }
-.ld-trust { list-style: none; padding: 0; margin: 26px 0 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
-.ld-trust li { color: rgba(255,255,255,0.7); font-size: 14px; font-weight: 600; position: relative; padding-left: 20px; }
-.ld-trust li::before { content: '✓'; position: absolute; left: 0; color: var(--orange); font-weight: 700; }
-.ld-hero-shot { text-align: center; }
-.ld-shot-caption { color: rgba(255,255,255,0.5); font-size: 12px; margin-top: 14px; }
-
-/* Section headings */
-.ld h2 { font-size: clamp(24px, 4vw, 32px); font-weight: 800; text-align: center; }
-.ld .ld-kicker { text-align: center; color: var(--text-muted); font-size: 15px; margin: 8px auto 8px; max-width: 520px; }
-
-/* Watch-it-run video — 16:9, click-to-play */
-.ld-video { background: var(--navy); color: #fff; }
-.ld-video h2 { color: #fff; }
-.ld-video .ld-kicker { color: rgba(255,255,255,0.6); }
-.ld-video-frame { max-width: 860px; margin: 24px auto 0; border-radius: var(--radius); overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.45); background: #000; aspect-ratio: 16 / 9; }
-.ld-video-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
-
-/* Introduction video — tinted on purpose so two stacked video blocks don't
-   read as the same video twice. Matches .rl-intro on /remodelers.
-   The 16/9 + object-fit:cover above is for the walkthrough, which is a
-   screen recording; the intro is a person on camera and its real aspect is
-   whatever the phone shot, so the frame follows the file instead of cropping
-   a face out of it. */
-.ld-intro { background: var(--orange-tint); }
-.ld-intro h2 { margin-bottom: 4px; }
-/* The name is the only credential on the page before anyone has used the
-   product, so it gets weight, not muted grey. */
-.ld-intro .ld-kicker { color: var(--text-secondary); font-weight: 600; margin-bottom: 4px; }
-.ld-intro .ld-video-frame { max-width: 720px; aspect-ratio: auto; line-height: 0; box-shadow: var(--shadow-md); }
-.ld-intro .ld-video-frame video { height: auto; object-fit: contain; }
-.ld-video-after { text-align: center; }
-.ld-video-after .ld-cta-note { color: var(--text-muted); font-size: 13px; margin-top: 10px; }
-
-/* "Watch the introduction" — a pill, not a plain link, so it's findable
-   without competing with the orange primary CTA it sits under. Appears on
-   navy (hero, final CTA) and on white (origin story), hence the two skins. */
-.ld-intro-link { display: inline-flex; align-items: center; gap: 9px; margin-top: 20px; padding: 11px 20px; min-height: var(--tap); border: 1.5px solid var(--border); border-radius: 999px; color: var(--text); font-size: 15px; font-weight: 600; text-decoration: none; transition: border-color .15s ease, background .15s ease; }
-.ld-intro-link:hover { border-color: var(--text-muted); background: rgba(0,0,0,0.03); }
-.ld-intro-link .ld-play { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--orange); color: #fff; flex-shrink: 0; }
-.ld-hero .ld-intro-link, .ld-intro-link-onnavy { border-color: rgba(255,255,255,0.35); color: #fff; }
-.ld-hero .ld-intro-link:hover, .ld-intro-link-onnavy:hover { border-color: #fff; background: rgba(255,255,255,0.08); }
-/* Sticky top bar is ~64px — without this, #intro lands under it. */
-.ld section[id] { scroll-margin-top: 72px; }
-
-/* Why-this-exists origin/trust band */
-.ld-story { background: var(--bg); border-bottom: 1px solid var(--border); }
-.ld-story-inner { max-width: 760px; }
-.ld-story-kicker { color: var(--orange); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; text-align: center; margin-bottom: 10px; }
-.ld-story h2 { margin-bottom: 8px; }
-.ld-story p { font-size: 16px; color: var(--text-secondary); margin-top: 16px; }
-.ld-story p strong { color: var(--text); }
-.ld-story .ld-story-punch { font-size: 17px; color: var(--text); border-left: 3px solid var(--orange); padding-left: 16px; margin-top: 22px; }
-
-/* Feature rows — copy + phone, alternating sides on desktop */
-.ld-row { display: grid; grid-template-columns: 1fr; gap: 28px; align-items: center; padding: 36px 0; border-bottom: 1px solid var(--border); }
-.ld-row:last-child { border-bottom: none; }
-@media (min-width: 760px) {
-  .ld-row { grid-template-columns: 1fr 1fr; gap: 48px; }
-  .ld-row-flip .ld-row-copy { order: 2; }
-  .ld-row-flip .ld-row-shot { order: 1; }
+@font-face {
+  font-family: 'LD Display';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/archivo-700.woff2') format('woff2');
 }
-.ld-row-kicker { color: var(--orange); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
-.ld-row-copy h3 { font-size: clamp(20px, 3vw, 26px); font-weight: 800; line-height: 1.2; margin-bottom: 10px; }
-.ld-row-copy p { font-size: 16px; color: var(--text-secondary); }
-
-/* The home-screen band and the "Everything included" band are both gone —
-   they were the feature list a third and fourth time. The home screen is now a
-   row in What it does; the included list lives inside the price card. */
-
-/* What you get, inside the price card */
-.ld-price-inc { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); text-align: left; }
-.ld-price-inc-head { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
-.ld-price-inc .ld-inc-grid { margin-top: 14px; }
-.ld-inc-grid { list-style: none; padding: 0; margin: 28px 0 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
-@media (min-width: 560px) { .ld-inc-grid { grid-template-columns: 1fr 1fr; } }
-.ld-inc-grid li { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px 12px 38px; font-size: 15px; font-weight: 600; position: relative; }
-.ld-inc-grid li::before { content: '✓'; position: absolute; left: 14px; color: var(--green); font-weight: 700; }
-
-/* How it works */
-.ld-how { background: var(--navy); color: #fff; }
-.ld-steps { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 32px; }
-@media (min-width: 760px) { .ld-steps { grid-template-columns: 1fr 1fr 1fr; } }
-.ld-step { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: var(--radius); padding: 24px 20px; }
-.ld-step-num { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: var(--orange); color: #fff; font-weight: 800; font-size: 16px; }
-.ld-step h3 { font-size: 17px; font-weight: 700; margin: 14px 0 6px; }
-.ld-step p { font-size: 14px; color: rgba(255,255,255,0.7); }
-
-/* Social proof — real approved quotes. The section only renders when there are
-   some, so these rules are dormant until a customer actually says something. */
-.ld-proof { background: var(--bg); }
-.ld-proof-grid { max-width: 900px; margin: 26px auto 0; display: grid; grid-template-columns: 1fr; gap: 14px; }
-.ld-proof-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--orange); border-radius: var(--radius); padding: 20px 22px; margin: 0; }
-.ld-proof-stars { color: var(--orange); font-size: 15px; letter-spacing: 2px; margin-bottom: 8px; }
-.ld-proof-card blockquote { margin: 0; font-size: 16px; color: var(--text); }
-.ld-proof-card figcaption { margin-top: 10px; font-size: 14px; font-weight: 600; color: var(--text-muted); }
-@media (min-width: 720px) { .ld-proof-grid { grid-template-columns: 1fr 1fr; } }
-
-/* Pricing (mirrors the /remodelers card) */
-.ld-pricing { text-align: center; }
-.ld-price-card { max-width: 420px; margin: 28px auto 0; background: #fff; border: 2px solid var(--navy); border-radius: var(--radius-lg); padding: 28px 24px; box-shadow: var(--shadow-md); }
-.ld-price-card .ld-price { font-size: 44px; font-weight: 800; }
-.ld-price-card .ld-price span { font-size: 17px; font-weight: 500; color: var(--text-muted); }
-.ld-price-card ul { list-style: none; text-align: left; margin: 18px 0 4px; padding: 0; }
-.ld-price-card li { font-size: 15px; color: var(--text-secondary); padding: 6px 0 6px 26px; position: relative; }
-.ld-price-card li::before { content: '✓'; position: absolute; left: 2px; color: var(--green); font-weight: 700; }
-.ld-price-note { font-size: 13px; color: var(--text-muted); margin-top: 14px; }
-
-/* Which one's you — self-select by stage. Left-border color ties each card
-   back to its matching tier card above (green/orange/amber). */
-.ld-faq { background: var(--bg); }
-.ld-faq-list { max-width: 720px; margin: 28px auto 0; display: grid; gap: 14px; }
-.ld-faq-item { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius); padding: 20px 22px; display: flex; gap: 16px; align-items: flex-start; }
-.ld-faq-item--green { border-left-color: var(--green); }
-.ld-faq-item--orange { border-left-color: var(--orange); }
-.ld-faq-item--amber { border-left-color: var(--amber); }
-.ld-faq-num { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: var(--navy); color: #fff; font-weight: 800; font-size: 13px; }
-.ld-faq-item h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; font-style: italic; }
-.ld-faq-item p { font-size: 15px; color: var(--text-secondary); }
-
-/* Free-calculator strip — the give-before-you-ask offer for a visitor who is
-   not signing up today. Deliberately quieter than the final CTA under it so it
-   reads as an alternative, not a competing ask. */
-.ld-calc-strip { background: var(--orange-tint); text-align: center; }
-.ld-calc-strip h2 { font-size: clamp(20px, 3.5vw, 26px); font-weight: 800; max-width: 620px; margin: 0 auto; }
-.ld-calc-strip p { font-size: 15px; color: var(--text-secondary); max-width: 520px; margin: 12px auto 0; }
-
-/* Final CTA + footer */
-.ld-final { background: var(--navy); color: #fff; text-align: center; }
-.ld-final h2 { max-width: 560px; margin: 0 auto; }
-.ld-final p { color: rgba(255,255,255,0.7); font-size: 15px; max-width: 460px; margin: 12px auto 0; }
-.ld-footer { background: var(--navy); border-top: 1px solid rgba(255,255,255,0.12); padding: 20px; text-align: center; font-size: 13px; color: rgba(255,255,255,0.5); }
-.ld-footer a { color: rgba(255,255,255,0.6); text-decoration: none; margin: 0 8px; }
-.ld-footer a:hover { text-decoration: underline; }
-
-/* "Nothing to download" — add-to-home-screen block in the hero.
-   Only renders on a phone that can actually act on it (see InstallButton),
-   so it is styled for a narrow column first. */
-.ld-a2hs {
-  margin-top: 18px;
-  padding: 14px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.08);
+@font-face {
+  font-family: 'LD Display';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('../fonts/archivo-800.woff2') format('woff2');
 }
-.ld-a2hs-copy {
-  font-size: 14px;
+@font-face {
+  font-family: 'LD Display';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('../fonts/archivo-900.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'LD Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/plexmono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'LD Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/plexmono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'LD Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/plexmono-600.woff2') format('woff2');
+}
+
+.ld {
+  --bg: #05070c;
+  --bg-2: #0a0f1a;
+  --panel: rgba(255, 255, 255, 0.045);
+  --panel-hover: rgba(255, 255, 255, 0.075);
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.24);
+  --ink: #f4f6fb;
+  --ink-dim: rgba(244, 246, 251, 0.7);
+  --ink-mute: rgba(244, 246, 251, 0.46);
+  --cyan: #3fe8e2;
+  --violet: #9b7bff;
+  --blue: #4c8dff;
+  --green: #35e3a1;
+  --orange: #ff9a4d;
+  --amber: #ffc94d;
+  --font-display: 'LD Display', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'LD Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-display);
   line-height: 1.55;
-  margin-bottom: 12px;
-  opacity: 0.95;
+  position: relative;
+  overflow-x: clip;
 }
 
-/* "Or just say it" — the voice assistant band.
-   Navy, unlike the feature rows above it, because it is deliberately a
-   different KIND of claim: the features say what the app has, this says how
-   little work using it is. The colour break is what stops it reading as a
-   sixth feature row. Same navy as the hero and the video band, so the page
-   still alternates in two tones rather than sprouting a third. */
-.ld-say { background: var(--navy); color: #fff; }
-.ld-say .ld-inner { max-width: 780px; }
-.ld-say-kicker { color: var(--orange); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; text-align: center; margin-bottom: 10px; }
-.ld-say h2 { color: #fff; margin-bottom: 10px; }
-.ld-say-lede { font-size: 16px; color: rgba(255,255,255,0.82); max-width: 620px; margin: 0 auto 26px; text-align: center; line-height: 1.6; }
-.ld-say-list { display: grid; gap: 14px; }
-.ld-say-item { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 16px 18px; }
-/* The spoken line is the hero of each card, so it gets the size and the
-   weight; the outcome is support. Reversing that reads like a feature list. */
-.ld-say-said { font-size: 16.5px; font-weight: 600; line-height: 1.5; color: #fff; }
-.ld-say-said span { margin-right: 6px; }
-.ld-say-did { font-size: 14px; color: var(--orange); margin-top: 8px; font-weight: 600; line-height: 1.5; }
-.ld-say-foot { font-size: 15px; color: rgba(255,255,255,0.72); text-align: center; margin-top: 24px; line-height: 1.6; }
-@media (min-width: 760px) {
-  .ld-say-said { font-size: 17.5px; }
+/* Blueprint grid, fixed behind everything. Two layer sizes (fine + coarse)
+   read as drafting paper without ever being loud enough to fight the copy. */
+.ld::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(rgba(63, 232, 226, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(63, 232, 226, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px, 28px 28px, 140px 140px, 140px 140px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 0%, transparent 75%);
 }
 
-/* "Or try it yourself" — the demo link under the hero CTA. Understated on
-   purpose: it must be findable by the visitor who isn't ready to give a card,
-   without competing with the trial button for the visitor who is. */
-.ld-demo-link { display: inline-block; margin-top: 12px; color: rgba(255,255,255,0.75); font-size: 15px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
-.ld-demo-link:hover { color: var(--orange); }
+.ld > * { position: relative; z-index: 1; }
 
-/* ── 2026-09-20 rebuild: single-column hero (no phone screenshot — there is
-   no product screen to show here), a secondary call/text CTA, and the
-   3-tier grid that replaced the single $150 price card. */
-.ld-hero-grid--solo { grid-template-columns: 1fr; max-width: 680px; }
+.ld section { padding: 96px 20px; }
+.ld .ld-inner { max-width: 1120px; margin: 0 auto; }
+.ld section[id] { scroll-margin-top: 76px; }
 
-/* Three tiers — a colored top bar per tier (green/orange/amber) so the card
-   itself signals "which stage," matching the self-select cards further down
-   the page. Hover lift is a cheap way to make a pricing grid feel designed
-   instead of static. */
-.ld-tiers { background: var(--bg); text-align: center; }
-.ld-tier-grid { display: grid; grid-template-columns: 1fr; gap: 20px; margin-top: 32px; text-align: left; }
-@media (min-width: 820px) { .ld-tier-grid { grid-template-columns: 1fr 1fr 1fr; } }
-.ld-tier-card { background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--border); border-radius: var(--radius-lg); padding: 26px 22px; box-shadow: var(--shadow-md); transition: transform .15s ease, box-shadow .15s ease; }
-.ld-tier-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
-.ld-tier-card--green { border-top-color: var(--green); }
-.ld-tier-card--orange { border-top-color: var(--orange); }
-.ld-tier-card--amber { border-top-color: var(--amber); }
-.ld-tier-num { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: var(--navy); color: var(--orange); font-weight: 800; font-size: 15px; margin-bottom: 14px; }
-.ld-tier-card--green .ld-tier-num { color: var(--green); }
-.ld-tier-card--amber .ld-tier-num { color: var(--amber); }
-.ld-tier-card h3 { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
-.ld-tier-price { color: var(--orange); font-weight: 700; font-size: 15px; margin-bottom: 8px; }
-.ld-tier-card--green .ld-tier-price { color: var(--green-dark); }
-.ld-tier-card--amber .ld-tier-price { color: #92650a; }
-.ld-tier-forwho { font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; }
-.ld-tier-card p { font-size: 15px; color: var(--text-secondary); line-height: 1.5; }
-.ld-how-cta { margin-top: 32px; }
+@media (max-width: 640px) {
+  .ld section { padding: 64px 18px; }
+}
 
-/* Portfolio — sized up from the first pass and each card carries a colored
-   initials avatar, so it reads as "here are the actual businesses" instead
-   of a plain link list. */
+/* ── Reveal-on-scroll ───────────────────────────────────────────────── */
+.ld-reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1); }
+.ld-reveal.ld-in { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .ld-reveal, .ld-reveal.ld-in { opacity: 1; transform: none; transition: none; }
+}
+
+/* ── Top bar ────────────────────────────────────────────────────────── */
+.ld-top {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px;
+  background: rgba(5, 7, 12, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.ld-top .ld-logo { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 800; font-size: 16px; letter-spacing: 0.01em; text-decoration: none; }
+.ld-logo-mark { width: 11px; height: 11px; border-radius: 3px; background: linear-gradient(135deg, var(--cyan), var(--violet)); box-shadow: 0 0 14px rgba(63,232,226,0.6); flex-shrink: 0; }
+.ld-logo-sub { display: none; font-family: var(--font-mono); font-size: 11px; color: var(--ink-mute); font-weight: 500; }
+@media (min-width: 560px) { .ld-logo-sub { display: inline; } }
+.ld-top nav { display: flex; align-items: center; gap: 16px; }
+.ld-top .ld-cta-sm {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--bg); background: var(--cyan);
+  text-decoration: none; padding: 10px 16px; border-radius: 8px; min-height: 40px;
+  display: inline-flex; align-items: center; transition: filter .15s ease, transform .15s ease;
+}
+.ld-top .ld-cta-sm:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+/* ── Shared bits ────────────────────────────────────────────────────── */
+.ld-eyebrow {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--font-mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.05em;
+  color: var(--cyan); background: rgba(63, 232, 226, 0.08);
+  border: 1px solid rgba(63, 232, 226, 0.28); border-radius: 999px;
+  padding: 7px 14px 7px 12px; margin-bottom: 22px;
+}
+.ld-eyebrow-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); flex-shrink: 0; animation: ld-pulse 2.2s ease-in-out infinite; }
+@keyframes ld-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .ld-eyebrow-dot { animation: none; } }
+
+.ld h2 { font-family: var(--font-display); font-weight: 800; font-size: clamp(26px, 4.2vw, 38px); letter-spacing: -0.01em; text-align: center; line-height: 1.15; }
+.ld .ld-kicker-label { display: block; font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); text-align: center; margin-bottom: 12px; }
+.ld .ld-kicker { text-align: center; color: var(--ink-mute); font-size: 15.5px; margin: 12px auto 0; max-width: 560px; line-height: 1.6; }
+
+.ld-grad-text {
+  background: linear-gradient(100deg, var(--cyan) 0%, var(--blue) 45%, var(--violet) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* CTA buttons */
+.ld-cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: linear-gradient(100deg, var(--cyan), var(--blue));
+  color: #051013; font-family: var(--font-display); font-size: 16px; font-weight: 800;
+  text-decoration: none; padding: 15px 26px; border-radius: 12px; min-height: 52px;
+  box-shadow: 0 0 0 1px rgba(63,232,226,0.25), 0 12px 30px -8px rgba(63,232,226,0.45);
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+.ld-cta:hover { transform: translateY(-2px); filter: brightness(1.06); box-shadow: 0 0 0 1px rgba(63,232,226,0.35), 0 16px 38px -8px rgba(63,232,226,0.55); }
+.ld-cta:active { transform: translateY(0); }
+.ld-cta-call {
+  background: transparent; color: var(--ink); box-shadow: none;
+  border: 1.5px solid var(--line-strong);
+}
+.ld-cta-call:hover { background: var(--panel-hover); border-color: var(--cyan); transform: translateY(-2px); box-shadow: none; }
+.ld-cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+.ld-cta-row--center { justify-content: center; }
+.ld-cta-note { font-family: var(--font-mono); color: var(--ink-mute); font-size: 13px; margin-top: 14px; }
+
+/* Corner brackets — the recurring "technical drawing" motif */
+.ld-corners { position: relative; }
+.ld-corners::before, .ld-corners::after,
+.ld-corners .ld-c2, .ld-corners .ld-c3 { content: ''; position: absolute; width: 14px; height: 14px; pointer-events: none; }
+.ld-corners::before { top: -1px; left: -1px; border-top: 2px solid var(--corner-color, var(--cyan)); border-left: 2px solid var(--corner-color, var(--cyan)); border-radius: 4px 0 0 0; opacity: 0.75; }
+.ld-corners::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--corner-color, var(--cyan)); border-right: 2px solid var(--corner-color, var(--cyan)); border-radius: 0 0 4px 0; opacity: 0.75; }
+
+/* ── Hero ───────────────────────────────────────────────────────────── */
+.ld-hero { position: relative; min-height: min(88vh, 820px); display: flex; align-items: center; padding-top: 140px; padding-bottom: 90px; overflow: hidden; }
+.ld-hero-field { position: absolute; inset: 0; z-index: 0; opacity: 0.75; }
+.ld-hero-glow-a { position: absolute; top: -180px; left: -120px; width: 620px; height: 620px; background: radial-gradient(circle, rgba(155,123,255,0.28) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+.ld-hero-glow-b { position: absolute; bottom: -220px; right: -160px; width: 680px; height: 680px; background: radial-gradient(circle, rgba(63,232,226,0.22) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+.ld-hero-inner { position: relative; z-index: 2; max-width: 780px; margin: 0 auto; padding: 0 22px; text-align: center; }
+.ld-hero h1 {
+  font-family: var(--font-display); font-weight: 900; font-size: clamp(34px, 6.6vw, 68px);
+  line-height: 1.06; letter-spacing: -0.02em; margin: 0 auto;
+}
+.ld-hero .ld-sub { color: var(--ink-dim); font-size: clamp(16px, 2.2vw, 19px); max-width: 560px; margin: 22px auto 0; line-height: 1.65; }
+.ld-hero .ld-cta-row { justify-content: center; }
+.ld-trust { list-style: none; padding: 0; margin: 36px 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; font-family: var(--font-mono); }
+.ld-trust li { color: var(--ink-mute); font-size: 13px; font-weight: 500; position: relative; padding-left: 18px; }
+.ld-trust li::before { content: ''; position: absolute; left: 0; top: 6px; width: 6px; height: 6px; border-radius: 1px; background: var(--cyan); transform: rotate(45deg); }
+
+.ld-scroll-cue { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.16em; color: var(--ink-mute); text-transform: uppercase; }
+.ld-scroll-cue-line { width: 1px; height: 30px; background: linear-gradient(var(--cyan), transparent); animation: ld-scroll-fall 1.8s ease-in-out infinite; }
+@keyframes ld-scroll-fall { 0% { opacity: 0.2; } 50% { opacity: 1; } 100% { opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) { .ld-scroll-cue-line { animation: none; } }
+@media (max-width: 640px) { .ld-scroll-cue { display: none; } }
+
+/* ── Ticker ─────────────────────────────────────────────────────────── */
+.ld-ticker { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.02); overflow: hidden; padding: 18px 0; }
+.ld-ticker-track { display: flex; width: max-content; gap: 44px; animation: ld-marquee 34s linear infinite; }
+@keyframes ld-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .ld-ticker-track { animation: none; } }
+.ld-ticker-item { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; color: var(--ink-mute); white-space: nowrap; display: flex; align-items: center; gap: 44px; }
+.ld-ticker-item b { color: var(--ink-dim); font-weight: 600; }
+.ld-ticker-item::after { content: '/'; color: var(--cyan); opacity: 0.5; margin-left: 44px; }
+
+/* ── How this works ─────────────────────────────────────────────────── */
+.ld-story { }
+.ld-process { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 44px; }
+@media (min-width: 820px) { .ld-process { grid-template-columns: repeat(3, 1fr); gap: 22px; } }
+.ld-process-step { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px; transition: border-color .2s ease, background .2s ease; }
+.ld-process-step:hover { border-color: var(--line-strong); background: var(--panel-hover); }
+.ld-process-num { font-family: var(--font-mono); font-size: 12px; color: var(--cyan); letter-spacing: 0.08em; margin-bottom: 16px; }
+.ld-process-step h3 { font-size: 18px; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.005em; }
+.ld-process-step p { font-size: 14.5px; color: var(--ink-dim); line-height: 1.6; }
+.ld-process-line { display: none; }
+@media (min-width: 820px) {
+  .ld-process { position: relative; }
+  .ld-process::before { content: ''; position: absolute; top: 20px; left: 16.5%; right: 16.5%; height: 1px; background: linear-gradient(90deg, transparent, var(--line-strong) 15%, var(--line-strong) 85%, transparent); z-index: -1; }
+}
+.ld-story-punch { text-align: center; max-width: 620px; margin: 40px auto 0; font-size: 17px; color: var(--ink); border-top: 1px solid var(--line); padding-top: 28px; }
+.ld-story-punch strong { color: var(--cyan); }
+
+/* ── Niche split (construction lean, serves everyone) ──────────────── */
+.ld-niche { background: linear-gradient(180deg, transparent, rgba(255,255,255,0.02) 20%, rgba(255,255,255,0.02) 80%, transparent); }
+.ld-niche-grid { display: grid; grid-template-columns: 1fr; gap: 40px; align-items: start; margin-top: 8px; }
+@media (min-width: 900px) { .ld-niche-grid { grid-template-columns: 1.1fr 0.9fr; gap: 56px; } }
+.ld-niche-copy h2 { text-align: left; }
+.ld-niche .ld-kicker-label { text-align: left; }
+.ld-niche-copy p { color: var(--ink-dim); font-size: 16px; line-height: 1.7; margin-top: 18px; }
+.ld-niche-copy p strong { color: var(--ink); }
+.ld-niche-list { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 10px; }
+.ld-niche-list li { font-family: var(--font-mono); font-size: 13.5px; color: var(--ink-dim); padding-left: 22px; position: relative; }
+.ld-niche-list li::before { content: ''; position: absolute; left: 0; top: 7px; width: 8px; height: 8px; border: 1.5px solid var(--green); border-radius: 2px; transform: rotate(45deg); }
+
+.ld-niche-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 28px 26px; --corner-color: var(--violet); }
+.ld-niche-panel-label { font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--violet); margin-bottom: 6px; }
+.ld-niche-panel h3 { font-size: 19px; font-weight: 800; margin-bottom: 16px; }
+.ld-industry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ld-industry-chip { font-size: 13.5px; font-weight: 600; color: var(--ink-dim); background: rgba(255,255,255,0.03); border: 1px solid var(--line); border-radius: 10px; padding: 12px 12px; text-align: center; transition: border-color .15s ease, color .15s ease; }
+.ld-industry-chip:hover { border-color: var(--violet); color: var(--ink); }
+
+/* ── Tiers ──────────────────────────────────────────────────────────── */
+.ld-tiers { }
+.ld-tier-grid { display: grid; grid-template-columns: 1fr; gap: 20px; margin-top: 44px; text-align: left; }
+@media (min-width: 860px) { .ld-tier-grid { grid-template-columns: repeat(3, 1fr); } }
+.ld-tier-card {
+  --corner-color: var(--tier-c, var(--cyan));
+  position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+  padding: 30px 26px 28px; transition: transform .22s cubic-bezier(.2,.7,.2,1), border-color .22s ease, box-shadow .22s ease, background .22s ease;
+}
+.ld-tier-card::after { content: ''; position: absolute; top: 0; left: 24px; right: 24px; height: 2px; background: var(--tier-c); border-radius: 0 0 3px 3px; opacity: 0.8; }
+.ld-tier-card:hover { transform: translateY(-6px); border-color: var(--line-strong); background: var(--panel-hover); box-shadow: 0 22px 50px -18px var(--tier-glow); }
+.ld-tier-card--green { --tier-c: var(--green); --tier-glow: rgba(53,227,161,0.35); }
+.ld-tier-card--orange { --tier-c: var(--orange); --tier-glow: rgba(255,154,77,0.35); }
+.ld-tier-card--amber { --tier-c: var(--amber); --tier-glow: rgba(255,201,77,0.35); }
+.ld-tier-num { font-family: var(--font-mono); font-size: 12px; color: var(--tier-c); letter-spacing: 0.1em; margin-bottom: 18px; }
+.ld-tier-card h3 { font-size: 19px; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.005em; }
+.ld-tier-price { font-family: var(--font-mono); color: var(--tier-c); font-weight: 600; font-size: 22px; margin-bottom: 12px; }
+.ld-tier-forwho { font-size: 13px; font-weight: 600; color: var(--ink-mute); margin-bottom: 14px; line-height: 1.5; }
+.ld-tier-card p { font-size: 14.5px; color: var(--ink-dim); line-height: 1.6; }
+.ld-how-cta { margin-top: 40px; text-align: center; }
+
+/* ── Portfolio ──────────────────────────────────────────────────────── */
 .ld-portfolio { text-align: center; }
-.ld-portfolio-grid { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: 1fr; gap: 14px; text-align: left; }
+.ld-portfolio-grid { list-style: none; padding: 0; margin: 44px 0 0; display: grid; grid-template-columns: 1fr; gap: 14px; text-align: left; }
 @media (min-width: 640px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr; } }
-@media (min-width: 960px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr 1fr; } }
-.ld-portfolio-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 20px; transition: transform .15s ease, box-shadow .15s ease; }
-.ld-portfolio-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+@media (min-width: 960px) { .ld-portfolio-grid { grid-template-columns: repeat(3, 1fr); } }
+.ld-portfolio-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+.ld-portfolio-card:hover { transform: translateY(-3px); border-color: var(--line-strong); background: var(--panel-hover); }
 .ld-portfolio-card a, .ld-portfolio-static { display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit; }
-/* Colored initials avatar, cycled per card (green/orange/amber) — no image
-   request, so nothing for the CSP to block and nothing that can 404. */
-.ld-portfolio-logo { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 800; letter-spacing: 0.02em; }
-.ld-portfolio-logo--green { background: var(--green-dark); }
+.ld-portfolio-logo { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; color: #051013; font-family: var(--font-mono); font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
+.ld-portfolio-logo--green { background: var(--green); }
 .ld-portfolio-logo--orange { background: var(--orange); }
-.ld-portfolio-logo--amber { background: #92650a; }
-.ld-portfolio-text { display: flex; flex-direction: column; gap: 4px; }
-.ld-portfolio-name { font-size: 15px; font-weight: 700; color: var(--text); }
-.ld-portfolio-domain { font-size: 13px; color: var(--orange); font-weight: 600; }
+.ld-portfolio-logo--amber { background: var(--amber); }
+.ld-portfolio-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ld-portfolio-num { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-mute); letter-spacing: 0.08em; }
+.ld-portfolio-name { font-size: 15px; font-weight: 700; color: var(--ink); }
+.ld-portfolio-domain { font-family: var(--font-mono); font-size: 12.5px; color: var(--cyan); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ld-portfolio-card a:hover .ld-portfolio-domain { text-decoration: underline; }
+
+/* ── Which one's you ───────────────────────────────────────────────── */
+.ld-faq { }
+.ld-faq-list { max-width: 760px; margin: 44px auto 0; display: grid; gap: 14px; }
+.ld-faq-item { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--faq-c, var(--cyan)); border-radius: 14px; padding: 22px 24px; display: flex; gap: 18px; align-items: flex-start; transition: background .18s ease, border-color .18s ease; }
+.ld-faq-item:hover { background: var(--panel-hover); }
+.ld-faq-item--green { --faq-c: var(--green); }
+.ld-faq-item--orange { --faq-c: var(--orange); }
+.ld-faq-item--amber { --faq-c: var(--amber); }
+.ld-faq-num { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--line); color: var(--faq-c, var(--cyan)); font-family: var(--font-mono); font-weight: 700; font-size: 13px; }
+.ld-faq-item h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; font-style: italic; color: var(--ink); }
+.ld-faq-item p { font-size: 14.5px; color: var(--ink-dim); line-height: 1.55; }
+
+/* ── Final CTA ──────────────────────────────────────────────────────── */
+.ld-final { text-align: center; position: relative; }
+.ld-final-panel { max-width: 640px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 24px; padding: 56px 32px; position: relative; overflow: hidden; }
+.ld-final-glow { position: absolute; top: -140px; left: 50%; transform: translateX(-50%); width: 520px; height: 300px; background: radial-gradient(ellipse, rgba(63,232,226,0.22), transparent 70%); pointer-events: none; }
+.ld-final h2 { position: relative; }
+.ld-final p { position: relative; color: var(--ink-dim); font-size: 15.5px; max-width: 440px; margin: 14px auto 0; line-height: 1.6; }
+.ld-final .ld-cta-row { position: relative; }
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+.ld-footer { border-top: 1px solid var(--line); padding: 28px 20px; text-align: center; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-mute); }
+.ld-footer a { color: var(--ink-mute); text-decoration: none; margin: 0 8px; }
+.ld-footer a:hover { color: var(--cyan); }
+.ld-footer-sig { margin-top: 8px; letter-spacing: 0.04em; }
