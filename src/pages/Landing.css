@@ -25,13 +25,25 @@
 .ld-phone img { display: block; width: 100%; height: auto; }
 .ld-phone-sm { width: min(260px, 72vw); box-shadow: 0 16px 36px rgba(0,0,0,0.22); }
 
-/* Hero */
-.ld-hero { background: var(--navy); color: #fff; padding: 56px 20px 64px; }
-.ld-hero-grid { max-width: 1020px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 40px; align-items: center; }
+/* Hero — diagonal cut on the bottom edge + a soft orange glow behind the
+   copy so this reads as designed, not a template with new words in it. The
+   glow is a plain radial-gradient div, no image, so it costs nothing. */
+.ld-hero { position: relative; background: var(--navy); color: #fff; padding: 64px 20px 84px; overflow: hidden; clip-path: polygon(0 0, 100% 0, 100% 94%, 0 100%); }
+.ld-hero-glow { position: absolute; top: -120px; right: -140px; width: 480px; height: 480px; background: radial-gradient(circle, rgba(224,123,42,0.35) 0%, rgba(224,123,42,0) 70%); pointer-events: none; }
+.ld-hero-grid { position: relative; max-width: 1020px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 40px; align-items: center; }
 @media (min-width: 860px) { .ld-hero-grid { grid-template-columns: 7fr 5fr; } }
-.ld-hero h1 { font-size: clamp(32px, 6vw, 50px); font-weight: 800; line-height: 1.12; max-width: 620px; }
+.ld-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--orange); background: rgba(224,123,42,0.14); border: 1px solid rgba(224,123,42,0.4); border-radius: 999px; padding: 7px 14px; margin-bottom: 18px; }
+.ld-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
+.ld-hero h1 { font-size: clamp(32px, 6vw, 52px); font-weight: 800; line-height: 1.1; max-width: 640px; letter-spacing: -0.01em; }
 .ld-hero .ld-sub { color: rgba(255,255,255,0.78); font-size: clamp(16px, 2.5vw, 19px); max-width: 540px; margin-top: 18px; }
 .ld-hero .ld-cta-note { color: rgba(255,255,255,0.55); font-size: 13px; margin-top: 10px; }
+.ld-cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.ld-cta-row .ld-cta { margin-top: 0; }
+.ld-cta-row--center { justify-content: center; }
+.ld-cta-call { background: transparent; border: 1.5px solid var(--orange); color: var(--orange); }
+.ld-cta-call:hover { background: rgba(224,123,42,0.12); }
+.ld-final .ld-cta-call { border-color: rgba(255,255,255,0.5); color: #fff; }
+.ld-final .ld-cta-call:hover { border-color: #fff; background: rgba(255,255,255,0.1); }
 /* The offer, sized like the offer. Orange rule on the left because on this
    page orange means "this is the thing", and it sits directly above the button
    so the promise and the tap are one glance apart. */
@@ -145,15 +157,17 @@
 .ld-price-card li::before { content: '✓'; position: absolute; left: 2px; color: var(--green); font-weight: 700; }
 .ld-price-note { font-size: 13px; color: var(--text-muted); margin-top: 14px; }
 
-/* FAQ */
+/* Which one's you — self-select by stage. Left-border color ties each card
+   back to its matching tier card above (green/orange/amber). */
 .ld-faq { background: var(--bg); }
 .ld-faq-list { max-width: 720px; margin: 28px auto 0; display: grid; gap: 14px; }
-.ld-faq-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; }
-.ld-faq-item h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+.ld-faq-item { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius); padding: 20px 22px; display: flex; gap: 16px; align-items: flex-start; }
+.ld-faq-item--green { border-left-color: var(--green); }
+.ld-faq-item--orange { border-left-color: var(--orange); }
+.ld-faq-item--amber { border-left-color: var(--amber); }
+.ld-faq-num { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: var(--navy); color: #fff; font-weight: 800; font-size: 13px; }
+.ld-faq-item h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; font-style: italic; }
 .ld-faq-item p { font-size: 15px; color: var(--text-secondary); }
-.ld-faq-more { max-width: 720px; margin: 18px auto 0; text-align: center; font-size: 15px; }
-.ld-faq-more a { color: var(--orange); font-weight: 600; text-decoration: none; }
-.ld-faq-more a:hover { text-decoration: underline; }
 
 /* Free-calculator strip — the give-before-you-ask offer for a visitor who is
    not signing up today. Deliberately quieter than the final CTA under it so it
@@ -220,27 +234,43 @@
    no product screen to show here), a secondary call/text CTA, and the
    3-tier grid that replaced the single $150 price card. */
 .ld-hero-grid--solo { grid-template-columns: 1fr; max-width: 680px; }
-.ld-cta-secondary { display: block; background: transparent; color: rgba(255,255,255,0.85); border: 1.5px solid rgba(255,255,255,0.35); margin-top: 12px; }
-.ld-cta-secondary:hover { background: rgba(255,255,255,0.08); border-color: #fff; }
 
+/* Three tiers — a colored top bar per tier (green/orange/amber) so the card
+   itself signals "which stage," matching the self-select cards further down
+   the page. Hover lift is a cheap way to make a pricing grid feel designed
+   instead of static. */
 .ld-tiers { background: var(--bg); text-align: center; }
 .ld-tier-grid { display: grid; grid-template-columns: 1fr; gap: 20px; margin-top: 32px; text-align: left; }
 @media (min-width: 820px) { .ld-tier-grid { grid-template-columns: 1fr 1fr 1fr; } }
-.ld-tier-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 26px 22px; box-shadow: var(--shadow-md); }
+.ld-tier-card { background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--border); border-radius: var(--radius-lg); padding: 26px 22px; box-shadow: var(--shadow-md); transition: transform .15s ease, box-shadow .15s ease; }
+.ld-tier-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.ld-tier-card--green { border-top-color: var(--green); }
+.ld-tier-card--orange { border-top-color: var(--orange); }
+.ld-tier-card--amber { border-top-color: var(--amber); }
 .ld-tier-num { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: var(--navy); color: var(--orange); font-weight: 800; font-size: 15px; margin-bottom: 14px; }
+.ld-tier-card--green .ld-tier-num { color: var(--green); }
+.ld-tier-card--amber .ld-tier-num { color: var(--amber); }
 .ld-tier-card h3 { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
-.ld-tier-price { color: var(--orange); font-weight: 700; font-size: 15px; margin-bottom: 12px; }
+.ld-tier-price { color: var(--orange); font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+.ld-tier-card--green .ld-tier-price { color: var(--green-dark); }
+.ld-tier-card--amber .ld-tier-price { color: #92650a; }
+.ld-tier-forwho { font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; }
 .ld-tier-card p { font-size: 15px; color: var(--text-secondary); line-height: 1.5; }
 .ld-how-cta { margin-top: 32px; }
 
-/* Portfolio — plain named cards, no photos yet. A domain link is the whole
-   pitch here ("check my work"), so it gets the same weight as the name. */
+/* Portfolio — sized up from the first pass and each card carries a small
+   real favicon (or initials for the one not live yet), so it reads as "here
+   are the actual businesses" instead of a plain link list. */
 .ld-portfolio { text-align: center; }
-.ld-portfolio-grid { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: 1fr; gap: 12px; text-align: left; }
+.ld-portfolio-grid { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: 1fr; gap: 14px; text-align: left; }
 @media (min-width: 640px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr; } }
 @media (min-width: 960px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr 1fr; } }
-.ld-portfolio-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
-.ld-portfolio-card a, .ld-portfolio-static { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: inherit; }
+.ld-portfolio-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 20px; transition: transform .15s ease, box-shadow .15s ease; }
+.ld-portfolio-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.ld-portfolio-card a, .ld-portfolio-static { display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit; }
+.ld-portfolio-logo { width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; }
+.ld-portfolio-logo--initials { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; background: var(--navy); color: var(--orange); font-size: 13px; font-weight: 800; }
+.ld-portfolio-text { display: flex; flex-direction: column; gap: 4px; }
 .ld-portfolio-name { font-size: 15px; font-weight: 700; color: var(--text); }
 .ld-portfolio-domain { font-size: 13px; color: var(--orange); font-weight: 600; }
 .ld-portfolio-card a:hover .ld-portfolio-domain { text-decoration: underline; }

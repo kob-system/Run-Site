@@ -82,7 +82,7 @@ beforeEach(() => goTo('/'))
 
 test('a logged-out visitor at the root gets the public landing page', async () => {
   render(<App />)
-  expect(await screen.findByText(/Your website's not the problem/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
 
 test('a logged-out visitor at /login gets the login screen', async () => {
@@ -124,7 +124,7 @@ test('the installed icon never answers a crew member with the sales page', async
   goTo('/?home=1')
   render(<App />)
   expect(await screen.findByText(/get you to your clock/i, {}, ROUTE_LOAD)).toBeInTheDocument()
-  expect(screen.queryByText(/Your website's not the problem/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
 })
 
 test('/crew tells him his link IS his password and puts his boss one tap away', async () => {
@@ -190,7 +190,7 @@ test('a saved crew key gets him back in with NO tap at all', async () => {
     ROUTE_LOAD
   )
   // Never the marketing page aimed at his boss.
-  expect(screen.queryByText(/Your website's not the problem/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
 })
 
 test('a URL invite is NOT auto-redeemed — only a key off this phone is', async () => {
@@ -213,7 +213,7 @@ test('a revoked crew key is thrown away instead of stranding him', async () => {
   inviteReply = { valid: false, rejoinable: false, revoked: true }
   goTo('/')
   render(<App />)
-  expect(await screen.findByText(/Your website's not the problem/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)).toBeInTheDocument()
   expect(localStorage.getItem('jt_crew_key')).toBeNull()
 })
 
@@ -227,7 +227,7 @@ test('an unknown path gets a real not-found page, NOT the landing page', async (
   goTo('/some-old-link-that-no-longer-exists')
   render(<App />)
   expect(await screen.findByText(/That page isn't here/i, {}, ROUTE_LOAD)).toBeInTheDocument()
-  expect(screen.queryByText(/Your website's not the problem/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
 })
 
 test('the not-found page tells search engines not to index it', async () => {
@@ -259,5 +259,5 @@ test('a trailing slash still reaches the root landing page', async () => {
   // taken the entire marketing site down, so it gets its own test.
   goTo('/')
   render(<App />)
-  expect(await screen.findByText(/Your website's not the problem/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
