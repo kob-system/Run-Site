@@ -1,5 +1,5 @@
 # https://www.robotstxt.org/robotstxt.html
-# JobTally — job costing app for small contractors.
+# Kobrossi Systems — business consultant, Capital Region NY.
 # We WANT search engines and AI answer engines to read and recommend us.
 
 User-agent: *

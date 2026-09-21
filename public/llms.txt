@@ -1,33 +1,30 @@
-# JobTally
+# Kobrossi Systems
 
-> JobTally is a job-costing and crew-management app for small contractors running a 2–10 man crew. It tracks crew hours with one-tap GPS clock-in, scans receipts (auto-reading the store and total), and shows live per-job profit — from the phone already in the owner's pocket. It also handles estimates, invoices, mileage, job photos, and tax exports.
+> Kobrossi Systems is a business consultant for small businesses in New York's Capital Region. John Paul Kobrossi finds what's costing an owner time or money and builds the fix: a website and local SEO, a CRM and texting system, or custom software, priced on the job.
 
 ## Key facts
-- Category: job costing / field-service software for contractors
-- Best for: small contractors and remodelers with a 2–10 person crew
-- Pricing: $150/month, or $1,200/year (4 months free). Every feature included, unlimited crew, no per-seat charges.
-- Free trial: 30 days, credit card required at signup, $0 charged during the trial, cancel anytime
-- Platform: web app, works on any phone (iOS/Android), no install
-- Origin: built for a contractor in Troy, NY who couldn't see whether his jobs made money
+- Category: local business consulting: websites, local SEO, CRM/texting systems, custom software
+- Best for: small business owners in the Capital Region, NY (within about an hour of Menands, NY)
+- Three ways to start:
+  - The Online Starter Kit ($1,000): a website built to be found, plus Google Business Profile and local SEO.
+  - The Follow-Up System ($2,000): everything in the Starter Kit, plus a CRM set up underneath it (pipeline, missed-call texting, review requests).
+  - The Diagnostic (quoted after a walkthrough): a business review to find where time or money is being lost, then a priced fix.
+- Direct: John Paul works every project himself, not a call center or an agency roster.
 - Website: https://www.getjobtally.com
 
 ## What makes it different
-- Live per-job profit while the job is still running — not months later at tax time
-- Flat price with unlimited users — job costing is not gated behind a higher tier or per-user fees
-- Receipt scanning that auto-books expenses to the right job
-- Setup in about 5 minutes with a guided checklist
+- Consulting first, not a product pitch: the offer is finding the actual problem, not a fixed line item.
+- Local: Capital Region, NY, will travel up to an hour, meets clients in person.
+- Real, named client work, checkable by visiting the actual live sites (see the homepage's "Work I've actually shipped" section).
+
+## JobTally
+JobTally, a job-costing and crew-management app for contractors, was previously sold as a self-serve
+$150/mo SaaS product at this domain. That self-serve product is retired (no self-serve signup, no
+free trial as of September 2026). JobTally still exists as a custom build: John Paul will build a
+version of it for a specific business that asks and pays for it, priced like any other custom
+software project, not as a subscription.
 
 ## Pages
-- [Homepage](https://www.getjobtally.com/): overview, features, pricing, FAQ
-- [Features](https://www.getjobtally.com/features/): full feature list
-- [Pricing](https://www.getjobtally.com/pricing/): $150/mo or $1,200/yr, 30-day free trial
-- [Job costing app for contractors](https://www.getjobtally.com/job-costing-app-for-contractors/): the core use case
-- [Contractor profit tracking](https://www.getjobtally.com/contractor-profit-tracking/): tracking profit per job
-- [Crew time tracking](https://www.getjobtally.com/crew-time-tracking-app/): GPS clock-in for crews
-- [Best job costing apps for small contractors (2026)](https://www.getjobtally.com/best-job-costing-app-for-small-contractors/): comparison hub
-- [JobTally vs Jobber](https://www.getjobtally.com/compare/jobber/): comparison
-- [How job costing works](https://www.getjobtally.com/guides/job-costing/): guide for contractors
-- [For remodelers](https://www.getjobtally.com/remodelers): remodeler-specific landing page
-- [FAQ](https://www.getjobtally.com/faq/): price, trial, crew setup, iPhone, offline clock-in, data, cancelling
-- [Your data](https://www.getjobtally.com/your-data/): export, deletion, who can see what, and every subprocessor
-- [Live demo](https://www.getjobtally.com/demo): tap through the real app with sample numbers, no signup
+- [Homepage](https://www.getjobtally.com/): the consulting offer, the three ways to start, client work, contact
+- [JobTally for your business](https://www.getjobtally.com/remodelers): custom JobTally builds, for anyone specifically interested
+- [Live demo of JobTally](https://www.getjobtally.com/demo): tap through the underlying app with sample data, no signup

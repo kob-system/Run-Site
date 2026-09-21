@@ -7,18 +7,25 @@ import './Landing.css'
 // index.html so the SPA can own its routes, and App.js fell through to the
 // LANDING PAGE for anything it didn't recognise. So
 // getjobtally.com/any-nonsense answered HTTP 200 with a full marketing page.
-// That's a "soft 404", and for a site running eleven SEO pages, a sitemap and
-// a robots.txt that explicitly invites AI crawlers, it is a real cost: Google
-// indexes junk URLs as valid pages, every typo'd or stale link looks alive,
-// and the duplicate-content signal is spread across infinite addresses.
+// That's a "soft 404", and for a site with a sitemap and a robots.txt that
+// explicitly invites AI crawlers, it is a real cost: Google indexes junk URLs
+// as valid pages, every typo'd or stale link looks alive, and the
+// duplicate-content signal is spread across infinite addresses.
 //
 // A static SPA cannot return a genuine 404 status from the client, so we do
 // the two things that DO work: tell search engines not to index this response
 // with a robots meta tag (which Google honours for soft-404 detection), and
 // tell the human plainly what happened and where to go.
+//
+// ── 2026-09-21: this page still had its own stale JobTally-self-serve pitch
+// ("Start free" signup CTA, a link to the now-retired /pricing/ page) months
+// after the Kobrossi Systems rebrand — the exact class of bug the homepage
+// rebuild and the orphaned-SEO-page cleanup were fixing everywhere else.
+// Fixed to match: Kobrossi Systems branding, no self-serve signup pitch,
+// links that actually resolve.
 export default function NotFound() {
   useEffect(() => {
-    document.title = 'Page not found — JobTally'
+    document.title = 'Page not found, Kobrossi Systems'
     // noindex is the part that actually matters for SEO. Added at runtime and
     // removed on unmount so it can never leak onto a real page during a
     // client-side route change.
@@ -32,10 +39,9 @@ export default function NotFound() {
   return (
     <div className="ld">
       <header className="ld-top">
-        <a className="ld-logo" href="/">JobTally</a>
+        <a className="ld-logo" href="/">Kobrossi Systems</a>
         <nav>
           <a className="ld-signin" href="/login">Sign in</a>
-          <a className="ld-cta-sm" href="/login?signup=1">Start free</a>
         </nav>
       </header>
       <section className="ld-hero">
@@ -47,13 +53,11 @@ export default function NotFound() {
           <a className="ld-cta" href="/">Go to the home page</a>
           <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginTop: 26, lineHeight: 1.8 }}>
             Looking for something specific?<br />
-            <a href="/demo" style={{ color: 'var(--orange)', fontWeight: 700 }}>See it work</a>
-            {' · '}
-            <a href="/pricing/" style={{ color: 'var(--orange)', fontWeight: 700 }}>Pricing</a>
+            <a href="/#tiers" style={{ color: 'var(--orange)', fontWeight: 700 }}>Pricing</a>
             {' · '}
             <a href="/login" style={{ color: 'var(--orange)', fontWeight: 700 }}>Sign in</a>
             {' · '}
-            <a href="mailto:support@getjobtally.com" style={{ color: 'var(--orange)', fontWeight: 700 }}>Email us</a>
+            <a href="mailto:kobrossisystems@gmail.com" style={{ color: 'var(--orange)', fontWeight: 700 }}>Email me</a>
           </p>
         </div>
       </section>
