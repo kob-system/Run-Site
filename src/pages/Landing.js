@@ -1,218 +1,175 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect } from 'react'
 import './Landing.css'
 import { track, trackOnce, EV } from '../utils/analytics'
-import { useVideoSpeed, SpeedPicker } from '../components/VideoSpeed'
 
 // Public landing page at / — what a stranger sees before they have an account.
-// Rendered before the Login screen (App.js) for logged-out visitors; logged-in
-// users never hit it. Screenshots in /landing/* are REAL app screens from the
-// demo company (Summit Remodeling) — nothing mocked up. CTAs point at the real
-// signup: /login?signup=1 opens the Create Account form.
+// Rendered before the Login screen (App.js) for logged-out visitors.
 //
-// ── 2026-08-28: CUT TO THE BONE, on JP's call ───────────────────────────────
-// "Plain and simple, only the necessary. Get rid of everything that isn't. We
-// can always add things back."
+// ── 2026-09-20/21: REPURPOSED, on JP's call ─────────────────────────────────
+// JobTally the self-serve product is done as a standing offer — zero paying
+// customers, ever. JP killed the old ONE-OFFER lock and this domain becomes
+// the storefront for the new one instead: three flat menu items ($1,000 site
+// / $2,000 full build / the monthly open bill), sold local in the Capital
+// Region under the Kobrossi Systems name (not "KS Digital" — his own site,
+// his own name on it). JobTally itself didn't disappear — it survives as a
+// custom job-costing build for whoever specifically asks and pays for it,
+// which is what the /josh and /fb flyer links now lead to (see Remodelers.js
+// — same route, new pitch).
 //
-// What came out, and why, so nobody re-adds it by accident:
-//   · "How it works" (3 numbered steps)  — the FAQ already answers all three,
-//                                          two screens further down, better.
-//   · "Everything, for that one price" (13-item grid) — a third pass over the
-//                                          same feature list, in list form.
-//   · Two of the six feature rows (estimates, home screen) — the page sells on
-//                                          hours, receipts and profit. The rest
-//                                          is what they find once they're in.
-//   · The trust bullets, the add-to-home-screen band, the testimonial grid
-//                                        — nobody has given a quote yet, so
-//                                          that section rendered empty anyway.
-//   · Two of the five FAQs.
-//
-// THE RULE FOR PUTTING ANYTHING BACK: it has to answer a question a contractor
-// actually asks before signing up. Nothing here exists to look complete.
-//
-// ⚠️ The offer on this page is "one job free forever, no card." There is no
-// trial. api/create-checkout-session.js sends no trial_period_days. If that
-// ever changes, this page, /pricing, /faq and the FAQ JSON-LD change with it.
-const SIGNUP_URL = '/login?signup=1'
+// The actual app (OwnerDashboard, WorkerDashboard, Billing, crew invites) is
+// untouched underneath this page and still works exactly as before for any
+// session that already exists — this file only changes what a logged-out
+// stranger hitting the bare root sees.
+const CONTACT_EMAIL = 'kobrossisystems@gmail.com'
+const CONTACT_PHONE_DISPLAY = '(518) 608-9344'
+const CONTACT_PHONE_HREF = 'tel:+15186089344'
+const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Let's talk about my business")}`
 
-const FEATURES = [
+const TIERS = [
   {
-    img: '/landing/clockin-active.png',
-    alt: 'JobTally crew clock-in screen with GPS stamp',
-    kicker: 'Crew hours',
-    title: 'Your crew clocks in and out with one tap, both GPS-stamped',
-    body:
-      "Your guys tap one button on their phone and they're on the clock, and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. Two stamps, start and finish, not a tracker. Nothing follows your crew around in between, which is why they'll actually use it.",
+    n: '1',
+    name: 'The site',
+    price: '$1,000',
+    body: 'A real website built to be found, plus the Google Business Profile and local SEO work that gets you showing up when someone actually searches.',
   },
   {
-    img: '/landing/receipts-list.png',
-    alt: 'JobTally receipts list booked to a job',
-    kicker: 'Receipts',
-    title: 'Snap a receipt and the store, total, tax and date fill themselves in',
-    body:
-      'Take a photo at the register and JobTally reads the store, the total, the sales tax and the date off it, and drops them into a new expense. You just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing.',
+    n: '2',
+    name: 'The full build',
+    price: '$2,000',
+    body: 'Everything in the site, plus the GHL/CRM system set up underneath it — the pipeline, the automations, the plumbing that makes the site actually do something for you.',
   },
   {
-    img: '/landing/job-profit.png',
-    alt: 'JobTally job screen showing live materials, labor, and projected profit',
-    kicker: 'Profit',
-    title: "See what every job is making, while it's still running",
-    body:
-      "Every job shows what you're charging, what's gone out in labor and materials, and what's left for you. Live, not three months later when it's too late to fix. If a job starts bleeding, you know that week.",
+    n: '3',
+    name: 'The monthly bill',
+    price: 'Quoted per business',
+    body: "The ongoing side, whatever that means for you — keeping the texting and automations running, or an open problem I solve and bill for over time instead of as a one-time project. This is a conversation, not a rate card. I'll tell you the number after I see the job.",
   },
+]
+
+const PORTFOLIO = [
+  { name: 'First Class Property Services', domain: '518firstclassservices.com' },
+  { name: 'Troy Mega Laundromat', domain: 'troymegawash.com' },
+  { name: 'Schenectady Marble & Granite', domain: 'schenectadymarble.com' },
+  { name: 'Half Moon Smoke World', domain: 'halfmoonsmokeworld.com' },
+  { name: 'USA Kitchen & Cabinets', domain: 'usakitchencabinets518.com' },
+  { name: 'All Phase Maintenance', domain: 'allphasemaintenance.com' },
+  { name: 'D&K Tax Services', domain: null, note: 'In build' },
 ]
 
 const FAQS = [
   {
-    q: 'Do I need a credit card to try it?',
-    a: 'There is no card at signup. You run one job free, for as long as you want. When you need a second job open at the same time it is $150/mo for every feature, unlimited crew.',
+    q: "Do I need all three tiers?",
+    a: "No. Most people start with the site. The texting system and the custom problem-solving are there when you're ready for them, not a bundle you're pushed into.",
   },
   {
-    q: 'What does my crew have to do?',
-    a: 'Nothing. You text each guy an invite link, he taps it, and he is in. You already typed his name when you made the link, so there is nothing for him to fill in. No password, no email, nothing to download. From then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it.',
+    q: 'What does "AI" actually mean here?',
+    a: "Whatever actually saves you time. Sometimes that's a chatbot answering questions on your site, sometimes it's an automation that stops a lead from going cold, sometimes the honest answer is you don't need it yet — I'll tell you which.",
   },
   {
-    q: 'What if I want out?',
-    a: 'Cancel anytime, no contract. Your data stays yours. You can export everything to a spreadsheet whenever you want, even after you cancel. And if you want it all gone, there is a delete button in Settings that erases the whole account.',
+    q: "Why should I use someone local?",
+    a: "Because you can meet me, see what I've built for other businesses near you, and call the same number in a year if something breaks. Not a ticket number in another state.",
   },
 ]
 
 export default function Landing() {
   useEffect(() => {
-    document.title = 'JobTally: know what every job really makes'
-    // Top of the funnel. Once per tab so a re-render doesn't inflate it.
+    document.title = 'Kobrossi Systems — websites, texting, and AI for Capital Region businesses'
     trackOnce(EV.LANDING_VIEW)
   }, [])
 
-  // Which CTA got the click matters — hero vs pricing vs video tells us whether
-  // the page sells on the promise or on the price.
   const cta = (where) => () => track(EV.LANDING_CTA, { where })
-
-  // One play is one event, not one per scrub.
-  const introPlayedRef = useRef(false)
-  const onIntroPlay = () => {
-    if (introPlayedRef.current) return
-    introPlayedRef.current = true
-    track(EV.LANDING_CTA, { where: 'intro-video-play' })
-  }
-  const introSpeed = useVideoSpeed()
 
   return (
     <div className="ld">
       {/* Top bar */}
       <header className="ld-top">
-        <a className="ld-logo" href="/">JobTally</a>
+        <a className="ld-logo" href="/">Kobrossi Systems</a>
         <nav>
-          {/* A crew member with no link in hand lands HERE, and every other
-              door on this page is an owner door. His account has no password,
-              so "Sign in" is a form he can never pass. This is his. */}
-          <a className="ld-signin" href="/crew">On a crew?</a>
-          <a className="ld-signin" href="/login">Sign in</a>
-          <a className="ld-cta-sm" href={SIGNUP_URL} onClick={cta('topbar')}>Start free</a>
+          <a className="ld-cta-sm" href={CONTACT_MAILTO} onClick={cta('topbar')}>Get in touch</a>
         </nav>
       </header>
 
       {/* Hero */}
       <section className="ld-hero">
-        <div className="ld-hero-grid">
+        <div className="ld-hero-grid ld-hero-grid--solo">
           <div className="ld-hero-copy">
-            <h1>Know what every job really makes.</h1>
+            <h1>Your website's not the problem. Nobody's answering the phone.</h1>
             <p className="ld-sub">
-              JobTally tracks your crew's hours, your receipts, and your profit, live,
-              from the phone already in your pocket. Built for contractors running a
-              2–10 man crew.
+              I build the site, get you found on Google, and wire up the texting so no lead
+              goes cold. If AI is genuinely the fix for what's eating your time, I build that too.
             </p>
-            {/* THE BIG IDEA, and JP called it that: "one active job, free,
-                forever, no card" is the whole offer, not a footnote under the
-                button. His framing, word for word: "give it a shot, it's free,
-                just track one job with it and see how that goes." So it gets
-                its own band above the button, at a size you cannot miss. */}
-            <div className="ld-free">
-              <div className="ld-free-big">One job. Free forever.</div>
-              <div className="ld-free-sub">No card. Not a trial. Track one job with it and see how it goes.</div>
-            </div>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free, no card</a>
-            <div className="ld-cta-note">$150/mo only when you want a second job open at the same time.</div>
-            {/* Kept because it converts the visitor who is not ready to hand
-                over an email yet: watching is passive, tapping through the real
-                app is the thing that makes someone believe it. */}
-            <a className="ld-demo-link" href="/demo" onClick={cta('hero-demo')}>
-              Or try it yourself first. No signup, no card
-            </a>
-          </div>
-          <div className="ld-hero-shot">
-            <div className="ld-phone">
-              <img src="/landing/jobs-list.png" alt="JobTally jobs list showing live projected profit per job" width="390" height="844" />
-            </div>
-            <div className="ld-shot-caption">Real screens from the app. This is what you get.</div>
-          </div>
-        </div>
-      </section>
-
-      {/* Introduction — a face and the honest origin, before anyone is asked for
-          anything. 14 MB, so preload="none": a guy standing on a job site on
-          cell data downloads nothing until he actually presses play. */}
-      <section className="ld-intro" id="intro">
-        <div className="ld-inner">
-          <h2>Who built this</h2>
-          <p className="ld-kicker">John Paul Kobrossi, founder of JobTally. I built the whole thing myself.</p>
-          <div className="ld-video-frame">
-            <video
-              ref={introSpeed.videoRef}
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/intro-poster.jpg"
-              src="/landing/JobTally-Intro.mp4"
-              onPlay={onIntroPlay}
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-          <div style={{ marginTop: '14px' }}>
-            <SpeedPicker speed={introSpeed.speed} onChange={introSpeed.setSpeed} />
-          </div>
-        </div>
-      </section>
-
-      {/* Features — alternating rows, real screenshots */}
-      <section className="ld-features">
-        <div className="ld-inner">
-          <h2>What it does</h2>
-          <p className="ld-kicker">Three things, done properly. Sign up and it works.</p>
-          {FEATURES.map((f, i) => (
-            <div className={'ld-row' + (i % 2 ? ' ld-row-flip' : '')} key={f.title}>
-              <div className="ld-row-copy">
-                <div className="ld-row-kicker">{f.kicker}</div>
-                <h3>{f.title}</h3>
-                <p>{f.body}</p>
-              </div>
-              <div className="ld-row-shot">
-                <div className="ld-phone ld-phone-sm">
-                  <img src={f.img} alt={f.alt} loading="lazy" width="390" height="844" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="ld-pricing">
-        <div className="ld-inner">
-          <h2>One price. Everything. No games.</h2>
-          <div className="ld-price-card">
-            <div className="ld-price">$150<span>/mo</span></div>
-            <ul>
-              <li>Unlimited crew, no per-seat charges</li>
-              <li>Every feature included, nothing gated</li>
-              <li>One job free, forever, no card</li>
-              <li>$1,200/yr if you'd rather pay once (4 months free)</li>
-              <li>Cancel anytime. Your data stays yours, export it whenever</li>
+            <ul className="ld-trust">
+              <li>Local — Capital Region, will travel up to an hour</li>
+              <li>2 years, 7 businesses of real work behind it</li>
+              <li>Talk to me directly, not a call center</li>
             </ul>
-            <a className="ld-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free, no card</a>
-            <p className="ld-price-note">
-              One caught receipt pile or one job that stops bleeding pays for the year.
-            </p>
+            <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email me</a>
+            <a className="ld-cta ld-cta-secondary" href={CONTACT_PHONE_HREF} onClick={cta('hero-call')}>Or call/text {CONTACT_PHONE_DISPLAY}</a>
           </div>
+        </div>
+      </section>
+
+      {/* Why this exists — same slot the old origin story used, honest and short */}
+      <section className="ld-story">
+        <div className="ld-inner ld-story-inner">
+          <div className="ld-story-kicker">Why local</div>
+          <h2>I've done this for 7 businesses so far.</h2>
+          <p>
+            Every one of them had the same problem in a different costume: a site nobody found,
+            a phone nobody answered fast enough, or a slow process that a small piece of software
+            could fix. Not a "digital transformation." Just the specific thing that was costing
+            them money.
+          </p>
+          <p className="ld-story-punch">
+            I'm local, I show up, and you can check my work before you hire me. That's the whole pitch.
+          </p>
+        </div>
+      </section>
+
+      {/* The three tiers */}
+      <section className="ld-tiers" id="tiers">
+        <div className="ld-inner">
+          <h2>Three ways to start</h2>
+          <p className="ld-kicker">Pick the one that matches the problem you actually have.</p>
+          <div className="ld-tier-grid">
+            {TIERS.map((t) => (
+              <div className="ld-tier-card" key={t.n}>
+                <div className="ld-tier-num">{t.n}</div>
+                <h3>{t.name}</h3>
+                <div className="ld-tier-price">{t.price}</div>
+                <p>{t.body}</p>
+              </div>
+            ))}
+          </div>
+          <div className="ld-how-cta">
+            <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('tiers')}>Tell me the problem</a>
+          </div>
+        </div>
+      </section>
+
+      {/* Portfolio — real client work, named. Smoke shops excluded on JP's
+          standing rule except Half Moon Smoke World, which he's fine naming. */}
+      <section className="ld-portfolio" id="portfolio">
+        <div className="ld-inner">
+          <h2>Work I've actually shipped</h2>
+          <p className="ld-kicker">Real businesses, real sites. Click through and check for yourself.</p>
+          <ul className="ld-portfolio-grid">
+            {PORTFOLIO.map((p) => (
+              <li className="ld-portfolio-card" key={p.name}>
+                {p.domain ? (
+                  <a href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">
+                    <span className="ld-portfolio-name">{p.name}</span>
+                    <span className="ld-portfolio-domain">{p.domain}</span>
+                  </a>
+                ) : (
+                  <div className="ld-portfolio-static">
+                    <span className="ld-portfolio-name">{p.name}</span>
+                    <span className="ld-portfolio-domain">{p.note}</span>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
@@ -228,18 +185,20 @@ export default function Landing() {
               </div>
             ))}
           </div>
-          {/* The full FAQ and the trust page are real URLs a stranger can read
-              before signing up — and the ones a skeptical contractor goes
-              looking for. Buried in the footer they were effectively hidden. */}
-          <p className="ld-faq-more">
-            <a href="/faq/">Every question, answered in full</a> · <a href="/your-data/">What happens to your data</a>
-          </p>
         </div>
       </section>
 
+      {/* Final CTA */}
+      <section className="ld-final">
+        <h2>Tell me what's broken.</h2>
+        <p>I'll tell you straight whether I can fix it and what it's worth doing.</p>
+        <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email me</a>
+        <div className="ld-cta-note">Or call/text {CONTACT_PHONE_DISPLAY}</div>
+      </section>
+
       <footer className="ld-footer">
-        <a href="/crew">On a crew?</a>·<a href="/login">Sign in</a>·<a href="/faq/">FAQ</a>·<a href="/your-data/">Your data</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
-        <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
+        <a href={CONTACT_MAILTO}>Email</a>·<a href={CONTACT_PHONE_HREF}>Call/text</a>·<a href="/login">Client sign in</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
+        <div style={{ marginTop: 8 }}>Kobrossi Systems · getjobtally.com</div>
       </footer>
     </div>
   )

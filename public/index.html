@@ -4,67 +4,52 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#1C2B3A" />
-    <title>JobTally — Job Costing &amp; Crew Tracking App for Contractors</title>
-    <meta name="description" content="JobTally is a job costing app for small contractors. Track crew hours (GPS clock-in and clock-out), scan receipts, and see live per-job profit from your phone. Built for 2–10 man crews. One job free, forever — no card." />
-    <meta name="keywords" content="job costing app, contractor profit tracking, crew time tracking app, construction job costing, receipt scanning app for contractors, contractor app" />
+    <title>Kobrossi Systems — websites, texting, and AI for Capital Region businesses</title>
+    <meta name="description" content="Kobrossi Systems builds websites and local SEO, sets up texting and review automation, and builds custom AI/software fixes for Capital Region NY businesses. Local, direct, priced on the job." />
+    <meta name="keywords" content="capital region website design, local SEO albany ny, missed call text back, small business AI, website and SEO bundle" />
     <link rel="canonical" href="https://www.getjobtally.com/" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
-    <!-- iPhone home-screen behaviour. Without these, "Add to Home Screen" makes
-         a plain Safari bookmark: it opens with the address bar and the tab
-         strip, which reads as a web page and not as the app the crew was told
-         they were getting. With them it launches full screen off the icon,
-         which is the entire point of asking a worker to install it.
-         The apple-mobile-web-app-title is what sits under the icon; without it
-         iOS uses the <title>, and ours is a 60-character SEO string. -->
+    <!-- iPhone home-screen behaviour still matters for the JobTally app itself
+         (Tier 3 rebuilds, existing sessions), even though the public root is a
+         different pitch now. Left in place, untouched. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="JobTally" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta property="og:title" content="JobTally — know what every job really makes" />
-    <meta property="og:description" content="Crew GPS clock-in and clock-out, receipt scanning, live per-job profit, estimates and invoices — from the phone in your pocket. One job free, forever — no card." />
+    <meta property="og:title" content="Kobrossi Systems — websites, texting, and AI for Capital Region businesses" />
+    <meta property="og:description" content="Website + local SEO from $1,000. Add a texting system that catches missed calls and asks for reviews. Or bring me the actual problem and I'll build the fix, priced on the job." />
     <meta property="og:image" content="https://www.getjobtally.com/og-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:url" content="https://www.getjobtally.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="JobTally" />
+    <meta property="og:site_name" content="Kobrossi Systems" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="JobTally — know what every job really makes" />
-    <meta name="twitter:description" content="Crew GPS clock-in and clock-out, receipt scanning, live per-job profit, estimates and invoices — from the phone in your pocket. One job free, forever — no card." />
+    <meta name="twitter:title" content="Kobrossi Systems — websites, texting, and AI for Capital Region businesses" />
+    <meta name="twitter:description" content="Website + local SEO from $1,000. Add a texting system that catches missed calls and asks for reviews. Or bring me the actual problem and I'll build the fix, priced on the job." />
     <meta name="twitter:image" content="https://www.getjobtally.com/og-card.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
 
-    <!-- SoftwareApplication: what JobTally is, for search + AI answer engines -->
+    <!-- ── 2026-09-20: schema rebuilt for the Kobrossi Systems pivot. The old
+         SoftwareApplication + JobTally-specific FAQPage schema described a
+         SaaS product with zero paying customers, ever — replaced with a
+         ProfessionalService schema for the actual current offer. JobTally
+         itself still exists as a Tier 3 case; its own schema can come back
+         if/when it's a real live product again, not a parked one. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "JobTally",
-        "applicationCategory": "BusinessApplication",
-        "applicationSubCategory": "Job Costing & Field Service Software",
-        "operatingSystem": "Web, iOS, Android",
+        "@type": "ProfessionalService",
+        "name": "Kobrossi Systems",
         "url": "https://www.getjobtally.com/",
-        "description": "JobTally is a job costing and crew management app for small contractors. It tracks crew hours with GPS-stamped clock-in and clock-out, scans receipts, and shows live per-job profit — from the phone in your pocket. Built for contractors running a 2–10 man crew.",
-        "featureList": [
-          "Crew GPS time clock (one-tap clock in/out, both ends GPS-stamped)",
-          "Receipt scanning (auto-reads store and total)",
-          "Live per-job profit tracking",
-          "Estimates and invoices from your phone",
-          "Mileage tracking",
-          "Job photos and daily logs",
-          "Reports and tax exports"
-        ],
-        "offers": {
-          "@type": "Offer",
-          "price": "150.00",
-          "priceCurrency": "USD",
-          "description": "$150/mo — every feature, unlimited crew. Also $1,200/yr (4 months free). One job free, forever — no card."
-        },
-        "publisher": {
-          "@type": "Organization",
-          "name": "JobTally",
-          "url": "https://www.getjobtally.com/"
-        }
+        "description": "Websites, local SEO, missed-call texting and review automation, and custom AI/software builds for small businesses in New York's Capital Region.",
+        "areaServed": { "@type": "Place", "name": "Capital Region, NY (within about an hour of Menands, NY)" },
+        "address": { "@type": "PostalAddress", "addressLocality": "Menands", "addressRegion": "NY", "addressCountry": "US" },
+        "makesOffer": [
+          { "@type": "Offer", "name": "Website + local SEO", "price": "1000.00", "priceCurrency": "USD" },
+          { "@type": "Offer", "name": "Full build: site + SEO + GHL/CRM system", "price": "2000.00", "priceCurrency": "USD" },
+          { "@type": "Offer", "name": "Monthly bill: automation upkeep or open problem-solving", "description": "Ongoing, quoted per business. Not a fixed rate card." }
+        ]
       }
     </script>
 
@@ -73,13 +58,14 @@
       {
         "@context": "https://schema.org",
         "@type": "Organization",
-        "name": "JobTally",
+        "name": "Kobrossi Systems",
         "url": "https://www.getjobtally.com/",
         "logo": "https://www.getjobtally.com/apple-touch-icon.png",
-        "description": "JobTally makes job costing software for small contractors — track crew hours, receipts, and per-job profit from a phone.",
+        "description": "Kobrossi Systems builds websites, local SEO, texting automation, and custom AI/software fixes for small businesses in the Capital Region, NY.",
+        "founder": { "@type": "Person", "name": "John Paul Kobrossi" },
         "foundingLocation": {
           "@type": "Place",
-          "address": { "@type": "PostalAddress", "addressLocality": "Troy", "addressRegion": "NY", "addressCountry": "US" }
+          "address": { "@type": "PostalAddress", "addressLocality": "Menands", "addressRegion": "NY", "addressCountry": "US" }
         }
       }
     </script>
@@ -89,12 +75,12 @@
       {
         "@context": "https://schema.org",
         "@type": "WebSite",
-        "name": "JobTally",
+        "name": "Kobrossi Systems",
         "url": "https://www.getjobtally.com/"
       }
     </script>
 
-    <!-- FAQPage: exact answers from the live landing page -->
+    <!-- FAQPage: matches the live homepage (src/pages/Landing.js) -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -102,33 +88,18 @@
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "What is JobTally?",
-            "acceptedAnswer": { "@type": "Answer", "text": "JobTally is a job costing and crew management app built for small contractors running a 2–10 man crew. It tracks your crew's hours with one-tap GPS clock-in and clock-out, scans your receipts, and shows what every job is really making — live, from the phone already in your pocket. It also handles estimates, invoices, mileage, job photos, and tax exports." }
+            "name": "Do I need all three tiers?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. Most people start with the site. The texting system and the custom problem-solving are there when you're ready for them, not a bundle you're pushed into." }
           },
           {
             "@type": "Question",
-            "name": "How much does JobTally cost?",
-            "acceptedAnswer": { "@type": "Answer", "text": "JobTally is $150/mo with every feature included and unlimited crew — no per-seat charges. You can also pay $1,200/yr (4 months free). There is no add-on pricing." }
+            "name": "What does \"AI\" actually mean here?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Whatever actually saves you time — sometimes a chatbot answering questions on your site, sometimes an automation that stops a lead from going cold, sometimes the honest answer is you don't need it yet." }
           },
           {
             "@type": "Question",
-            "name": "Do I need a credit card to try JobTally?",
-            "acceptedAnswer": { "@type": "Answer", "text": "There is no card at signup. You run one job free, for as long as you want. When you need a second job open at the same time it is $150/mo — every feature, unlimited crew." }
-          },
-          {
-            "@type": "Question",
-            "name": "What does my crew have to do?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Nothing. You text each guy an invite link, he taps it once and he is in — nothing to type, no password, nothing to download. From then on his whole app is basically one big Clock In / Clock Out button. If he can text, he can use it." }
-          },
-          {
-            "@type": "Question",
-            "name": "I'm not a tech guy. How long is setup?",
-            "acceptedAnswer": { "@type": "Answer", "text": "About five minutes. When you first sign in, a setup guide walks you through your first job, your crew, and your first estimate and invoice — each step checks itself off as you go." }
-          },
-          {
-            "@type": "Question",
-            "name": "Can I cancel JobTally anytime?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Yes. Cancel anytime, no contract. Your data stays yours — you can export everything to a spreadsheet whenever you want, even after you cancel." }
+            "name": "Why should I use someone local?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Because you can meet the person doing the work, see what's already been built for other businesses nearby, and call the same number in a year if something breaks." }
           }
         ]
       }
