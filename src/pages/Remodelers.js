@@ -1,102 +1,35 @@
-import React, { useEffect, useRef } from 'react'
+import React from 'react'
 import { track, trackOnce, EV } from '../utils/analytics'
-import InstallButton from '../components/InstallButton'
-import { useVideoSpeed, SpeedPicker } from '../components/VideoSpeed'
 import './Remodelers.css'
 
-// Public marketing page at /remodelers — remodelers & GCs running a 2–10 man
-// crew. Rendered before any auth check (App.js), so it works logged-out.
-// The CTA points at the REAL signup: /login opens the auth screen, ?signup=1
-// flips it to Create Account. New owners get the existing one job free, forever,
-// which DOES take a card up front (see api/create-checkout-session.js — the
-// old no-card window is retired). No invented trials, no invented pricing.
-const SIGNUP_URL = '/login?signup=1'
-
-// Clean stroke icons (inherit color via CSS `currentColor`) instead of emoji —
-// emoji render inconsistently across devices and read as unpolished on a public
-// marketing page.
-const svgProps = {
-  viewBox: '0 0 24 24', width: 26, height: 26, fill: 'none', stroke: 'currentColor',
-  strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
-}
-const ICONS = {
-  pin: (
-    <svg {...svgProps}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
-  ),
-  receipt: (
-    <svg {...svgProps}><path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21Z" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h4" /></svg>
-  ),
-  money: (
-    <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M12 7v10" /><path d="M14.5 9.3a2.3 2.3 0 0 0-2.2-1.3h-.9a1.9 1.9 0 0 0 0 3.8h1.2a1.9 1.9 0 0 1 0 3.8h-1a2.3 2.3 0 0 1-2.2-1.4" /></svg>
-  ),
-  doc: (
-    <svg {...svgProps}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></svg>
-  ),
-}
-
-const FEATURES = [
-  {
-    icon: 'pin',
-    title: 'Crew clock-in and clock-out with GPS',
-    body:
-      "Your guys tap one button on their phone and they're on the clock — and that tap stamps where they were standing when they made it. Same when they tap out. You get an email the moment anyone clocks in or out. No more \"I was there at 7\" or \"I stayed till 4.\" Two stamps, start and finish — not an all-day tracker.",
-  },
-  {
-    icon: 'receipt',
-    title: 'Snap a receipt, done',
-    body:
-      'Take a photo at the register. JobTally reads the store, the total, the sales tax and the date, and drops them into a new expense — you just tap the job it belongs to. The pile of crumpled receipts on the dash stops existing.',
-  },
-  {
-    icon: 'money',
-    title: 'Per-job profit, live',
-    body:
-      "Every job shows what you're charging, what's gone out in labor and materials, and what's left for you — while the job is still running, not three months later when it's too late to fix.",
-  },
-  {
-    icon: 'doc',
-    title: 'Estimate → invoice → paid',
-    body:
-      'Write the estimate on your phone, turn it into an invoice with one tap, and see exactly who still owes you what. The money you already earned stops slipping through the cracks.',
-  },
-]
+// Public marketing page at /remodelers — reached today only through the
+// /josh and /fb redirects in vercel.json (500 printed flyers, a Facebook
+// group link). Rendered before any auth check (App.js), so it works
+// logged-out.
+//
+// ── 2026-09-20: REPURPOSED, on JP's call ────────────────────────────────────
+// This used to be the self-serve JobTally signup funnel ($150/mo, "Start
+// free — no card"). JP killed that as a standing product the same night —
+// zero paying customers, ever. It is NOT going back up as a self-serve
+// signup. JobTally survives only as a Tier 3 custom build: someone who
+// scans an old flyer and is actually interested gets pitched a build made
+// for their business, priced on the job, not a rate card.
+//
+// Deliberately no backend here — no Supabase call, no Stripe, nothing that
+// can break while that infra sits paused. Just a pitch and a way to reach
+// JP directly.
+const CONTACT_EMAIL = 'kobrossisystems@gmail.com'
+const CONTACT_PHONE_DISPLAY = '(518) 608-9344'
+const CONTACT_PHONE_HREF = 'tel:+15186089344'
+const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('JobTally for my business')}`
 
 export default function Remodelers() {
-  useEffect(() => {
-    document.title = 'JobTally for Remodelers — know what every job really makes'
+  React.useEffect(() => {
+    document.title = 'JobTally, built for your business — KS Digital'
     trackOnce(EV.LANDING_VIEW, { page: 'remodelers' })
   }, [])
 
-  // Which CTA actually moved someone. `where` rides along so the flyer funnel
-  // (/josh → here) can be read end to end: view → video play → CTA → signup.
   const cta = (where) => () => track(EV.LANDING_CTA, { where, page: 'remodelers' })
-
-  // "Did the flyer crowd actually watch the video" is the whole question this
-  // page exists to answer, so the play is worth an event. onPlay fires again on
-  // every resume after a pause, hence the guard — we want one row meaning "this
-  // visitor started it", not one per scrub. Not trackOnce(): that dedupes on the
-  // event NAME, so it would burn the shared landing_cta key for the whole tab.
-  const playedRef = useRef(false)
-  const onVideoPlay = () => {
-    if (playedRef.current) return
-    playedRef.current = true
-    track(EV.LANDING_CTA, { where: 'video-play', page: 'remodelers' })
-  }
-
-  // The intro gets its OWN guard and its own `where`. Two videos now sit on this
-  // page and they answer different questions: "did the flyer crowd trust a face
-  // enough to press play" vs "did they stay for the product". One shared ref
-  // would collapse both into whichever they hit first.
-  const introPlayedRef = useRef(false)
-  const onIntroPlay = () => {
-    if (introPlayedRef.current) return
-    introPlayedRef.current = true
-    track(EV.LANDING_CTA, { where: 'intro-video-play', page: 'remodelers' })
-  }
-
-  // One saved speed drives both videos: pick 2x on either and the other follows.
-  const introSpeed = useVideoSpeed()
-  const pitchSpeed = useVideoSpeed()
 
   return (
     <div className="rl">
@@ -104,177 +37,25 @@ export default function Remodelers() {
       <header className="rl-top">
         <a className="rl-logo" href="/remodelers">JobTally</a>
         <nav>
-          <a className="rl-signin" href="/login">Sign in</a>
-          <a className="rl-cta-sm" href={SIGNUP_URL} onClick={cta('topbar')}>Start free</a>
+          <a className="rl-signin" href="/">KS Digital</a>
         </nav>
       </header>
 
       {/* Hero */}
       <section className="rl-hero">
-        <h1>Still running jobs out of a notebook?</h1>
+        <h1>Interested in JobTally for your business?</h1>
         <p className="rl-sub">
-          JobTally shows you what every job is really making — crew hours, receipts, and
-          what's left for you — from the phone already in your pocket. Built for remodelers
-          and GCs with a 2–10 man crew.
+          JobTally tracks crew hours, receipts, and per-job profit from a phone. It's not a
+          self-serve signup anymore — I build and customize it for one business at a time, the
+          same way I build everything else. Tell me about your crew and I'll tell you straight
+          whether it's worth doing.
         </p>
-        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('hero')}>Start free — no card</a>
-        {/* Says card-required UP FRONT on purpose. The Stripe screen comes right
-            after sign-up, and a card nobody warned them about is the drop point. */}
-        <div className="rl-cta-note">One job free, forever — no card. Card up front so it doesn't shut off on you mid-job. Then $150/mo, everything included. Cancel anytime.</div>
-        {/* Flyer traffic arrives ON A PHONE, in a truck. This is the one page
-            where "there's nothing to download" lands hardest — and where a guy
-            who isn't ready to sign up today can still leave with the icon on
-            his phone. Renders only where it can actually do something. */}
-        <div className="rl-a2hs">
-          <div className="rl-a2hs-copy">
-            <strong>Nothing to download.</strong> No app store. It's a web page — put it on your
-            home screen and it opens like anything else on your phone.
-          </div>
-          <InstallButton />
-        </div>
-        {/* Most people landing here came off a paper flyer's QR code and have
-            never heard of JobTally — or of the person who built it. Point them
-            at the introduction first: a face and a reason beat a feature list
-            when nobody knows who you are yet. */}
-        <a className="rl-watch-link" href="#intro" onClick={cta('hero-watch')}>
-          <span className="rl-play" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7Z" /></svg>
-          </span>
-          New here? Start with the 3-minute introduction
-        </a>
+        <a className="rl-cta" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email me</a>
+        <div className="rl-cta-note">Or call/text {CONTACT_PHONE_DISPLAY}</div>
       </section>
 
-      {/* Introduction — the FIRST thing flyer traffic should hit. Someone who
-          just scanned a QR code in their truck has no idea who is behind this,
-          and the honest origin (a contractor described the problem, so it got
-          built) is the only credibility available before they've used anything.
-          Same preload="none" rule as below: 14 MB, cell data, click to play. */}
-      <section className="rl-intro" id="intro">
-        <div className="rl-inner">
-          <h2>Introduction video</h2>
-          <p className="rl-kicker">
-            John Paul Kobrossi, founder of JobTally. I built the whole thing myself.
-          </p>
-          <div className="rl-video-frame">
-            <video
-              ref={introSpeed.videoRef}
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/intro-poster.jpg"
-              src="/landing/JobTally-Intro.mp4"
-              onPlay={onIntroPlay}
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-          <div style={{ marginTop: '14px' }}>
-            <SpeedPicker speed={introSpeed.speed} onChange={introSpeed.setSpeed} />
-          </div>
-          <div className="rl-video-after">
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('intro-video')}>Start free — no card</a>
-            <div className="rl-cta-note">Or watch the walkthrough below first — no sign-up needed for either.</div>
-          </div>
-        </div>
-      </section>
-
-      {/* Watch-it-run video. This is the "how-to" the introduction points at, so
-          it has to stay BELOW the intro — the closing line of that video tells
-          people it's down here. Click-to-play with preload="none" — the file is
-          ~8 MB and a lot of these visitors are standing on a job site on
-          cell data, so nothing downloads until they actually hit play. */}
-      <section className="rl-video" id="video">
-        <div className="rl-inner">
-          <h2>See it run — 3-minute walkthrough</h2>
-          <p className="rl-kicker">
-            Watch a real job go from clock-in to profit. No sign-up, nothing to fill out.
-          </p>
-          <div className="rl-video-frame">
-            <video
-              ref={pitchSpeed.videoRef}
-              controls
-              playsInline
-              preload="none"
-              poster="/landing/pitch-poster.jpg"
-              src="/landing/JobTally-Pitch.mp4"
-              onPlay={onVideoPlay}
-            >
-              Your browser can't play this video.
-            </video>
-          </div>
-          <div style={{ marginTop: '14px' }}>
-            <SpeedPicker speed={pitchSpeed.speed} onChange={pitchSpeed.setSpeed} />
-          </div>
-          <div className="rl-video-after">
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('video')}>Start free — no card</a>
-            <div className="rl-cta-note">Then follow the four steps below — you'll be running by tomorrow morning.</div>
-          </div>
-        </div>
-      </section>
-
-      {/* Getting started. The video sells it; this removes every "…okay, but
-          what do I actually DO?" excuse between watching and signing up. */}
-      <section className="rl-how" id="get-started">
-        <div className="rl-inner">
-          <h2>How to get started</h2>
-          <p className="rl-kicker">Four steps. About five minutes total, and you only do it once.</p>
-          <ol className="rl-steps">
-            <li className="rl-step">
-              <span className="rl-step-num">1</span>
-              <div>
-                <h3>Make your account</h3>
-                <p>
-                  Tap <strong>Start free — no card</strong>. Your name, your company name,
-                  email and a password. That's the whole form — about two minutes.
-                </p>
-              </div>
-            </li>
-            <li className="rl-step">
-              <span className="rl-step-num">2</span>
-              <div>
-                <h3>Set up your first job</h3>
-                <p>
-                  <strong>No card. No countdown.</strong> Your first job is free for as long as you
-                  want it, so nothing ever shuts off on you in the middle of a job. You only pay
-                  the $150/mo when you want a second job open at the same time.
-                </p>
-              </div>
-            </li>
-            <li className="rl-step">
-              <span className="rl-step-num">3</span>
-              <div>
-                <h3>Put in one real job</h3>
-                <p>
-                  Not a test — a job you're actually running. The name, the address, what you're
-                  charging. A setup guide on your home screen walks you through it and checks
-                  each step off as you go.
-                </p>
-              </div>
-            </li>
-            <li className="rl-step">
-              <span className="rl-step-num">4</span>
-              <div>
-                <h3>Text your crew the invite link</h3>
-                <p>
-                  JobTally gives you a link — text it to your guys. He taps it on his own phone
-                  and he is in, and he clocks in tomorrow morning. Nothing to type, no password,
-                  nothing to install, no training.
-                </p>
-              </div>
-            </li>
-          </ol>
-          <div className="rl-how-first">
-            <strong>Your very first move:</strong> snap a photo of the last receipt sitting in your
-            truck. It reads the store, the total and the tax by itself and books it to the job.
-            That's the whole thing in about ten seconds — and that's when it clicks.
-          </div>
-          <div className="rl-how-cta">
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('how')}>Start free — no card</a>
-          </div>
-        </div>
-      </section>
-
-      {/* Origin story */}
+      {/* Origin story — kept, it's still true and it's the only credibility
+          a flyer scanner has before they've talked to anyone. */}
       <section className="rl-story">
         <div className="rl-inner">
           <h2>Why this exists</h2>
@@ -282,74 +63,33 @@ export default function Remodelers() {
             JobTally started with a contractor friend of ours in Troy, NY. Good builder,
             steady work, crew of guys who showed up. His system: crew hours scribbled in
             <strong> spiral notebooks</strong>, and every receipt from the supply house stuffed
-            into a <strong>plastic sheet</strong> in the truck — crumpled, coffee-stained, half of
+            into a <strong>plastic sheet</strong> in the truck, crumpled, coffee-stained, half of
             them faded to nothing.
           </p>
           <p>
-            Ask him if a job made money and he'd say "pretty sure." Come tax time it was a
-            <strong> nightmare weekend</strong> of flattening receipts on the kitchen table and
-            trying to remember which job the lumber run belonged to. He wasn't losing money
-            because he was bad at building — he was losing it because nobody could see the
+            Ask him if a job made money and he'd say "pretty sure." He wasn't losing money
+            because he was bad at building. He was losing it because nobody could see the
             numbers until it was way too late.
           </p>
           <p>
-            <strong>So we built JobTally to kill that.</strong> The notebook, the plastic sheet,
-            the tax-time archaeology — all of it. One app, on the phones you and your crew
-            already carry, that keeps score while the job is running.
+            <strong>So I built JobTally to kill that.</strong> Now I build a version of it for
+            whoever actually needs the same fix, priced for that one job, not a monthly plan.
           </p>
         </div>
       </section>
 
-      {/* Features */}
-      <section className="rl-features">
-        <div className="rl-inner">
-          <h2>What it does</h2>
-          <p className="rl-kicker">No modules, no add-ons, no 3-week setup. Sign up and it works.</p>
-          <div className="rl-grid">
-            {FEATURES.map((f) => (
-              <div className="rl-feature" key={f.title}>
-                <span className="rl-icon" aria-hidden="true">{ICONS[f.icon]}</span>
-                <h3>{f.title}</h3>
-                <p>{f.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-
-      {/* Pricing */}
-      <section className="rl-pricing">
-        <div className="rl-inner">
-          <h2>One price. Everything. No games.</h2>
-          <div className="rl-price-card">
-            <div className="rl-price">$150<span>/mo</span></div>
-            <ul>
-              <li>Unlimited crew — no per-seat charges</li>
-              <li>Every feature included, nothing gated</li>
-              <li>One job free, forever — no card to start</li>
-              <li>$1,200/yr if you'd rather pay once (4 months free)</li>
-              <li>Cancel anytime — your data stays yours, export it whenever</li>
-            </ul>
-            <a className="rl-cta" href={SIGNUP_URL} onClick={cta('pricing')}>Start free — no card</a>
-            <p className="rl-price-note">
-              One caught receipt pile or one job that stops bleeding pays for the year.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Final CTA */}
-      <section className="rl-final">
-        <h2>Know your number before the job's over.</h2>
-        <p>Set up takes about five minutes. Your crew clocks in tomorrow morning.</p>
-        <a className="rl-cta" href={SIGNUP_URL} onClick={cta('final')}>Start free — no card</a>
-        <div className="rl-cta-note">Sign up and run your first job free. No card.</div>
+      <section className="rl-final-cta" style={{ padding: '48px 20px', textAlign: 'center', background: 'var(--navy)', color: '#fff' }}>
+        <h2 style={{ fontSize: 'clamp(22px, 4vw, 30px)', fontWeight: 800 }}>Tell me about your crew.</h2>
+        <p style={{ color: 'rgba(255,255,255,0.72)', marginTop: '8px', maxWidth: '480px', marginInline: 'auto' }}>
+          How many guys, what you're tracking now, and what's actually going wrong with it.
+        </p>
+        <a className="rl-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email me</a>
+        <div className="rl-cta-note">Or call/text {CONTACT_PHONE_DISPLAY}</div>
       </section>
 
       <footer className="rl-footer">
-        <a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>·<a href="/login">Sign in</a>
-        <div style={{ marginTop: 8 }}>JobTally · getjobtally.com</div>
+        <a href={CONTACT_MAILTO}>Email</a>·<a href={CONTACT_PHONE_HREF}>Call/text</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
+        <div style={{ marginTop: 8 }}>JobTally, a KS Digital build · getjobtally.com</div>
       </footer>
     </div>
   )
