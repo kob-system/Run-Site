@@ -5,15 +5,16 @@ import { track, trackOnce, EV } from '../utils/analytics'
 // Public landing page at / — what a stranger sees before they have an account.
 // Rendered before the Login screen (App.js) for logged-out visitors.
 //
-// ── 2026-09-20: REPURPOSED, on JP's call ────────────────────────────────────
+// ── 2026-09-20/21: REPURPOSED, on JP's call ─────────────────────────────────
 // JobTally the self-serve product is done as a standing offer — zero paying
-// customers, ever. JP killed the old ONE-OFFER lock the same night and this
-// domain becomes the storefront for the new one instead: a 3-tier ladder
-// (site + SEO / + texting system / problem-solved, value-priced), sold local
-// in the Capital Region under the existing KS Digital name. JobTally itself
-// didn't disappear — it survives as a Tier 3 case (a custom job-costing build
-// for whoever specifically asks and pays for it), which is what the /josh and
-// /fb flyer links now lead to (see Remodelers.js — same route, new pitch).
+// customers, ever. JP killed the old ONE-OFFER lock and this domain becomes
+// the storefront for the new one instead: three flat menu items ($1,000 site
+// / $2,000 full build / the monthly open bill), sold local in the Capital
+// Region under the Kobrossi Systems name (not "KS Digital" — his own site,
+// his own name on it). JobTally itself didn't disappear — it survives as a
+// custom job-costing build for whoever specifically asks and pays for it,
+// which is what the /josh and /fb flyer links now lead to (see Remodelers.js
+// — same route, new pitch).
 //
 // The actual app (OwnerDashboard, WorkerDashboard, Billing, crew invites) is
 // untouched underneath this page and still works exactly as before for any
@@ -33,16 +34,26 @@ const TIERS = [
   },
   {
     n: '2',
-    name: 'The site, answering back',
-    price: 'Tier 1 + a monthly texting system',
-    body: "Missed calls text themselves back, reviews get asked for and answered, slow seasons get an outreach push, and whatever else fits how your business actually runs. Monthly price is a quote, not a rate card — I'll tell you the number after I see the job.",
+    name: 'The full build',
+    price: '$2,000',
+    body: 'Everything in the site, plus the GHL/CRM system set up underneath it — the pipeline, the automations, the plumbing that makes the site actually do something for you.',
   },
   {
     n: '3',
-    name: 'The problem, solved',
-    price: 'Priced on the job',
-    body: "Tell me what's actually costing you time or money. If AI or a piece of software is genuinely the fix, I build it and price it on what solving it is worth, not an hourly rate.",
+    name: 'The monthly bill',
+    price: 'Quoted per business',
+    body: "The ongoing side, whatever that means for you — keeping the texting and automations running, or an open problem I solve and bill for over time instead of as a one-time project. This is a conversation, not a rate card. I'll tell you the number after I see the job.",
   },
+]
+
+const PORTFOLIO = [
+  { name: 'First Class Property Services', domain: '518firstclassservices.com' },
+  { name: 'Troy Mega Laundromat', domain: 'troymegawash.com' },
+  { name: 'Schenectady Marble & Granite', domain: 'schenectadymarble.com' },
+  { name: 'Half Moon Smoke World', domain: 'halfmoonsmokeworld.com' },
+  { name: 'USA Kitchen & Cabinets', domain: 'usakitchencabinets518.com' },
+  { name: 'All Phase Maintenance', domain: 'allphasemaintenance.com' },
+  { name: 'D&K Tax Services', domain: null, note: 'In build' },
 ]
 
 const FAQS = [
@@ -62,7 +73,7 @@ const FAQS = [
 
 export default function Landing() {
   useEffect(() => {
-    document.title = 'KS Digital — websites, texting, and AI for Capital Region businesses'
+    document.title = 'Kobrossi Systems — websites, texting, and AI for Capital Region businesses'
     trackOnce(EV.LANDING_VIEW)
   }, [])
 
@@ -72,7 +83,7 @@ export default function Landing() {
     <div className="ld">
       {/* Top bar */}
       <header className="ld-top">
-        <a className="ld-logo" href="/">KS Digital</a>
+        <a className="ld-logo" href="/">Kobrossi Systems</a>
         <nav>
           <a className="ld-cta-sm" href={CONTACT_MAILTO} onClick={cta('topbar')}>Get in touch</a>
         </nav>
@@ -136,6 +147,32 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Portfolio — real client work, named. Smoke shops excluded on JP's
+          standing rule except Half Moon Smoke World, which he's fine naming. */}
+      <section className="ld-portfolio" id="portfolio">
+        <div className="ld-inner">
+          <h2>Work I've actually shipped</h2>
+          <p className="ld-kicker">Real businesses, real sites. Click through and check for yourself.</p>
+          <ul className="ld-portfolio-grid">
+            {PORTFOLIO.map((p) => (
+              <li className="ld-portfolio-card" key={p.name}>
+                {p.domain ? (
+                  <a href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">
+                    <span className="ld-portfolio-name">{p.name}</span>
+                    <span className="ld-portfolio-domain">{p.domain}</span>
+                  </a>
+                ) : (
+                  <div className="ld-portfolio-static">
+                    <span className="ld-portfolio-name">{p.name}</span>
+                    <span className="ld-portfolio-domain">{p.note}</span>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
       {/* FAQ */}
       <section className="ld-faq">
         <div className="ld-inner">
@@ -161,7 +198,7 @@ export default function Landing() {
 
       <footer className="ld-footer">
         <a href={CONTACT_MAILTO}>Email</a>·<a href={CONTACT_PHONE_HREF}>Call/text</a>·<a href="/login">Client sign in</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
-        <div style={{ marginTop: 8 }}>KS Digital · getjobtally.com</div>
+        <div style={{ marginTop: 8 }}>Kobrossi Systems · getjobtally.com</div>
       </footer>
     </div>
   )

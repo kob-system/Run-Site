@@ -232,3 +232,15 @@
 .ld-tier-price { color: var(--orange); font-weight: 700; font-size: 15px; margin-bottom: 12px; }
 .ld-tier-card p { font-size: 15px; color: var(--text-secondary); line-height: 1.5; }
 .ld-how-cta { margin-top: 32px; }
+
+/* Portfolio — plain named cards, no photos yet. A domain link is the whole
+   pitch here ("check my work"), so it gets the same weight as the name. */
+.ld-portfolio { text-align: center; }
+.ld-portfolio-grid { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: 1fr; gap: 12px; text-align: left; }
+@media (min-width: 640px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 960px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr 1fr; } }
+.ld-portfolio-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+.ld-portfolio-card a, .ld-portfolio-static { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: inherit; }
+.ld-portfolio-name { font-size: 15px; font-weight: 700; color: var(--text); }
+.ld-portfolio-domain { font-size: 13px; color: var(--orange); font-weight: 600; }
+.ld-portfolio-card a:hover .ld-portfolio-domain { text-decoration: underline; }

@@ -25,7 +25,7 @@ const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Jo
 
 export default function Remodelers() {
   React.useEffect(() => {
-    document.title = 'JobTally, built for your business — KS Digital'
+    document.title = 'JobTally, built for your business — Kobrossi Systems'
     trackOnce(EV.LANDING_VIEW, { page: 'remodelers' })
   }, [])
 
@@ -37,7 +37,7 @@ export default function Remodelers() {
       <header className="rl-top">
         <a className="rl-logo" href="/remodelers">JobTally</a>
         <nav>
-          <a className="rl-signin" href="/">KS Digital</a>
+          <a className="rl-signin" href="/">Kobrossi Systems</a>
         </nav>
       </header>
 
@@ -89,7 +89,7 @@ export default function Remodelers() {
 
       <footer className="rl-footer">
         <a href={CONTACT_MAILTO}>Email</a>·<a href={CONTACT_PHONE_HREF}>Call/text</a>·<a href="/privacy.html">Privacy</a>·<a href="/terms.html">Terms</a>
-        <div style={{ marginTop: 8 }}>JobTally, a KS Digital build · getjobtally.com</div>
+        <div style={{ marginTop: 8 }}>JobTally, a Kobrossi Systems build · getjobtally.com</div>
       </footer>
     </div>
   )
