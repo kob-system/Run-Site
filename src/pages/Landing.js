@@ -85,11 +85,14 @@ const STAGES = [
   },
 ]
 
-// Google's public favicon proxy — pulls the real icon straight off the
-// client's own live domain, so a "logo" shows up here without JP handing over
-// or hosting a single image file for any of these 7 businesses.
-const favicon = (domain) => `https://www.google.com/s2/favicons?sz=64&domain=${domain}`
-
+// First pass pulled each business's real favicon off Google's public proxy —
+// looked fine locally but silently 404'd in production because the site's
+// own CSP (vercel.json img-src) only allows 'self'/data:/blob:/Supabase, and
+// rightly so (no reason this page needs to reach an external image host).
+// Initials avatars instead: zero network dependency, can't ever break, and
+// the color cycle still gives the grid the "these are 7 different real
+// businesses" visual variety the favicons were for.
+const AVATAR_COLORS = ['green', 'orange', 'amber']
 const initials = (name) => name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()
 
 export default function Landing() {
@@ -178,35 +181,43 @@ export default function Landing() {
 
       {/* Portfolio — real client work, named. Smoke shops excluded on JP's
           standing rule except Half Moon Smoke World, which he's fine naming.
-          Sized up from the first pass and each card carries the business's
-          own favicon (or initials, for the one not live yet) — a small,
-          real signal of "this is an actual business," not a stock icon. */}
+          Sized up from the first pass and each card carries a colored
+          initials avatar — a small, real signal of "this is an actual
+          business," not a stock icon, and it never depends on a network
+          request the CSP would have to trust. */}
       <section className="ld-portfolio" id="portfolio">
         <div className="ld-inner">
           <h2>Work I've actually shipped</h2>
           <p className="ld-kicker">Real businesses, real sites. Click through and check for yourself.</p>
           <ul className="ld-portfolio-grid">
-            {PORTFOLIO.map((p) => (
-              <li className="ld-portfolio-card" key={p.name}>
-                {p.domain ? (
-                  <a href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">
-                    <img className="ld-portfolio-logo" src={favicon(p.domain)} alt="" loading="lazy" width="28" height="28" />
-                    <span className="ld-portfolio-text">
-                      <span className="ld-portfolio-name">{p.name}</span>
-                      <span className="ld-portfolio-domain">{p.domain}</span>
-                    </span>
-                  </a>
-                ) : (
-                  <div className="ld-portfolio-static">
-                    <span className="ld-portfolio-logo ld-portfolio-logo--initials" aria-hidden="true">{initials(p.name)}</span>
-                    <span className="ld-portfolio-text">
-                      <span className="ld-portfolio-name">{p.name}</span>
-                      <span className="ld-portfolio-domain">{p.note}</span>
-                    </span>
-                  </div>
-                )}
-              </li>
-            ))}
+            {PORTFOLIO.map((p, i) => {
+              const avatar = (
+                <span className={`ld-portfolio-logo ld-portfolio-logo--${AVATAR_COLORS[i % AVATAR_COLORS.length]}`} aria-hidden="true">
+                  {initials(p.name)}
+                </span>
+              )
+              return (
+                <li className="ld-portfolio-card" key={p.name}>
+                  {p.domain ? (
+                    <a href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">
+                      {avatar}
+                      <span className="ld-portfolio-text">
+                        <span className="ld-portfolio-name">{p.name}</span>
+                        <span className="ld-portfolio-domain">{p.domain}</span>
+                      </span>
+                    </a>
+                  ) : (
+                    <div className="ld-portfolio-static">
+                      {avatar}
+                      <span className="ld-portfolio-text">
+                        <span className="ld-portfolio-name">{p.name}</span>
+                        <span className="ld-portfolio-domain">{p.note}</span>
+                      </span>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </div>
       </section>

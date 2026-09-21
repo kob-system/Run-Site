@@ -258,9 +258,9 @@
 .ld-tier-card p { font-size: 15px; color: var(--text-secondary); line-height: 1.5; }
 .ld-how-cta { margin-top: 32px; }
 
-/* Portfolio — sized up from the first pass and each card carries a small
-   real favicon (or initials for the one not live yet), so it reads as "here
-   are the actual businesses" instead of a plain link list. */
+/* Portfolio — sized up from the first pass and each card carries a colored
+   initials avatar, so it reads as "here are the actual businesses" instead
+   of a plain link list. */
 .ld-portfolio { text-align: center; }
 .ld-portfolio-grid { list-style: none; padding: 0; margin: 32px 0 0; display: grid; grid-template-columns: 1fr; gap: 14px; text-align: left; }
 @media (min-width: 640px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr; } }
@@ -268,8 +268,12 @@
 .ld-portfolio-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 20px; transition: transform .15s ease, box-shadow .15s ease; }
 .ld-portfolio-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .ld-portfolio-card a, .ld-portfolio-static { display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit; }
-.ld-portfolio-logo { width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; }
-.ld-portfolio-logo--initials { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; background: var(--navy); color: var(--orange); font-size: 13px; font-weight: 800; }
+/* Colored initials avatar, cycled per card (green/orange/amber) — no image
+   request, so nothing for the CSP to block and nothing that can 404. */
+.ld-portfolio-logo { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 800; letter-spacing: 0.02em; }
+.ld-portfolio-logo--green { background: var(--green-dark); }
+.ld-portfolio-logo--orange { background: var(--orange); }
+.ld-portfolio-logo--amber { background: #92650a; }
 .ld-portfolio-text { display: flex; flex-direction: column; gap: 4px; }
 .ld-portfolio-name { font-size: 15px; font-weight: 700; color: var(--text); }
 .ld-portfolio-domain { font-size: 13px; color: var(--orange); font-weight: 600; }
