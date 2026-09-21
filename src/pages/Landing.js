@@ -5,18 +5,33 @@ import { track, trackOnce, EV } from '../utils/analytics'
 // Public landing page at / — what a stranger sees before they have an account.
 // Rendered before the Login screen (App.js) for logged-out visitors.
 //
-// ── 2026-09-21 evening: FULL REBUILD, not another copy pass ────────────────
-// JP watched the previous version (consultant reframe, aa297a1) live and
-// called it: "JobTally is still better than this... the website is fully
-// JobTally, we need to get rid of anything related to it... build something
-// crazy, futuristic." This file keeps the proven content (same headline,
-// same three tiers, same portfolio, same stage-select — none of that was the
-// complaint) and replaces the whole visual system: a "digital blueprint"
-// look (grid paper + corner brackets + mono coordinate labels, ties the
-// construction/civil-engineering niche to the futuristic ask) instead of the
-// navy/orange SaaS template. Added: a niche section stating construction is
-// the lean (JP is a civil engineering student) without locking the site to
-// it — his explicit instruction, "we also service all kinds of businesses."
+// ── 2026-09-21 night: visual system replaced again, same content ──────────
+// The "digital blueprint" pass (commit 075d8d6, same evening) went live and
+// JP rejected it on sight: "looks like a first try with AI... anime
+// futuristic... I want it to look real futuristic. Look at the new X video
+// Elon Musk posted about Mars." Translation: he means the SpaceX/NASA
+// concept-render aesthetic — dramatic light, atmospheric depth, real
+// material and scale — not the flat neon-grid/particle-canvas/hacker-HUD
+// look that was live. That look, not the construction lean, was the "generic
+// AI template" tell.
+//
+// So the particle-network canvas, the cyan/violet neon glow blobs, and the
+// glassy neon buttons are gone. In their place: one real photograph (a
+// tower crane silhouetted against a sunset construction site — Unsplash,
+// Unsplash License, free for commercial use, no attribution required),
+// self-hosted at src/images/ and graded in CSS with a duotone wash, a
+// vignette and film grain instead of a flat color overlay, so it reads as a
+// cinematic frame instead of a stock photo with a filter slapped on. The
+// same still-image reappears, cropped differently, behind the construction
+// section further down — one photographic thread running through the page
+// instead of a decorative image plus an unrelated illustration style.
+// (Self-hosted, not linked, for the same CSP reason as the fonts below:
+// img-src is 'self' only, so an external URL would 404 silently in prod.)
+//
+// Content is untouched: same headline (asserted on by App.test.js — do not
+// edit without updating those tests), same three tiers, same portfolio, same
+// stage-select, same construction-leans-doesn't-lock section. Only the look
+// changed.
 //
 // The actual app (OwnerDashboard, WorkerDashboard, Billing, crew invites) is
 // untouched underneath this page and still works exactly as before for any
@@ -142,85 +157,21 @@ function Reveal({ as: Tag = 'div', className = '', children, ...rest }) {
   )
 }
 
-// ── Hero background: a quiet particle field, not decoration for its own
-// sake — nodes drift and link when close, like a network diagram resolving
-// itself. Canvas instead of a library so the bundle gains zero dependencies.
-function HeroField() {
-  const canvasRef = useRef(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return // jsdom (tests) and any environment without 2d canvas support — hero still works without the field
-    let width = 0
-    let height = 0
-    let dpr = Math.min(window.devicePixelRatio || 1, 2)
-    let nodes = []
-    let raf = null
-
-    const resize = () => {
-      const rect = canvas.parentElement.getBoundingClientRect()
-      width = rect.width
-      height = rect.height
-      dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = width * dpr
-      canvas.height = height * dpr
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      const count = Math.min(60, Math.round((width * height) / 22000))
-      nodes = Array.from({ length: count }, () => ({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        vx: (Math.random() - 0.5) * 0.22,
-        vy: (Math.random() - 0.5) * 0.22,
-      }))
-    }
-
-    const draw = () => {
-      ctx.clearRect(0, 0, width, height)
-      for (const n of nodes) {
-        n.x += n.vx
-        n.y += n.vy
-        if (n.x < 0 || n.x > width) n.vx *= -1
-        if (n.y < 0 || n.y > height) n.vy *= -1
-      }
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i]
-          const b = nodes[j]
-          const dx = a.x - b.x
-          const dy = a.y - b.y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 130) {
-            ctx.strokeStyle = `rgba(63, 232, 226, ${0.14 * (1 - dist / 130)})`
-            ctx.lineWidth = 1
-            ctx.beginPath()
-            ctx.moveTo(a.x, a.y)
-            ctx.lineTo(b.x, b.y)
-            ctx.stroke()
-          }
-        }
-      }
-      for (const n of nodes) {
-        ctx.fillStyle = 'rgba(155, 123, 255, 0.55)'
-        ctx.beginPath()
-        ctx.arc(n.x, n.y, 1.6, 0, Math.PI * 2)
-        ctx.fill()
-      }
-      if (!reduceMotion) raf = requestAnimationFrame(draw)
-    }
-
-    resize()
-    draw()
-    window.addEventListener('resize', resize)
-    return () => {
-      window.removeEventListener('resize', resize)
-      if (raf) cancelAnimationFrame(raf)
-    }
-  }, [])
-
-  return <canvas ref={canvasRef} className="ld-hero-field" aria-hidden="true" />
+// ── Hero background: one real photograph, cinematically graded ───────────
+// Replaces the old particle-network canvas. Three stacked layers, all pure
+// CSS (Landing.css): the photo itself (.ld-hero-photo, a slow 26s Ken-Burns
+// drift), a duotone/vignette color grade on top of it (.ld-hero-grade), and
+// a faint drifting dust layer (.ld-hero-dust) for atmosphere. No canvas, no
+// per-frame JS — cheaper than the field it replaced and doesn't fight
+// prefers-reduced-motion the way a requestAnimationFrame loop did.
+function HeroPhoto() {
+  return (
+    <div className="ld-hero-photo-wrap" aria-hidden="true">
+      <div className="ld-hero-photo" />
+      <div className="ld-hero-grade" />
+      <div className="ld-hero-dust" />
+    </div>
+  )
 }
 
 export default function Landing() {
@@ -247,9 +198,7 @@ export default function Landing() {
 
       {/* Hero */}
       <section className="ld-hero">
-        <HeroField />
-        <div className="ld-hero-glow-a" aria-hidden="true" />
-        <div className="ld-hero-glow-b" aria-hidden="true" />
+        <HeroPhoto />
         <div className="ld-hero-inner">
           <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Civil engineer, systems builder &middot; Capital Region, NY</div>
           <h1>Every business has a leak. I find it, then I fix it.</h1>
