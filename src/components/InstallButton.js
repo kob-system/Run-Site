@@ -19,7 +19,7 @@ import IosInstallGuide from './IosInstallGuide'
 const NAVY = '#1C2B3A'
 const ORANGE = '#E07B2A'
 
-export default function InstallButton({ variant = 'solid', className }) {
+export default function InstallButton({ variant = 'solid', className, label = 'Put it on your phone' }) {
   const { mode, install } = useInstallPrompt()
   const [sheet, setSheet] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -54,7 +54,7 @@ export default function InstallButton({ variant = 'solid', className }) {
         }}
       >
         <span aria-hidden="true" style={{ fontSize: 17 }}>📲</span>
-        {busy ? 'Adding…' : 'Put it on your phone'}
+        {busy ? 'Adding…' : label}
       </button>
 
       {sheet && (

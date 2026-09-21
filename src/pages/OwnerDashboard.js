@@ -3,12 +3,19 @@ import { supabase } from '../supabaseClient'
 import { formatCurrency } from '../utils/formatCurrency'
 import { formatTime } from '../utils/formatTime'
 import { todayLocal } from '../utils/todayLocal'
-import { computeProfit, computeMargin, computeContractPrice, roundCents } from '../utils/money'
+import { computeProfit, computeMargin, computeContractPrice, roundCents, profitPicture } from '../utils/money'
+import {
+  toLocalInputs, fromLocalInputs, shiftProblem, shiftMinutes, shiftPay,
+  clockTime, shiftDay, sinceLabel, MAX_SHIFT_MINUTES, LONG_OPEN_MINUTES
+} from '../utils/shiftEdit'
 import { downloadCsv } from '../utils/csv'
 import AssistantPanel from '../components/AssistantPanel'
 import InstallPrompt from '../components/InstallPrompt'
+import Walkthrough, { walkthroughSeenKey } from '../components/Walkthrough'
 import { buildQboInvoicesCsv, buildQboCustomersCsv } from '../features/quickbooks'
 import { deleteSampleJob } from '../utils/sampleJob'
+import { toJpeg, imageErrorMessage, jpegName } from '../utils/imageToJpeg'
+import { isImage, attachmentProblem, attachmentType, attachmentPath } from '../utils/attachment'
 import JobChat, { lastChatRead } from '../components/JobChat'
 import { track, EV } from '../utils/analytics'
 import { legacyFreeDaysLeft, canStartJob } from '../utils/trialWindow'
@@ -82,6 +89,16 @@ const EXPORT_TABLES = [
   // owner_id filter is not redundant belt-and-braces — it is load-bearing.
   ['testimonials', 'Your review', 'owner_id'],
 ]
+// Tables whose rows point at a file in the private `receipts` bucket, and the
+// column holding that file's path. Each one gets a signed download_link in the
+// export. Receipts were missing from this list, so the export (and the your-data
+// page) promised receipt pictures and handed over a storage path nobody could open.
+const EXPORT_LINK_COLS = {
+  job_photos: 'photo_url',
+  job_documents: 'file_url',
+  receipts: 'photo_url',
+  compliance_items: 'file_path',
+}
 // THREE DOORS. This was four tabs with eight sub-tabs behind them — twelve
 // places a man in a truck had to guess between. JP, 2026-08-30: he wanted to
 // open a job and see three things, not a filing cabinet.
@@ -359,6 +376,28 @@ function JobPhoto({ path, alt, style, onClick, signedUrl }) {
 export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [activeTab, setActiveTab] = useState('home')
   const [assistantOpen, setAssistantOpen] = useState(false)
+  // JP 09-13: a new owner lands and the walkthrough pops up in front of them, once.
+  // Owners who signed up before it existed are not ambushed with it; they find it under
+  // More. ?walkthrough=1 (or =worker) opens it on demand, for demos and for testing.
+  const [walkthrough, setWalkthrough] = useState(null) // null | 'owner' | 'worker'
+  // The home-screen card waits its turn: it stays hidden until we know whether the
+  // walkthrough is opening, and for as long as it is open. Both at once was too much.
+  const [walkthroughChecked, setWalkthroughChecked] = useState(false)
+  useEffect(() => {
+    if (!profile?.id) return
+    const ask = new URLSearchParams(window.location.search).get('walkthrough')
+    if (ask) setWalkthrough(ask === 'worker' ? 'worker' : 'owner')
+    else {
+      let seen = null
+      try { seen = localStorage.getItem(walkthroughSeenKey(profile.id)) } catch { /* private mode: treat as unseen */ }
+      if (!seen && profile.created_at && new Date(profile.created_at) >= new Date('2026-09-13T00:00:00Z')) setWalkthrough('owner')
+    }
+    setWalkthroughChecked(true)
+  }, [profile?.id, profile?.created_at])
+  const closeWalkthrough = useCallback(() => {
+    try { localStorage.setItem(walkthroughSeenKey(profile.id), new Date().toISOString()) } catch { /* nothing to do */ }
+    setWalkthrough(null)
+  }, [profile?.id])
   const [projects, setProjects] = useState([])
   const [removingSample, setRemovingSample] = useState(false) // demo-job cleanup in flight
   // Social proof. The ask only ever fires after a REAL job closes in the black —
@@ -448,8 +487,13 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [mileageEntries, setMileageEntries] = useState([])
   const [showNewMileage, setShowNewMileage] = useState(false)
   const [mileageForm, setMileageForm] = useState({ trip_date: '', miles: '', rate: String(DEFAULT_MILEAGE_RATE), notes: '' })
-  const [showNewTime, setShowNewTime] = useState(false)
-  const [timeForm, setTimeForm] = useState({ worker_id: '', work_date: '', start_time: '', end_time: '' })
+  // The shift the owner is fixing (forgot to clock out, wrong time, a shift
+  // that should not exist). null = the fix sheet is closed. See openShiftFix.
+  const [shiftFix, setShiftFix] = useState(null)
+  // Which worker's shifts are unfolded under the open job's Labor card, and
+  // which worker-week is unfolded on Crew Pay ('workerId|YYYY-MM-DD').
+  const [laborWorkerOpen, setLaborWorkerOpen] = useState(null)
+  const [payWeekOpen, setPayWeekOpen] = useState(null)
   const [payroll, setPayroll] = useState([])
   const [paychecks, setPaychecks] = useState([])
   // Money paid out on a job to somebody who never clocks in — a sub, a day
@@ -555,6 +599,21 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
   const [showNewWarranty, setShowNewWarranty] = useState(false)
   const [showNewPermit, setShowNewPermit] = useState(false)
   const [complianceForm, setComplianceForm] = useState({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
+  // A photo or PDF of the certificate / license (FIX-DATABASE-36). The file is
+  // held here until Save, then uploaded BEFORE the row is written, so a failed
+  // upload never leaves an item that looks saved but has no file.
+  const [editingComplianceId, setEditingComplianceId] = useState(null)
+  const [complianceFile, setComplianceFile] = useState(null)             // new File picked in the sheet
+  const [complianceFileRemoved, setComplianceFileRemoved] = useState(false)
+  const [complianceExisting, setComplianceExisting] = useState(null)     // file already on the item being edited
+  const [complianceFilePreview, setComplianceFilePreview] = useState(null)
+  const [complianceUrls, setComplianceUrls] = useState({})               // file_path -> signed URL, for thumbnails
+  useEffect(() => {
+    if (!complianceFile || !isImage(complianceFile.type, complianceFile.name) || typeof URL.createObjectURL !== 'function') { setComplianceFilePreview(null); return }
+    const u = URL.createObjectURL(complianceFile)
+    setComplianceFilePreview(u)
+    return () => URL.revokeObjectURL(u)
+  }, [complianceFile])
   const [warrantyForm, setWarrantyForm] = useState({ project_id: '', description: '', status: 'open', due_on: '' })
   const [permitForm, setPermitForm] = useState({ name: '', status: 'applied', permit_number: '', inspection_on: '', notes: '' })
 
@@ -628,8 +687,10 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       const { data, error } = await supabase.from('projects').select('*').eq('owner_id', profile.id).order('created_at', { ascending: false })
       if (error) throw error
       setProjects(data || [])
+      return data || []
     } catch (e) {
       showToast('Failed to load jobs', 'error')
+      return null
     }
   }, [profile.id])
 
@@ -762,7 +823,7 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       // Page past the 1000-row cap so weekly gross is complete on busy crews.
       const [times, { data: checks }] = await Promise.all([
-        fetchAllRows((from, to) => supabase.from('time_entries').select('worker_id, total_minutes, labor_cost, clocked_in_at').in('worker_id', workerIds).not('clocked_out_at', 'is', null).range(from, to)),
+        fetchAllRows((from, to) => supabase.from('time_entries').select('id, worker_id, project_id, total_minutes, labor_cost, clocked_in_at, clocked_out_at').in('worker_id', workerIds).not('clocked_out_at', 'is', null).range(from, to)),
         supabase.from('paychecks').select('*').eq('owner_id', profile.id)
       ])
       setPaychecks(checks || [])
@@ -770,10 +831,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
       ;(times || []).forEach(t => {
         const ws = weekStartKey(t.clocked_in_at)
         const key = t.worker_id + '|' + ws
-        if (!rows[key]) rows[key] = { worker_id: t.worker_id, week_start: ws, minutes: 0, gross: 0 }
+        if (!rows[key]) rows[key] = { worker_id: t.worker_id, week_start: ws, minutes: 0, gross: 0, shifts: [] }
         rows[key].minutes += t.total_minutes || 0
         rows[key].gross += t.labor_cost || 0
+        // The shifts ride along so a week can unfold into the rows the owner
+        // taps to fix one.
+        rows[key].shifts.push(t)
       })
+      Object.values(rows).forEach(r => r.shifts.sort((a, b) => new Date(b.clocked_in_at) - new Date(a.clocked_in_at)))
       setPayroll(Object.values(rows).sort((a, b) => b.week_start.localeCompare(a.week_start)))
     } catch (e) {
       console.error('Payroll fetch failed:', e)
@@ -964,7 +1029,19 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     try {
       const { data, error } = await supabase.from('compliance_items').select('*').eq('owner_id', profile.id).order('expires_on', { ascending: true })
       if (error) throw error
-      setComplianceItems(data || [])
+      const rows = data || []
+      setComplianceItems(rows)
+      // Sign every photo thumbnail in ONE request. If this misses, each
+      // thumbnail signs itself (JobPhoto fallback), so it never blanks the list.
+      const paths = rows.filter(r => r.file_path && isImage(r.file_type, r.file_name)).map(r => r.file_path)
+      if (paths.length) {
+        try {
+          const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 3600)
+          const map = {}
+          ;(signed || []).forEach(s => { if (s && s.signedUrl && s.path) map[s.path] = s.signedUrl })
+          setComplianceUrls(map)
+        } catch (signErr) { console.error('Compliance thumbnail signing failed:', signErr) }
+      }
     } catch (e) { console.error('Compliance fetch failed:', e); showToast('Could not load insurance & licenses. Check your connection and try again.', 'error') }
   }, [profile.id])
 
@@ -1059,8 +1136,14 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     if (activeTab === 'insights') { if (!invoicesLoaded) fetchInvoices(); if (!estimatesLoaded) fetchEstimates() }
   }, [activeTab, invoicesLoaded, estimatesLoaded, fetchInvoices, fetchEstimates, fetchUpcomingSchedule, fetchCompliance, fetchWarranties])
 
+  // Which job is open RIGHT NOW. A load that finishes after he has moved to a
+  // different job must not paint the old job's lists onto the new one.
+  const openJobIdRef = useRef(null)
+  useEffect(() => { openJobIdRef.current = selectedProject ? selectedProject.id : null }, [selectedProject])
+
   const fetchProjectDetails = async (project) => {
     setSelectedProject(project)
+    openJobIdRef.current = project.id
     // Clear the previous job's detail data first, so opening job B never
     // flashes job A's receipts/photos/etc. while these queries are in flight.
     setReceipts([]); setTimeEntries([]); setScheduleEntries([]); setMileageEntries([])
@@ -1073,7 +1156,20 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     // while these queries are in flight (T2.6).
     setDetailLoading(true)
     try {
-      const pid = project.id
+      await loadProjectDetail(project.id)
+    } catch (e) {
+      showToast('Failed to load job details', 'error')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  // Everything on one job's screen, loaded in place. Used on open (after the
+  // lists are cleared) and after the assistant saves something, when it must
+  // NOT clear anything, close the sheet he's in, or flip his tab. A table whose
+  // query errors keeps what is already on screen instead of going blank.
+  // Returns how many of the queries failed.
+  const loadProjectDetail = async (pid) => {
       // Load all 11 detail tables in parallel (was 11 serial round-trips → ~10x
       // faster job open). Same queries/filters/order; just no longer waterfalled.
       const [r, t, s, m, lg, cor, ph, pu, mt, dc, pm, pw] = await Promise.all([
@@ -1093,33 +1189,51 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
         // appear in the tick list, or the catch-up can't catch him up.
         supabase.from('project_workers').select('worker_id').eq('project_id', pid),
       ])
-      setReceipts(r.data || [])
-      setTimeEntries(t.data || [])
-      setScheduleEntries(s.data || [])
-      setMileageEntries(m.data || [])
-      setDailyLogs(lg.data || [])
-      setChangeOrders(cor.data || [])
-      const photos = ph.data || []
-      setJobPhotos(photos)
-      setPunchItems(pu.data || [])
-      setMaterialItems(mt.data || [])
-      setJobDocuments(dc.data || [])
-      setPermits(pm.data || [])
-      setProjectWorkerIds((pw.data || []).map(x => x.worker_id))
+      // He moved on to another job while this was loading. Paint nothing.
+      if (openJobIdRef.current !== pid) return 0
+      let failed = 0
+      const put = (res, set, map) => {
+        if (!res || res.error) { failed += 1; return }
+        set(map ? map(res.data || []) : (res.data || []))
+      }
+      put(r, setReceipts)
+      put(t, setTimeEntries)
+      put(s, setScheduleEntries)
+      put(m, setMileageEntries)
+      put(lg, setDailyLogs)
+      put(cor, setChangeOrders)
+      put(ph, setJobPhotos)
+      put(pu, setPunchItems)
+      put(mt, setMaterialItems)
+      put(dc, setJobDocuments)
+      put(pm, setPermits)
+      put(pw, setProjectWorkerIds, rows => rows.map(x => x.worker_id))
       // Sign every storage-path photo in ONE request instead of one-per-photo
       // (T2.5). Full-URL seed/demo photos need no signing.
+      const photos = ph && !ph.error ? (ph.data || []) : []
       const paths = photos.map(p => p.photo_url).filter(u => u && !/^https?:\/\//.test(u))
       if (paths.length) {
         const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 3600)
         const map = {}
         ;(signed || []).forEach(s => { if (s && s.signedUrl && s.path) map[s.path] = s.signedUrl })
-        setPhotoUrls(map)
+        if (openJobIdRef.current === pid) setPhotoUrls(map)
       }
-    } catch (e) {
-      showToast('Failed to load job details', 'error')
-    } finally {
-      setDetailLoading(false)
-    }
+      return failed
+  }
+
+  // After the assistant saves something. The job list AND the job he has open
+  // both reload. Before this only the list did, so a 2x4 added by voice didn't
+  // show on the open job's Buy list (nor a receipt, hours, a fix item) until he
+  // backed out and opened the job again.
+  const refreshAfterAssistant = async () => {
+    const fresh = await fetchProjects()
+    const pid = openJobIdRef.current
+    if (!pid) return
+    const row = Array.isArray(fresh) ? fresh.find(p => p.id === pid) : null
+    if (row) setSelectedProject(prev => (prev && prev.id === pid ? { ...prev, ...row } : prev))
+    let failed = 0
+    try { failed = await loadProjectDetail(pid) } catch { failed = 1 }
+    if (failed) showToast("Saved. This job didn't refresh, so close it and open it again to see it.", 'error')
   }
 
   // Refetch a SINGLE detail table for the open job instead of re-running all 11
@@ -1276,44 +1390,9 @@ export default function OwnerDashboard({ profile, sub, billingEnforced }) {
     }
   }
 
-  // Owner manually logs a worker's time on a job (for crew who don't clock in
-  // via the worker app). Mirrors the worker clock-out cost math:
-  // labor_cost = (minutes / 60) * the worker's hourly_rate.
-  const addTimeEntry = async () => {
-    if (!timeForm.worker_id) return setInlineError('Pick a worker')
-    if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return setInlineError('Date, start and end time are required')
-    const startAt = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
-    const endAt = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
-    if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) return setInlineError('Invalid date or time')
-    if (endAt <= startAt) return setInlineError('End time must be after start time')
-    const worker = workers.find(w => w.id === timeForm.worker_id)
-    const totalMinutes = Math.floor((endAt - startAt) / 60000)
-    // Round to cents on the way in — otherwise float noise ((m/60)*rate) persists
-    // to the DB and shows up as $123.4560001 in sums. Matches roundCents everywhere else.
-    const laborCost = roundCents((totalMinutes / 60) * (worker?.hourly_rate || 0))
-    setLoading(true)
-    setInlineError('')
-    try {
-      const { error } = await supabase.from('time_entries').insert({
-        project_id: selectedProject.id,
-        worker_id: timeForm.worker_id,
-        clocked_in_at: startAt.toISOString(),
-        clocked_out_at: endAt.toISOString(),
-        total_minutes: totalMinutes,
-        labor_cost: laborCost
-      })
-      if (error) throw error
-      setShowNewTime(false)
-      setTimeForm({ worker_id: '', work_date: '', start_time: '', end_time: '' })
-      track(EV.TIME_ADDED)
-      await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
-      showToast('Time added ✓')
-    } catch (e) {
-      setInlineError('Failed to add time. Try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
+  // (The old Add Time form and its addTimeEntry lived here. Nothing ever
+  // opened it: the Hours sheet above replaced it. Removed with the owner
+  // shift fix, which is the thing an owner actually needed from it.)
 
   // Remove a worker from the owner's crew. Soft-unlink (owner_id → null) rather
   // than delete: the worker's account and any hours already logged on jobs stay
@@ -1796,16 +1875,77 @@ ${link}`
   }
 
   // ---- Compliance (insurance / license) ----
-  const addCompliance = async () => {
+  const closeComplianceSheet = () => {
+    setShowNewCompliance(false); setInlineError(''); setEditingComplianceId(null)
+    setComplianceForm({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
+    setComplianceFile(null); setComplianceFileRemoved(false); setComplianceExisting(null)
+  }
+  const openNewCompliance = () => { closeComplianceSheet(); setShowNewCompliance(true) }
+  const openEditCompliance = (it) => {
+    closeComplianceSheet()
+    setEditingComplianceId(it.id)
+    setComplianceForm({ kind: it.kind || 'insurance', name: it.name || '', reference: it.reference || '', expires_on: it.expires_on || '', notes: it.notes || '' })
+    setComplianceExisting(it.file_path ? { file_path: it.file_path, file_name: it.file_name, file_type: it.file_type } : null)
+    setShowNewCompliance(true)
+  }
+  const pickComplianceFile = (e) => {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = '' // so picking the same file again still fires
+    if (!file) return
+    const problem = attachmentProblem(file)
+    if (problem) { showToast(problem, 'error'); setInlineError(problem); return }
+    setInlineError(''); setComplianceFile(file); setComplianceFileRemoved(false)
+  }
+  const removeComplianceFile = () => { setComplianceFile(null); setComplianceFileRemoved(true) }
+  const saveCompliance = async () => {
     if (!complianceForm.name) return setInlineError('Add a name')
+    const file = complianceFile
+    const fileChanged = !!file || (complianceFileRemoved && !!editingComplianceId)
     setLoading(true); setInlineError('')
     try {
-      const { error } = await supabase.from('compliance_items').insert({ owner_id: profile.id, kind: complianceForm.kind, name: complianceForm.name, reference: complianceForm.reference || null, expires_on: complianceForm.expires_on || null, notes: complianceForm.notes || null })
+      const row = { kind: complianceForm.kind, name: complianceForm.name, reference: complianceForm.reference || null, expires_on: complianceForm.expires_on || null, notes: complianceForm.notes || null }
+      // File columns only go in the write when the file changed, so a plain
+      // text save still works even before FIX-DATABASE-36 has run.
+      if (file) {
+        const path = attachmentPath(profile.id, file.name)
+        const { error: upErr } = await supabase.storage.from('receipts').upload(path, file)
+        if (upErr) {
+          console.error('Compliance file upload failed:', upErr)
+          const msg = 'The file did not upload, so nothing was saved. Check your signal and tap Save again.'
+          setInlineError(msg); showToast(msg, 'error'); setLoading(false); return
+        }
+        Object.assign(row, { file_path: path, file_name: file.name, file_type: attachmentType(file) })
+      } else if (complianceFileRemoved && editingComplianceId) {
+        Object.assign(row, { file_path: null, file_name: null, file_type: null })
+      }
+      const { error } = editingComplianceId
+        ? await supabase.from('compliance_items').update(row).eq('id', editingComplianceId)
+        : await supabase.from('compliance_items').insert({ owner_id: profile.id, ...row })
       if (error) throw error
-      setShowNewCompliance(false); setComplianceForm({ kind: 'insurance', name: '', reference: '', expires_on: '', notes: '' })
-      await fetchCompliance(); showToast('Saved ✓')
-    } catch (e) { setInlineError('Failed to save. Try again.') }
+      closeComplianceSheet()
+      await fetchCompliance(); showToast(file ? 'Saved with the file ✓' : 'Saved ✓')
+    } catch (e) {
+      console.error('Compliance save failed:', e)
+      if (fileChanged) {
+        const msg = 'Could not save the file with this item, so nothing was saved. Try again.'
+        setInlineError(msg); showToast(msg, 'error')
+      } else setInlineError('Failed to save. Try again.')
+    }
     setLoading(false)
+  }
+  const openComplianceFile = async (it) => {
+    // Open the tab inside the tap itself: iPhone Safari blocks a window.open
+    // that only happens after an await. Then point it at the signed URL.
+    const win = window.open('', '_blank')
+    try {
+      const { data } = await supabase.storage.from('receipts').createSignedUrl(it.file_path, 300)
+      if (!data || !data.signedUrl) throw new Error('No signed URL')
+      if (win) { win.opener = null; win.location.href = data.signedUrl }
+      else if (!window.open(data.signedUrl, '_blank')) showToast('Could not open the file. Allow pop-ups and try again.', 'error')
+    } catch (e) {
+      if (win) win.close()
+      showToast('Could not open the file. Check your connection and try again.', 'error')
+    }
   }
   const deleteCompliance = async (item) => {
     if (!window.confirm('Delete this item?')) return
@@ -1988,43 +2128,52 @@ ${link}`
   }
 
   const scanReceipt = async (e) => {
-    const file = e.target.files[0]
+    const file = e.target.files && e.target.files[0]
+    if (e.target) e.target.value = '' // so picking the same photo again still fires
     if (!file) return
     setScanning(true)
     setScanResult(null)
     setScanError('')
+    // Any photo, an iPhone HEIC from the library included, is shrunk to 1600px
+    // and turned into a JPEG first (utils/imageToJpeg), the same as the
+    // assistant does. scan-receipt can't read HEIC, and a full-size phone photo
+    // is a slow upload on a jobsite signal. A photo this browser can't open
+    // gets a plain message instead of a scan that silently never comes back.
+    let img
     try {
-      const fileName = `${profile.id}/${Date.now()}_${file.name}`
-      const { error: uploadError } = await supabase.storage.from('receipts').upload(fileName, file)
+      img = await toJpeg(file)
+    } catch (err) {
+      setScanError(imageErrorMessage(err))
+      setScanning(false)
+      return
+    }
+    try {
+      const fileName = `${profile.id}/${Date.now()}_${jpegName(file.name)}`
+      const { error: uploadError } = await supabase.storage.from('receipts').upload(fileName, img.blob, { contentType: 'image/jpeg' })
       if (uploadError) throw uploadError
       // Store the storage PATH (not a public URL); the bucket is private and the
       // image is viewed via a short-lived signed URL in PhotoViewer.
       setReceiptForm(f => ({ ...f, photo_url: fileName }))
-
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        const base64 = event.target.result.split(',')[1]
-        try {
-          const { data: { session } } = await supabase.auth.getSession()
-          const response = await fetch('/api/scan-receipt', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(session ? { Authorization: `Bearer ${session.access_token}` } : {})
-            },
-            body: JSON.stringify({ imageBase64: base64, mediaType: file.type })
-          })
-          const result = await response.json().catch(() => ({}))
-          if (result.store || result.amount) setScanResult(result)
-          else setScanError(result.error || "Couldn't read this receipt — fill in the fields below.")
-        } catch { setScanError("Couldn't read this receipt — fill in the fields below.") }
-        setScanning(false)
-      }
-      reader.readAsDataURL(file)
-    } catch (e) {
-      setScanError("Photo upload failed. Fill in the fields manually.")
+    } catch (e2) {
+      setScanError('Photo upload failed. Fill in the fields manually.')
       setScanning(false)
+      return
     }
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const response = await fetch('/api/scan-receipt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session ? { Authorization: `Bearer ${session.access_token}` } : {})
+        },
+        body: JSON.stringify({ imageBase64: img.base64, mediaType: img.mediaType })
+      })
+      const result = await response.json().catch(() => ({}))
+      if (result.store || result.amount) setScanResult(result)
+      else setScanError(result.error || "Couldn't read this receipt. Fill in the fields below.")
+    } catch { setScanError("Couldn't read this receipt. Fill in the fields below.") }
+    setScanning(false)
   }
 
   const confirmScan = () => {
@@ -2267,6 +2416,17 @@ ${link}`
     setStagePicker(false)
     if (!project || next === project.stage) return
     const wasEnd = project.stage === 'end'
+    // Reopening a finished job takes the free slot, the same as starting a new
+    // one, and the database refuses it when the slot is taken
+    // (FIX-DATABASE-38, projects_free_job_limit). Say that in plain English
+    // first, like createJob does, instead of "Could not change the status".
+    if (wasEnd && next !== 'end' && !project.is_sample && !canAddJob) {
+      showToast(
+        `You're on the free plan, one job open at a time. Finish “${activeProjects[0] ? activeProjects[0].name : 'your open job'}” first, or subscribe to run more.`,
+        'error'
+      )
+      return
+    }
     try {
       const { error } = await supabase.from('projects').update({
         stage: next,
@@ -2398,7 +2558,7 @@ ${link}`
       rows.push(['Generated', new Date().toLocaleString()])
       rows.push([])
       rows.push(['This is every record on your account, one section per kind.'])
-      rows.push(['Photos and documents have a "download_link" column. Those links open the real file, and they expire 7 days after this file was made — re-download this export any time to get fresh ones.'])
+      rows.push(['Photos, receipt pictures and documents have a "download_link" column. Those links open the real file, and they expire 7 days after this file was made. Re-download this export any time to get fresh ones.'])
       rows.push([])
 
       let failed = 0
@@ -2436,18 +2596,20 @@ ${link}`
         // right trade here — long enough to hand the file to an accountant,
         // short enough that a CSV emailed around isn't a permanent public key
         // to every receipt photo in the business.
-        const linkCol = table === 'job_documents' ? 'file_url' : table === 'job_photos' ? 'photo_url' : null
+        const linkCol = EXPORT_LINK_COLS[table] || null
         const links = new Map()
         if (linkCol) {
           // Rows written before the bucket went private still hold a full URL;
           // those are already openable and must not be re-signed as if they
           // were paths.
-          const paths = data.map(r => r[linkCol]).filter(u => u && !/^https?:\/\//.test(u))
-          if (paths.length) {
+          const paths = [...new Set(data.map(r => r[linkCol]).filter(u => u && !/^https?:\/\//.test(u)))]
+          // Signed in batches: a busy account has thousands of receipt photos,
+          // and one giant request is the likeliest way to lose every link at once.
+          for (let i = 0; i < paths.length; i += 500) {
             try {
-              const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths, 604800)
+              const { data: signed } = await supabase.storage.from('receipts').createSignedUrls(paths.slice(i, i + 500), 604800)
               ;(signed || []).forEach(s => { if (s && s.path && s.signedUrl) links.set(s.path, s.signedUrl) })
-            } catch { /* fall through — the path column is still exported below */ }
+            } catch { /* fall through: the path column is still exported below */ }
           }
         }
 
@@ -2571,17 +2733,145 @@ ${link}`
     }
   }
 
-  const deleteTimeEntry = async (entry) => {
-    if (!window.confirm('Delete this time entry? Labor cost recalculates automatically.')) return
+  // ---------------------------------------------------------------------
+  // FIX A SHIFT
+  //
+  // A man forgets to clock out and his shift runs all night. Before this there
+  // was no screen anywhere to fix it: the owner could see the bad shift and the
+  // pay piling up on it, and could not touch it.
+  //
+  // Every place a shift shows (the job's Labor card, Crew Pay's weeks, both
+  // "on the clock" cards) opens this one sheet. It writes ONLY clocked_in_at
+  // and clocked_out_at. The payroll trigger (FIX-DATABASE-8, extended in 29)
+  // recomputes total_minutes and labor_cost from the worker's own rate, and the
+  // row comes straight back from the database, so the sheet shows what was
+  // actually saved rather than what we hoped.
+  //
+  // The Hours sheet deliberately never touches a real clock record. This is
+  // the other case: the owner saying on purpose that the clock is wrong.
+  // ---------------------------------------------------------------------
+  const openShiftFix = (entry) => {
+    const open = !entry.clocked_out_at
+    const now = new Date()
+    const w = workers.find(x => x.id === entry.worker_id)
+    const pj = projects.find(p => p.id === entry.project_id)
+    const inP = toLocalInputs(entry.clocked_in_at)
+    // Clocking out an open shift starts at right now, unless now would make it
+    // a 24-hour-plus shift. Then he went home and forgot, "now" is the one time
+    // that is certainly wrong, and the owner has to pick when he left.
+    const stale = open && shiftMinutes(entry.clocked_in_at, now) > MAX_SHIFT_MINUTES
+    const outP = open ? (stale ? { date: inP.date, time: '' } : toLocalInputs(now)) : toLocalInputs(entry.clocked_out_at)
+    setShiftFix({
+      entry, open, stale,
+      name: (w && w.full_name) || entry.profiles?.full_name || 'Worker',
+      rate: (w && w.hourly_rate) || 0,
+      jobName: pj ? pj.name : '',
+      inDate: inP.date, inTime: inP.time, outDate: outP.date, outTime: outP.time,
+      error: '', saving: false, confirmDelete: false, saved: null,
+    })
+  }
+
+  // Everything that shows hours or labor dollars, re-read after a shift changes.
+  const refreshAfterShiftChange = async () => {
+    const jobs = [fetchSpend(projects), fetchOnTheClock(workers)]
+    if (selectedProject) jobs.push(refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)'))
+    if (workers.length) jobs.push(fetchPayroll(), fetchWorkerStats(workers))
+    await Promise.all(jobs)
+  }
+
+  const saveShiftFix = async () => {
+    const f = shiftFix
+    if (!f || f.saving) return
+    const inAt = fromLocalInputs(f.inDate, f.inTime)
+    const outAt = fromLocalInputs(f.outDate, f.outTime)
+    const problem = shiftProblem(inAt, outAt)
+    if (problem) return setShiftFix({ ...f, error: problem })
+    setShiftFix({ ...f, saving: true, error: '' })
+    let row
     try {
-      const { error } = await supabase.from('time_entries').delete().eq('id', entry.id)
+      const { data, error } = await supabase.from('time_entries')
+        .update({ clocked_in_at: inAt.toISOString(), clocked_out_at: outAt.toISOString() })
+        .eq('id', f.entry.id)
+        .select('id, worker_id, project_id, clocked_in_at, clocked_out_at, total_minutes, labor_cost')
       if (error) throw error
-      await refetchDetail('time_entries', setTimeEntries, 'clocked_in_at', false, '*, profiles(full_name)')
-      await fetchProjects()
-      showToast('Time entry deleted ✓')
+      row = data && data[0]
+      // Zero rows back is not a save. The database refused it (not his job) or
+      // the shift is already gone. A quiet "Saved" here would be a lie.
+      if (!row) throw new Error('No shift came back from the save')
     } catch (e) {
-      showToast('Failed to delete time entry', 'error')
+      console.error('Shift fix failed:', e)
+      setShiftFix(s => (s ? { ...s, saving: false, error: 'That shift did not save. Check your signal and try again.' } : s))
+      return
     }
+    // The trigger fills these on every save. Empty means the times landed but
+    // the hours and pay were not worked out, and he must not pay off them.
+    if (row.total_minutes == null || row.labor_cost == null) {
+      setShiftFix(s => (s ? { ...s, saving: false, error: 'The times saved, but the hours and pay did not update. Close this and check the job before you pay on it.' } : s))
+    } else {
+      setShiftFix(s => (s ? { ...s, saving: false, saved: row } : s))
+    }
+    await refreshAfterShiftChange()
+  }
+
+  // The old delete, never called until now. Its confirm is a second tap
+  // inside the fix sheet instead of a browser pop-up.
+  const deleteTimeEntry = async () => {
+    const f = shiftFix
+    if (!f || f.saving) return
+    setShiftFix({ ...f, saving: true, error: '' })
+    try {
+      // .select() so a delete the database quietly refused (zero rows) is caught.
+      const { data, error } = await supabase.from('time_entries').delete().eq('id', f.entry.id).select('id')
+      if (error) throw error
+      if (!data || !data.length) throw new Error('Nothing was deleted')
+    } catch (e) {
+      console.error('Shift delete failed:', e)
+      setShiftFix(s => (s ? { ...s, saving: false, error: 'That shift did not delete. Try again.' } : s))
+      return
+    }
+    setShiftFix(null)
+    showToast('Shift deleted ✓')
+    await refreshAfterShiftChange()
+  }
+
+  // One finished shift as a row you tap to fix. The Labor card and Crew Pay
+  // both use it, so a tap anywhere opens the same sheet.
+  const shiftRow = (t, showJob) => {
+    const pj = showJob ? projects.find(p => p.id === t.project_id) : null
+    return (
+      <button
+        key={t.id}
+        type="button"
+        onClick={() => openShiftFix(t)}
+        aria-label={`Fix the shift on ${shiftDay(t.clocked_in_at)}, ${clockTime(t.clocked_in_at)} to ${clockTime(t.clocked_out_at)}`}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', padding: '8px 10px', marginTop: '6px', background: '#F9FAFB', border: '1px solid #EEE', borderRadius: '10px', cursor: 'pointer', textAlign: 'left' }}
+      >
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#1C2B3A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiftDay(t.clocked_in_at)}{pj ? ' · ' + pj.name : ''}</span>
+          <span style={{ display: 'block', fontSize: '12px', color: '#717171' }}>{clockTime(t.clocked_in_at)} to {clockTime(t.clocked_out_at)} · {formatTime(t.total_minutes)}</span>
+        </span>
+        <span style={{ fontSize: '13px', fontWeight: 700, color: '#1C2B3A', flexShrink: 0 }}>{formatCurrency(t.labor_cost)}</span>
+        <span style={{ fontSize: '13px', fontWeight: 700, color: '#E07B2A', flexShrink: 0 }}>Fix ›</span>
+      </button>
+    )
+  }
+
+  // A shift with no clock-out, said out loud, with the button that ends it.
+  // Past 12 hours it also says what almost certainly happened.
+  const stillOnClock = (t) => {
+    const mins = shiftMinutes(t.clocked_in_at, new Date())
+    const long = mins > LONG_OPEN_MINUTES
+    return (
+      <div key={'open-' + t.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px 10px', padding: '10px 12px', marginTop: '6px', background: 'white', border: '1px solid ' + (long ? '#FCD34D' : '#BBF7D0'), borderRadius: '10px' }}>
+        <span style={{ flex: '1 1 160px', minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: '14px', fontWeight: 700, color: '#15803D' }}>Still on the clock since {sinceLabel(t.clocked_in_at)}</span>
+          <span style={{ display: 'block', fontSize: '12px', color: long ? '#B45309' : '#4B5563', fontWeight: long ? 700 : 400 }}>
+            {formatTime(mins)} so far{long ? '. He probably forgot to clock out.' : ''}
+          </span>
+        </span>
+        <button type="button" onClick={() => openShiftFix(t)} style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '10px 16px', borderRadius: '10px', border: 'none', background: '#15803D', color: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Clock him out</button>
+      </div>
+    )
   }
 
   const openEditJob = () => {
@@ -2886,6 +3176,85 @@ ${link}`
     </div>
   )
 
+  // The fix-a-shift sheet. Like scheduleModal, one definition rendered on both
+  // sides of the job-screen early return below. Three faces: the times, the
+  // delete confirm, and what the database saved.
+  const shiftFixSheet = shiftFix && (() => {
+    const f = shiftFix
+    const first = (f.name || 'him').split(' ')[0]
+    const close = () => setShiftFix(null)
+    const set = (k) => (e) => { const v = e.target.value; setShiftFix(s => (s ? { ...s, [k]: v, error: '' } : s)) }
+    const inAt = fromLocalInputs(f.inDate, f.inTime)
+    const outAt = fromLocalInputs(f.outDate, f.outTime)
+    const problem = inAt && outAt ? shiftProblem(inAt, outAt) : ''
+    const mins = inAt && outAt && !problem ? shiftMinutes(inAt, outAt) : null
+    const half = { flex: '1 1 140px', minWidth: 0, marginBottom: '10px' }
+    const errText = { color: '#DC2626', fontSize: '14px', fontWeight: 600, marginBottom: '8px' }
+    return (
+      <div className="modal-overlay" onClick={f.saving ? undefined : close}>
+        <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+          {f.saved ? (
+            <>
+              <h2>Saved ✓</h2>
+              <div className="card" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                <p style={{ fontSize: '12px', fontWeight: 700, color: '#15803D', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{f.name}{f.jobName ? ' · ' + f.jobName : ''}</p>
+                <p style={{ fontSize: '32px', fontWeight: 800, color: '#1C2B3A', lineHeight: 1.1, marginTop: '4px' }}>{formatTime(f.saved.total_minutes)}</p>
+                <p style={{ fontSize: '22px', fontWeight: 800, color: '#15803D' }}>{formatCurrency(f.saved.labor_cost)}</p>
+                <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '6px' }}>{shiftDay(f.saved.clocked_in_at)} · {clockTime(f.saved.clocked_in_at)} to {clockTime(f.saved.clocked_out_at)}</p>
+              </div>
+              <p style={{ fontSize: '13px', color: '#717171', marginBottom: '8px' }}>The job’s labor and his pay for that week are updated.</p>
+              <button className="btn-primary" onClick={close}>Done</button>
+            </>
+          ) : f.confirmDelete ? (
+            <>
+              <h2>Delete this shift?</h2>
+              <p style={{ fontSize: '15px', color: '#1C2B3A', lineHeight: 1.5, marginBottom: '16px' }}>
+                {f.name}, {shiftDay(f.entry.clocked_in_at)}{f.open ? ', still on the clock' : `, ${formatTime(f.entry.total_minutes)} and ${formatCurrency(f.entry.labor_cost)}`}. It comes off the job and off his pay, and it can’t be brought back.
+              </p>
+              {f.error && <p style={errText}>{f.error}</p>}
+              <button className="btn-danger" onClick={deleteTimeEntry} disabled={f.saving}>{f.saving ? 'Deleting…' : 'Yes, delete it'}</button>
+              <button className="btn-secondary" onClick={() => setShiftFix(s => ({ ...s, confirmDelete: false, error: '' }))} disabled={f.saving}>Keep it</button>
+            </>
+          ) : (
+            <>
+              <h2>{f.open ? `Clock ${first} out` : `Fix ${first}’s shift`}</h2>
+              {f.jobName && <p style={{ fontSize: '13px', color: '#717171', margin: '-6px 0 12px' }}>{f.jobName}</p>}
+              {f.open && (
+                <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '10px 12px', marginBottom: '12px' }}>
+                  <p style={{ fontSize: '15px', fontWeight: 700, color: '#15803D' }}>Still on the clock since {sinceLabel(f.entry.clocked_in_at)}</p>
+                  {f.stale && <p style={{ fontSize: '13px', color: '#B45309', fontWeight: 600, marginTop: '4px' }}>That is more than a day. Pick the time he actually left.</p>}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div className="input-group" style={half}><label htmlFor="fix-in-date">Clock-in day</label><input id="fix-in-date" type="date" value={f.inDate} onChange={set('inDate')} /></div>
+                <div className="input-group" style={half}><label htmlFor="fix-in-time">Clock-in time</label><input id="fix-in-time" type="time" value={f.inTime} onChange={set('inTime')} /></div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div className="input-group" style={half}><label htmlFor="fix-out-date">Clock-out day</label><input id="fix-out-date" type="date" value={f.outDate} onChange={set('outDate')} /></div>
+                <div className="input-group" style={half}><label htmlFor="fix-out-time">Clock-out time</label><input id="fix-out-time" type="time" value={f.outTime} onChange={set('outTime')} /></div>
+              </div>
+              {mins != null && (
+                <p style={{ fontSize: '15px', fontWeight: 700, color: '#1C2B3A', marginBottom: '8px' }}>
+                  {formatTime(mins)} · about {formatCurrency(shiftPay(mins, f.rate))}
+                  {!f.rate && <span style={{ display: 'block', fontSize: '12px', fontWeight: 400, color: '#B45309' }}>His pay rate isn’t set, so these hours cost $0 until you set it.</span>}
+                </p>
+              )}
+              {(f.error || problem) && <p style={errText}>{f.error || problem}</p>}
+              <button className="btn-primary" onClick={saveShiftFix} disabled={f.saving || !!problem}>{f.saving ? 'Saving…' : f.open ? 'Clock him out' : 'Save shift'}</button>
+              <button className="btn-secondary" onClick={close} disabled={f.saving}>Cancel</button>
+              <button
+                type="button"
+                onClick={() => setShiftFix(s => ({ ...s, confirmDelete: true, error: '' }))}
+                disabled={f.saving}
+                style={{ width: '100%', minHeight: 'var(--tap)', marginTop: '16px', background: 'none', border: '1px solid #FCA5A5', borderRadius: '8px', color: '#DC2626', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}
+              >Delete this shift</button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  })()
+
   // Tapping a cost total in Money jumps to Work → Receipts with that bucket
   // already filtered. Returns the handler so both onClick and onKeyDown use one
   // definition.
@@ -2909,7 +3278,14 @@ ${link}`
     const sp = spendOf(selectedProject.id)
     const matPct = getBudgetPct(sp.materials, selectedProject.materials_budget)
     const labPct = getBudgetPct(sp.labor, selectedProject.labor_budget)
-    const projProfit = profitOf(selectedProject)
+    const pic = profitPicture({
+      contract: contractOf(selectedProject),
+      materialsBudget: selectedProject.materials_budget,
+      laborBudget: selectedProject.labor_budget,
+      profitTarget: selectedProject.profit_target,
+      spend: sp,
+      finished: selectedProject.stage === 'end',
+    })
 
     return (
       <div>
@@ -2978,28 +3354,46 @@ ${link}`
           {projectTab === 'job' && (
             <div>
               <JobSection title="Budget & profit" open={isOpen('budget')} onToggle={() => toggleSection('budget')}>
-              {/* Profit hero — the one number that matters, surfaced at the top
-                  instead of buried as the last of six cards. If no budget was
-                  set yet, don't show a scary $0/over-budget — prompt to add one. */}
-              {contractOf(selectedProject) > 0 ? (
-                <div className="card" style={{ background: projProfit >= 0 ? '#F0FDF4' : '#FEF2F2', border: '1px solid ' + (projProfit >= 0 ? '#BBF7D0' : '#FECACA') }}>
-                  <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Projected Profit</p>
-                  <p style={{ fontSize: '32px', fontWeight: 800, lineHeight: 1.1, color: projProfit >= 0 ? '#15803D' : '#DC2626' }}>{formatCurrency(projProfit)}</p>
-                  <p style={{ fontSize: '13px', color: '#4B5563', marginTop: '4px' }}>
-                    {(() => {
-                      // Guard against absurd margins on tiny contracts (e.g. a $50
-                      // job losing $190 → -380%). Below -100% the loss exceeds the
-                      // whole contract, so say "over budget" instead of a wild number.
-                      const margin = Math.round((projProfit / contractOf(selectedProject)) * 100)
-                      return margin >= -100 ? margin + '% margin · ' : 'over budget · '
-                    })()}target {formatCurrency(selectedProject.profit_target)}
-                  </p>
-                  {projProfit < 0 && <p style={{ fontSize: '12px', color: '#DC2626', marginTop: '4px', fontWeight: 600 }}>⚠️ Projected to go over budget</p>}
-                </div>
-              ) : (
+              {/* Profit hero, the one number that matters. It used to be
+                  contract minus spend at every stage, so a new $13,500 job with
+                  nothing spent read "$13,500 profit, 100% margin": the whole
+                  contract as profit. Now it is his own target until a cost
+                  lands, then where the job is heading against that target, and
+                  the real number only once it is finished. The math and the
+                  reasoning live in profitPicture (utils/money.js).
+                  No split set yet: no number at all, just the prompt. */}
+              {contractOf(selectedProject) > 0 && pic.mode !== 'noTarget' ? (() => {
+                const contract = contractOf(selectedProject)
+                const behind = pic.mode === 'target' ? 0 : pic.target - pic.amount
+                const losing = pic.amount < 0
+                const short = !losing && behind > 0.005
+                const tone = losing
+                  ? { bg: '#FEF2F2', bd: '#FECACA', fg: '#DC2626' }
+                  : short ? { bg: '#FFFBEB', bd: '#FDE68A', fg: '#B45309' } : { bg: '#F0FDF4', bd: '#BBF7D0', fg: '#15803D' }
+                const eyebrow = pic.mode === 'target' ? 'Target profit' : pic.mode === 'final' ? 'Final profit' : 'On track for'
+                // Guard against absurd margins on tiny contracts (a $50 job
+                // losing $190 is -380%). Past -100% just say over budget.
+                const margin = computeMargin(pic.amount, contract)
+                return (
+                  <div className="card" style={{ background: tone.bg, border: '1px solid ' + tone.bd }}>
+                    <p style={{ fontSize: '12px', color: '#4B5563', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{eyebrow}</p>
+                    <p style={{ fontSize: '36px', fontWeight: 800, lineHeight: 1.1, color: tone.fg }}>{formatCurrency(pic.amount)}</p>
+                    <p style={{ fontSize: '14px', color: '#1C2B3A', fontWeight: 600, marginTop: '4px' }}>
+                      {pic.mode === 'target' && 'No costs logged yet'}
+                      {pic.mode === 'onTrack' && `Your target ${formatCurrency(pic.target)} · ${formatCurrency(pic.spent)} spent so far`}
+                      {pic.mode === 'final' && `${margin >= -100 ? margin + '% margin' : 'Over budget'} · target ${formatCurrency(pic.target)}`}
+                    </p>
+                    {pic.mode === 'target' && (
+                      <p style={{ fontSize: '12px', color: '#4B5563', marginTop: '4px' }}>{computeMargin(pic.target, contract)}% of the {formatCurrency(contract)} contract. This moves as receipts and hours come in.</p>
+                    )}
+                    {short && <p style={{ fontSize: '13px', color: tone.fg, marginTop: '6px', fontWeight: 700 }}>⚠️ {formatCurrency(behind)} under your target</p>}
+                    {losing && <p style={{ fontSize: '13px', color: tone.fg, marginTop: '6px', fontWeight: 700 }}>⚠️ This job is losing money</p>}
+                  </div>
+                )
+              })() : (
                 <div className="card" role="button" tabIndex={0} onClick={openEditJob} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditJob() } }} style={{ cursor: 'pointer', background: '#FFF7ED', border: '1px solid #FED7AA' }}>
-                  <p style={{ fontSize: '12px', color: '#9A3412', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Set your budget to track profit</p>
-                  <p style={{ fontSize: '15px', color: '#4B5563', lineHeight: 1.4 }}>Add materials, labor, and profit target for this job — then JobTally shows your live profit as costs come in. <span style={{ color: '#E07B2A', fontWeight: 700 }}>Add budget →</span></p>
+                  <p style={{ fontSize: '12px', color: '#9A3412', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>Set your profit target</p>
+                  <p style={{ fontSize: '15px', color: '#4B5563', lineHeight: 1.4 }}>Split this job into materials, labor and the profit you want out of it. Then this shows whether you are on track as costs come in.{pic.spent > 0 ? ` ${formatCurrency(pic.spent)} spent so far.` : ''} <span style={{ color: '#E07B2A', fontWeight: 700 }}>Add it →</span></p>
                 </div>
               )}
               {(selectedProject.client_name || selectedProject.client_phone || selectedProject.client_email || selectedProject.client_address) && (
@@ -3041,28 +3435,53 @@ ${link}`
                 <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>LABOR</p>
                 <p style={{ fontWeight: '700', fontSize: '18px' }}>{formatCurrency(sp.labor)} <span style={{ color: '#888', fontSize: '13px', fontWeight: '400' }}>of {formatCurrency(selectedProject.labor_budget)}</span></p>
                 <div className="budget-bar"><div className={'budget-bar-fill ' + getBudgetClass(labPct)} style={{ width: labPct + '%' }} /></div>
-                {timeEntries.length > 0 && (
-    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
-      <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>By Worker</p>
-      {Object.values(
-        timeEntries.filter(t => t.clocked_out_at).reduce((acc, t) => {
-          const name = t.profiles?.full_name || 'Unknown'
-          if (!acc[name]) acc[name] = { name, minutes: 0, cost: 0 }
-          acc[name].minutes += t.total_minutes || 0
-          acc[name].cost += t.labor_cost || 0
-          return acc
-        }, {})
-      ).map(w => (
-        <div key={w.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f9f9f9' }}>
-          <div>
-            <p style={{ fontWeight: '600', fontSize: '14px' }}>{w.name}</p>
-            <p style={{ fontSize: '12px', color: '#888' }}>{formatTime(w.minutes)}</p>
-          </div>
-          <p style={{ fontWeight: '700', color: '#1C2B3A', fontSize: '14px' }}>{formatCurrency(w.cost)}</p>
-        </div>
-      ))}
-    </div>
-  )}
+                {/* By worker, and the way in to fixing a shift. Tap a man to
+                    unfold his shifts on this job, tap a shift to fix or delete
+                    it. A shift with no clock-out is never folded away: it shows
+                    under his name with the button that ends it. */}
+                {timeEntries.length > 0 && (() => {
+                  const groups = {}
+                  timeEntries.forEach(t => {
+                    const k = t.worker_id || 'unknown'
+                    if (!groups[k]) {
+                      const w = workers.find(x => x.id === t.worker_id)
+                      groups[k] = { id: k, name: t.profiles?.full_name || (w && w.full_name) || 'Unknown', minutes: 0, cost: 0, closed: [], open: [] }
+                    }
+                    const g = groups[k]
+                    if (t.clocked_out_at) { g.minutes += t.total_minutes || 0; g.cost += t.labor_cost || 0; g.closed.push(t) }
+                    else g.open.push(t)
+                  })
+                  return (
+                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f0f0f0' }}>
+                      <p style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>By worker · tap to fix a shift</p>
+                      {Object.values(groups).map(w => {
+                        const unfolded = laborWorkerOpen === w.id
+                        return (
+                          <div key={w.id} style={{ padding: '2px 0 8px', borderBottom: '1px solid #f3f3f3' }}>
+                            <button
+                              type="button"
+                              onClick={() => setLaborWorkerOpen(unfolded ? null : w.id)}
+                              aria-expanded={unfolded}
+                              style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', textAlign: 'left' }}
+                            >
+                              <span style={{ minWidth: 0 }}>
+                                <span style={{ display: 'block', fontWeight: 600, fontSize: '14px', color: '#1C2B3A' }}>{w.name}</span>
+                                <span style={{ display: 'block', fontSize: '12px', color: '#888' }}>{formatTime(w.minutes)} · {w.closed.length} shift{w.closed.length === 1 ? '' : 's'}</span>
+                              </span>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                                <span style={{ fontWeight: 700, color: '#1C2B3A', fontSize: '14px' }}>{formatCurrency(w.cost)}</span>
+                                <span style={{ color: '#9CA3AF', fontSize: '13px' }}>{unfolded ? '▾' : '▸'}</span>
+                              </span>
+                            </button>
+                            {w.open.map(t => stillOnClock(t))}
+                            {unfolded && w.closed.map(t => shiftRow(t))}
+                            {unfolded && w.closed.length === 0 && <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>No finished shifts on this job yet.</p>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
                 {/* JP asked for the by-worker split open by default and one tap
                     to the place that changes it. The hours themselves live in
                     Crew now, so this is the door through. */}
@@ -3334,7 +3753,7 @@ ${link}`
             <div className="modal-sheet" onClick={e => e.stopPropagation()}>
               <h2>🛒 What to buy</h2>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
+                <input value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} enterKeyHint="done" placeholder="Item (e.g. 2x4s)" style={{ flex: 2, minWidth: '0', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
                 <input value={materialInput.qty} onChange={e => setMaterialInput({ ...materialInput, qty: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') addMaterial() }} placeholder="Qty" style={{ width: '64px', padding: '12px', border: '1.5px solid #ddd', borderRadius: '8px', fontSize: '14px' }} />
                 <button onClick={addMaterial} className="btn-primary" style={{ width: 'auto', marginTop: 0, padding: '12px 18px' }}>Add</button>
               </div>
@@ -3459,8 +3878,8 @@ ${link}`
                   </div>
                 )}
 
-                {/* Same shared invite block used by Add Time and Schedule
-                    Worker — one form, three doors into it. */}
+                {/* Same shared invite block used by Schedule Worker and the
+                    crew screen: one form, several doors into it. */}
                 {inviteOpenBtn(workers.length === 0 ? '+ Add a new worker — sends him a link' : 'Someone missing? + Add a new worker')}
                 {inviteBlock('hours')}
 
@@ -3539,7 +3958,10 @@ ${link}`
               <h2>Add Receipt</h2>
               <div className="input-group">
                 <label>📷 Scan Receipt Photo</label>
-                <input type="file" accept="image/*" capture="environment" onChange={scanReceipt} style={{ padding: '8px 0' }} />
+                {/* No `capture`, so the phone offers the camera AND the photo
+                    library. Library photos (HEIC on an iPhone) are turned into
+                    JPEGs in scanReceipt before they go anywhere. */}
+                <input type="file" accept="image/*" onChange={scanReceipt} style={{ padding: '8px 0' }} />
                 {scanning && <p style={{ color: '#E07B2A', fontSize: '13px', marginTop: '6px' }}>🔍 Scanning receipt…</p>}
                 {scanError && <p style={{ color: '#DC2626', fontSize: '13px', marginTop: '6px' }}>{scanError}</p>}
               </div>
@@ -3583,6 +4005,7 @@ ${link}`
         )}
 
         {scheduleModal}
+        {shiftFixSheet}
 
         {showNewPayout && (
           <div className="modal-overlay" onClick={() => { setShowNewPayout(false); setInlineError('') }}>
@@ -3621,37 +4044,6 @@ ${link}`
               {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
               <button className="btn-primary" onClick={addMileage} disabled={loading}>{loading ? 'Saving…' : 'Add mileage'}</button>
               <button className="btn-secondary" onClick={() => { setShowNewMileage(false); setInlineError('') }}>Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {showNewTime && (
-          <div className="modal-overlay" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>
-            <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-              <h2>Add Time</h2>
-              <div className="input-group">
-                <label>Worker</label>
-                <select value={timeForm.worker_id} onChange={e => setTimeForm({ ...timeForm, worker_id: e.target.value })}><option value="">Select worker</option>{workers.map(w => <option key={w.id} value={w.id}>{w.full_name}{w.hourly_rate ? ` — ${formatCurrency(w.hourly_rate)}/hr` : ''}</option>)}</select>
-                {inviteOpenBtn(workers.length === 0 ? '+ Add a new worker — sends him a link' : 'Don’t see him? + Add a new worker')}
-              </div>
-              {inviteBlock('time')}
-              <div className="input-group"><label>Date</label><input type="date" value={timeForm.work_date} onChange={e => setTimeForm({ ...timeForm, work_date: e.target.value })} /></div>
-              <div className="input-group"><label>Start time</label><input type="time" value={timeForm.start_time} onChange={e => setTimeForm({ ...timeForm, start_time: e.target.value })} /></div>
-              <div className="input-group"><label>End time</label><input type="time" value={timeForm.end_time} onChange={e => setTimeForm({ ...timeForm, end_time: e.target.value })} /></div>
-              {(() => {
-                if (!timeForm.work_date || !timeForm.start_time || !timeForm.end_time) return null
-                const s = new Date(`${timeForm.work_date}T${timeForm.start_time}`)
-                const en = new Date(`${timeForm.work_date}T${timeForm.end_time}`)
-                if (isNaN(s.getTime()) || isNaN(en.getTime()) || en <= s) return null
-                const mins = Math.floor((en - s) / 60000)
-                const w = workers.find(x => x.id === timeForm.worker_id)
-                const cost = (mins / 60) * (w?.hourly_rate || 0)
-                return <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>{formatTime(mins)} · {formatCurrency(cost)}{(w && !w.hourly_rate) ? ' — set this worker’s hourly rate (Workers tab) to track labor cost' : ''}</p>
-              })()}
-              {workers.length === 0 && !showInvite && <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>No workers yet — tap “Invite a worker” above to send someone a sign-up link. Once they join, you can log their time here.</p>}
-              {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-              <button className="btn-primary" onClick={addTimeEntry} disabled={loading || workers.length === 0}>{loading ? 'Saving…' : 'Add time'}</button>
-              <button className="btn-secondary" onClick={() => { setShowNewTime(false); setInlineError(''); resetInvite() }}>Cancel</button>
             </div>
           </div>
         )}
@@ -3739,7 +4131,7 @@ ${link}`
         {/* The job screen has no bottom bar (it is a drill-down), so the sheet
             the Hold-to-talk chip opens has to be mounted here too. Same
             component, same state — just a second mount point. */}
-        <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
+        <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={refreshAfterAssistant} autoTalk={askTalk} projectId={askProjectId} />
         <Toast message={toast} type={toastType} onClose={() => setToast('')} />
       </div>
     )
@@ -3792,17 +4184,17 @@ ${link}`
                   {onTheClock.length ? '🟢 On the clock right now' : 'On the clock right now'}
                 </p>
                 <p style={{ fontSize: '46px', fontWeight: 800, lineHeight: 1.05, color: onTheClock.length ? '#15803D' : '#9CA3AF', margin: '2px 0 0' }}>{onTheClock.length}</p>
+                {/* Each open shift carries its own way out: a man who forgot
+                    to clock out gets clocked out from right here. */}
                 {onTheClock.map(t => {
                   const w = workers.find(x => x.id === t.worker_id)
                   const pj = projects.find(p => p.id === t.project_id)
-                  const mins = Math.max(0, Math.floor((Date.now() - new Date(t.clocked_in_at).getTime()) / 60000))
                   return (
-                    <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', paddingTop: '8px', marginTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <p style={{ fontWeight: 700, fontSize: '15px', color: '#1C2B3A' }}>{w ? w.full_name : 'Worker'}</p>
-                        <p style={{ fontSize: '12px', color: '#717171', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pj ? pj.name : 'No job'} · in at {new Date(t.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</p>
-                      </div>
-                      <p style={{ fontWeight: 800, fontSize: '16px', color: '#15803D', flexShrink: 0 }}>{formatTime(mins)}</p>
+                    <div key={t.id} style={{ paddingTop: '8px', marginTop: '8px', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                      <p style={{ fontWeight: 700, fontSize: '15px', color: '#1C2B3A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {w ? w.full_name : 'Worker'}<span style={{ fontWeight: 400, fontSize: '12px', color: '#717171' }}> · {pj ? pj.name : 'No job'}</span>
+                      </p>
+                      {stillOnClock(t)}
                     </div>
                   )
                 })}
@@ -4008,6 +4400,7 @@ ${link}`
           <div>
             <BackBtn label="Home" onClick={() => setActiveTab('home')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>More tools</p>
+            <HubCard icon="▶️" title="Watch the walkthrough" sub="3 minutes on your side, 1 minute on what your crew sees" onClick={() => setWalkthrough('owner')} />
             <HubCard icon="🛡️" title="Insurance & Licenses" sub="Track expirations before they lapse" onClick={() => setActiveTab('compliance')} />
             <HubCard icon="🔧" title="Callbacks & warranty work" sub="Post-job follow-ups and fixes under warranty" onClick={() => setActiveTab('warranties')} />
             <HubCard icon="⚙️" title="Settings & Billing" sub="Your business info and subscription" onClick={() => { setSettingsForm({ company_name: profile.company_name || '', full_name: profile.full_name || '' }); setActiveTab('settings') }} />
@@ -4051,7 +4444,7 @@ ${link}`
               <ul style={{ fontSize: '13px', color: '#4B5563', lineHeight: '1.55', margin: '0 0 14px', paddingLeft: '18px' }}>
                 <li style={{ marginBottom: '6px' }}>Everything you enter — jobs, receipts, hours, photos, invoices — is stored on servers in the <b>United States</b>.</li>
                 <li style={{ marginBottom: '6px' }}><b>No other company can see any of it.</b> The database checks who's asking on every single request, so one business can never read another's jobs, clients, crew or files.</li>
-                <li style={{ marginBottom: '6px' }}>Receipt photos are read by Claude to pull out the store and the total, so you don't have to type them. That's the only thing the picture is used for.</li>
+                <li style={{ marginBottom: '6px' }}>Receipt photos, and whatever you ask the assistant, are sent to Anthropic's Claude so it can do what you asked. We use them for nothing else.</li>
                 <li style={{ marginBottom: '6px' }}>Card numbers are handled by <b>Stripe</b> and never touch JobTally.</li>
                 <li style={{ marginBottom: '6px' }}><b>We don't sell your data, to anyone, ever.</b></li>
                 <li>Cancelling doesn't erase anything — your records stay put.</li>
@@ -4076,9 +4469,10 @@ ${link}`
             <div className="card" style={{ borderColor: '#f1d4d4' }}>
               <h3 style={{ marginBottom: '4px' }}>Delete my account</h3>
               <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', lineHeight: '1.55' }}>
-                Erases your account and everything in it — every job, receipt, hour, photo, estimate and
-                invoice. It cannot be undone and we cannot get it back for you. <b>Download your data first
-                if you might want it.</b>
+                Cancels your billing, then erases your account and every job, receipt, hour, estimate and
+                invoice in it. Job photos and documents you uploaded are not wiped by this button yet: email
+                support@getjobtally.com and we'll delete them. It cannot be undone and we cannot get it back
+                for you. <b>Download your data first if you might want it.</b>
               </p>
               {!deleteOpen ? (
                 <button
@@ -4131,25 +4525,39 @@ ${link}`
         {activeTab === 'compliance' && (
           <div>
             <button onClick={() => setActiveTab('more')} style={{ background: 'none', border: 'none', color: '#E07B2A', fontSize: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '8px', padding: '4px' }}>‹ More</button>
-            <button className="btn-primary" onClick={() => { setShowNewCompliance(true); setInlineError('') }}>+ Add insurance / license</button>
+            <button className="btn-primary" onClick={openNewCompliance}>+ Add insurance / license</button>
             {complianceItems.map(it => {
               const days = it.expires_on ? Math.ceil((new Date(it.expires_on + 'T00:00:00') - new Date()) / 86400000) : null
               const color = days == null ? '#888' : days < 0 ? '#DC2626' : days <= 30 ? '#E07B2A' : '#16A34A'
               const label = days == null ? '' : days < 0 ? 'EXPIRED' : days <= 30 ? `${days}d left` : 'OK'
+              const fileLabel = it.file_name || 'File'
               return (
                 <div key={it.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                    {it.file_path && (
+                      <button type="button" aria-label={`Open ${fileLabel}`} onClick={() => openComplianceFile(it)} style={{ width: '64px', height: '64px', flexShrink: 0, padding: 0, border: '1px solid #E5E7EB', borderRadius: '10px', overflow: 'hidden', background: '#F9FAFB', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '30px' }}>
+                        {isImage(it.file_type, it.file_name)
+                          ? <JobPhoto path={it.file_path} signedUrl={complianceUrls[it.file_path]} alt={fileLabel} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : <span aria-hidden="true">📄</span>}
+                      </button>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <h3>{it.name}</h3>
                       <p style={{ textTransform: 'capitalize' }}>{it.kind}{it.reference ? ` · ${it.reference}` : ''}</p>
                       {it.expires_on && <p style={{ fontSize: '12px', color, fontWeight: '600', marginTop: '2px' }}>Expires {new Date(it.expires_on + 'T00:00:00').toLocaleDateString()}{label ? ` · ${label}` : ''}</p>}
+                      {it.file_path
+                        ? <button type="button" onClick={() => openComplianceFile(it)} style={{ background: 'none', border: 'none', padding: '8px 0', minHeight: '40px', color: '#E07B2A', fontSize: '13px', fontWeight: '600', cursor: 'pointer', textAlign: 'left', wordBreak: 'break-word' }}>📎 {fileLabel} · tap to open</button>
+                        : <button type="button" onClick={() => openEditCompliance(it)} style={{ background: 'none', border: 'none', padding: '8px 0', minHeight: '40px', color: '#E07B2A', fontSize: '13px', fontWeight: '600', cursor: 'pointer', textAlign: 'left' }}>+ Add photo or file</button>}
                     </div>
-                    <button aria-label="Delete item" onClick={() => deleteCompliance(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', flexShrink: 0 }}>Delete</button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0 }}>
+                      <button aria-label="Edit item" onClick={() => openEditCompliance(it)} style={{ background: 'none', border: '1px solid #E07B2A', color: '#E07B2A', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0 14px', minHeight: '44px', borderRadius: '8px' }}>Edit</button>
+                      <button aria-label="Delete item" onClick={() => deleteCompliance(it)} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0 14px', minHeight: '44px', borderRadius: '8px' }}>Delete</button>
+                    </div>
                   </div>
                 </div>
               )
             })}
-            {complianceItems.length === 0 && <div className="empty-state"><p>Track your insurance and licenses here — get a heads-up before they expire.</p></div>}
+            {complianceItems.length === 0 && <div className="empty-state"><p>Track your insurance and licenses here. Get a heads-up before they expire, and keep a photo or PDF of each one.</p></div>}
           </div>
         )}
 
@@ -4317,28 +4725,33 @@ ${link}`
                 driveway at 7am actually wants off this screen. Only renders when
                 somebody is clocked in — an empty "0 on the clock" card every
                 evening is noise. */}
+            {/* The header opens Crew; each man is his own button that opens
+                the fix sheet, so a forgotten clock-out is one tap from Home.
+                (It was one big card-button, which left no room for that.) */}
             {onTheClock.length > 0 && (
-              <div className="card" role="button" tabIndex={0} onClick={() => setActiveTab('workers')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab('workers') } }}
-                style={{ border: '2px solid #16A34A', background: '#F0FDF4', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-                  <p style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>
+              <div className="card" style={{ border: '2px solid #16A34A', background: '#F0FDF4' }}>
+                <button type="button" onClick={() => setActiveTab('crew')} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>
                     🟢 {onTheClock.length} on the clock right now
-                  </p>
+                  </span>
                   <span style={{ color: '#16A34A', fontSize: '18px' }}>›</span>
-                </div>
-                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                </button>
+                <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {onTheClock.slice(0, 4).map(t => {
                     const w = workers.find(x => x.id === t.worker_id)
                     const job = projects.find(p => p.id === t.project_id)
+                    const long = shiftMinutes(t.clocked_in_at, new Date()) > LONG_OPEN_MINUTES
                     return (
-                      <p key={t.id} style={{ fontSize: '13px', color: '#1C2B3A' }}>
-                        <strong>{w ? w.full_name : 'Worker'}</strong>
-                        {job ? ` · ${job.name}` : ''}
-                        <span style={{ color: '#717171' }}> · since {new Date(t.clocked_in_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
-                      </p>
+                      <button key={t.id} type="button" onClick={() => openShiftFix(t)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', minHeight: 'var(--tap)', padding: '6px 10px', background: 'white', border: '1px solid ' + (long ? '#FCD34D' : '#BBF7D0'), borderRadius: '10px', cursor: 'pointer', textAlign: 'left' }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: '13px', color: '#1C2B3A' }}>
+                          <strong>{w ? w.full_name : 'Worker'}</strong>{job ? ` · ${job.name}` : ''}
+                          <span style={{ display: 'block', color: long ? '#B45309' : '#717171', fontWeight: long ? 700 : 400 }}>Since {sinceLabel(t.clocked_in_at)}{long ? '. Forgot to clock out?' : ''}</span>
+                        </span>
+                        <span style={{ color: '#15803D', fontSize: '13px', fontWeight: 700, flexShrink: 0 }}>Clock out ›</span>
+                      </button>
                     )
                   })}
-                  {onTheClock.length > 4 && <p style={{ fontSize: '13px', color: '#717171' }}>+{onTheClock.length - 4} more</p>}
+                  {onTheClock.length > 4 && <p style={{ fontSize: '13px', color: '#717171' }}>+{onTheClock.length - 4} more on the Crew screen</p>}
                 </div>
               </div>
             )}
@@ -4472,9 +4885,12 @@ ${link}`
 
         {activeTab === 'jobs' && (
           <div>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <button style={{ flex: 1, minHeight: 'var(--tap)', padding: '10px', borderRadius: '10px', border: 'none', background: '#1C2B3A', color: 'white', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>🔨 Jobs</button>
-              <button onClick={() => setActiveTab('calendar')} style={{ flex: 1, minHeight: 'var(--tap)', padding: '10px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>📅 Schedule</button>
+            {/* "🔨 Jobs" is the title of this screen, not a control. It used to be
+                a dark filled button with no handler, so it looked tappable and
+                did nothing. The Schedule shortcut next to it is the real one. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <h2 style={{ flex: 1, margin: 0, fontSize: '20px', fontWeight: '800', color: '#1C2B3A' }}>🔨 Jobs</h2>
+              <button onClick={() => setActiveTab('calendar')} style={{ flex: '0 0 auto', minHeight: 'var(--tap)', padding: '10px 16px', borderRadius: '10px', border: '1px solid #ddd', background: 'white', color: '#1C2B3A', fontSize: '14px', fontWeight: '700', cursor: 'pointer' }}>📅 Schedule</button>
             </div>
             <div className="stats-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
               <div className="stat-card"><div className="stat-value">{activeProjects.length}</div><div className="stat-label">Active Jobs</div></div>
@@ -4756,7 +5172,7 @@ ${link}`
           <div>
             <BackBtn label="Crew" onClick={() => setActiveTab('crew')} />
             <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px', padding: '0 4px' }}>
-              Weekly pay per worker, straight from their clocked hours. Tap "Mark Paid" each week to record a paycheck.
+              Weekly pay per worker, straight from their clocked hours. Tap "Mark paid" each week to record a paycheck. Tap a week to see its shifts and fix a wrong one.
             </p>
             {/* Moved up here from the bottom of the page at JP's call. Paying a
                 sub in cash is the thing an owner opens this screen to DO; the
@@ -4783,19 +5199,26 @@ ${link}`
                   {rows.map(r => {
                     const paid = paychecks.find(c => c.worker_id === r.worker_id && c.week_start === r.week_start)
                     const paidExtra = paid ? r.gross - (paid.gross_pay || 0) : 0 // hours added since the paycheck was recorded
+                    // Tap the week to unfold its shifts; tap a shift to fix it.
+                    const weekKey = r.worker_id + '|' + r.week_start
+                    const unfolded = payWeekOpen === weekKey
+                    const shifts = r.shifts || []
                     return (
-                      <div key={r.week_start} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
-                        <div>
-                          <p style={{ fontWeight: '600', fontSize: '14px' }}>Week of {new Date(r.week_start + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-                          <p style={{ fontSize: '12px', color: '#717171' }}>{formatTime(r.minutes)} · {formatCurrency(r.gross)}</p>
-                        </div>
+                      <div key={r.week_start} style={{ padding: '4px 0 8px', borderTop: '1px solid #f0f0f0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <button type="button" onClick={() => setPayWeekOpen(unfolded ? null : weekKey)} aria-expanded={unfolded} style={{ flex: 1, minWidth: 0, minHeight: 'var(--tap)', background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', textAlign: 'left' }}>
+                          <span style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#1C2B3A' }}>Week of {new Date(r.week_start + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} <span style={{ color: '#9CA3AF', fontSize: '12px' }}>{unfolded ? '▾' : '▸'}</span></span>
+                          <span style={{ display: 'block', fontSize: '12px', color: '#717171' }}>{formatTime(r.minutes)} · {formatCurrency(r.gross)} · {shifts.length} shift{shifts.length === 1 ? '' : 's'}</span>
+                        </button>
                         {paid
                           ? <div style={{ textAlign: 'right' }}>
                               <span style={{ fontSize: '12px', fontWeight: '700', color: '#16A34A' }}>Paid ✓</span>
                               {paidExtra > 0.005 && <p style={{ fontSize: '11px', fontWeight: '700', color: '#DC2626', marginTop: '2px' }}>+{formatCurrency(paidExtra)} added since paid</p>}
                             </div>
-                          : <button onClick={() => recordPaycheck(r)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: '40px' }}>Mark paid</button>
+                          : <button onClick={() => recordPaycheck(r)} disabled={loading} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', minHeight: 'var(--tap)' }}>Mark paid</button>
                         }
+                      </div>
+                      {unfolded && shifts.map(t => shiftRow(t, true))}
                       </div>
                     )
                   })}
@@ -5109,17 +5532,57 @@ ${link}`
       )}
 
       {showNewCompliance && (
-        <div className="modal-overlay" onClick={() => { setShowNewCompliance(false); setInlineError('') }}>
+        <div className="modal-overlay" onClick={() => { if (!loading) closeComplianceSheet() }}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-            <h2>Insurance / License</h2>
+            <h2>{editingComplianceId ? 'Edit insurance / license' : 'Insurance / License'}</h2>
             <div className="input-group"><label>Type</label><select value={complianceForm.kind} onChange={e => setComplianceForm({ ...complianceForm, kind: e.target.value })}><option value="insurance">Insurance</option><option value="license">License</option><option value="certification">Certification</option></select></div>
             <div className="input-group"><label>Name</label><input value={complianceForm.name} onChange={e => setComplianceForm({ ...complianceForm, name: e.target.value })} placeholder="General Liability" /></div>
             <div className="input-group"><label>Policy / License #</label><input value={complianceForm.reference} onChange={e => setComplianceForm({ ...complianceForm, reference: e.target.value })} placeholder="GL-100482" /></div>
             <div className="input-group"><label>Expires</label><input type="date" value={complianceForm.expires_on} onChange={e => setComplianceForm({ ...complianceForm, expires_on: e.target.value })} /></div>
             <div className="input-group"><label>Notes (optional)</label><input value={complianceForm.notes} onChange={e => setComplianceForm({ ...complianceForm, notes: e.target.value })} placeholder="Carrier, agent, etc." /></div>
-            {inlineError && <p style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
-            <button className="btn-primary" onClick={addCompliance} disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
-            <button className="btn-secondary" onClick={() => { setShowNewCompliance(false); setInlineError('') }}>Cancel</button>
+            {(() => {
+              const shown = complianceFile
+                ? { name: complianceFile.name, image: isImage(complianceFile.type, complianceFile.name), preview: complianceFilePreview, isNew: true }
+                : (complianceExisting && !complianceFileRemoved)
+                  ? { name: complianceExisting.file_name || 'File', image: isImage(complianceExisting.file_type, complianceExisting.file_name), path: complianceExisting.file_path, isNew: false }
+                  : null
+              const pickStyle = { flex: '1 1 140px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', minHeight: '52px', marginTop: 0, cursor: loading ? 'default' : 'pointer', textAlign: 'center' }
+              return (
+                <div className="input-group">
+                  <p style={{ fontSize: '13px', fontWeight: '500', color: '#444', marginBottom: '5px' }}>Photo or file of it (optional)</p>
+                  {shown && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', border: '1.5px solid #ddd', borderRadius: '10px', marginBottom: '8px' }}>
+                      <div style={{ width: '56px', height: '56px', flexShrink: 0, borderRadius: '8px', overflow: 'hidden', background: '#F9FAFB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px' }}>
+                        {!shown.image
+                          ? <span aria-hidden="true">📄</span>
+                          : shown.isNew
+                            ? (shown.preview ? <img src={shown.preview} alt="Picked file" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span aria-hidden="true">📷</span>)
+                            : <JobPhoto path={shown.path} signedUrl={complianceUrls[shown.path]} alt={shown.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0, fontSize: '13px', color: '#1C2B3A', wordBreak: 'break-word' }}>
+                        {shown.name}
+                        {shown.isNew && <div style={{ fontSize: '11px', color: '#717171', marginTop: '2px' }}>Uploads when you tap Save</div>}
+                      </div>
+                      <button type="button" onClick={removeComplianceFile} disabled={loading} style={{ background: 'none', border: '1px solid #FCA5A5', color: '#DC2626', fontSize: '13px', fontWeight: '600', cursor: 'pointer', padding: '0 14px', minHeight: '44px', borderRadius: '8px', flexShrink: 0 }}>Remove</button>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <label className="btn-secondary" style={pickStyle}>
+                      📷 {shown ? 'Retake photo' : 'Take a photo'}
+                      <input type="file" accept="image/*" capture="environment" onChange={pickComplianceFile} disabled={loading} style={{ display: 'none' }} />
+                    </label>
+                    <label className="btn-secondary" style={pickStyle}>
+                      📎 {shown ? 'Pick a different one' : 'Choose photo or PDF'}
+                      <input type="file" accept="image/*,application/pdf,.pdf" onChange={pickComplianceFile} disabled={loading} style={{ display: 'none' }} />
+                    </label>
+                  </div>
+                  {complianceFileRemoved && complianceExisting && !complianceFile && <p style={{ fontSize: '12px', color: '#717171', marginTop: '6px' }}>The file comes off when you tap Save.</p>}
+                </div>
+              )
+            })()}
+            {inlineError && <p role="alert" style={{ color: '#DC2626', fontSize: '13px', marginBottom: '8px' }}>{inlineError}</p>}
+            <button className="btn-primary" onClick={saveCompliance} disabled={loading}>{loading ? (complianceFile ? 'Uploading…' : 'Saving…') : 'Save'}</button>
+            <button className="btn-secondary" onClick={closeComplianceSheet} disabled={loading}>Cancel</button>
           </div>
         </div>
       )}
@@ -5216,13 +5679,15 @@ ${link}`
       )}
 
       {scheduleModal}
+      {shiftFixSheet}
 
       {testimonialModal}
 
       <Toast message={toast} type={toastType} onClose={() => setToast('')} />
 
-      <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={fetchProjects} autoTalk={askTalk} projectId={askProjectId} />
-      <InstallPrompt />
+      <AssistantPanel open={assistantOpen} onOpenChange={closeAsk} onDataChanged={refreshAfterAssistant} autoTalk={askTalk} projectId={askProjectId} />
+      <InstallPrompt hold={!walkthroughChecked || !!walkthrough} />
+      <Walkthrough open={!!walkthrough} start={walkthrough || 'owner'} onClose={closeWalkthrough} />
 
       {/* Ask sits in the MIDDLE, raised out of the bar, because talking to it is
           now the front door and not a shortcut. It costs no nav slot — the old

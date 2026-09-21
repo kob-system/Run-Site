@@ -99,4 +99,20 @@ describe('OwnerDashboard mounts', () => {
     fireEvent.click(orb)
     expect(await screen.findByText(/JobTally Assistant/i)).toBeInTheDocument()
   })
+
+  // Insurance & Licenses takes a photo or PDF of the certificate. Prove the
+  // pickers are reachable from the real path an owner taps (More, then the
+  // card, then Add), and that the camera one asks for the back camera.
+  it('offers a camera photo and a photo-or-PDF pick on a new insurance item', async () => {
+    render(<OwnerDashboard profile={profile} sub={sub} billingEnforced={false} />)
+    // HubCard titles render as "<icon> <title>" in one heading, hence the regex.
+    fireEvent.click(await screen.findByText(/More tools/))
+    fireEvent.click(await screen.findByText(/Insurance & Licenses/))
+    fireEvent.click(await screen.findByText('+ Add insurance / license'))
+    const camera = (await screen.findByText(/Take a photo/)).querySelector('input[type="file"]')
+    expect(camera).toHaveAttribute('capture', 'environment')
+    expect(camera).toHaveAttribute('accept', 'image/*')
+    const pick = screen.getByText(/Choose photo or PDF/).querySelector('input[type="file"]')
+    expect(pick.getAttribute('accept')).toMatch(/application\/pdf/)
+  })
 })

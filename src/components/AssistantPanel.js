@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
+import { toJpeg, imageErrorMessage, jpegName } from '../utils/imageToJpeg'
+import { pickReceiptJob, orderJobsForPicker, guessCategory } from '../utils/receiptJob'
 
 // In-app AI assistant. A floating ✨ button opens a bottom sheet.
 // Type a question or an action; reads answer inline, writes show a confirm card
@@ -13,11 +15,14 @@ import { supabase } from '../supabaseClient'
 // v0.6: talk-back — a spoken question gets a spoken answer (speechSynthesis), so
 // a guy with gloves on and hands full never has to look at the screen. Typed
 // turns stay silent on purpose; the header 🔊 kills it outright.
+// v0.7: a receipt PHOTO rides with the message. Pick one (camera or library),
+// say or type which job, Send. The card shows the photo, the numbers read off
+// it and a job picker, every field fixable. The photo is uploaded only when
+// Confirm is tapped, so Cancel leaves nothing behind in storage.
 const NAVY = '#1C2B3A'
 const ORANGE = '#E07B2A'
 const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
 const SS = typeof window !== 'undefined' ? window.speechSynthesis : null
-const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
 // 0:07, 1:42. A number that moves is the only proof a mic is really on;
 // "Listening…" sits there looking identical whether it works or not.
@@ -135,11 +140,148 @@ async function authHeader() {
   return tok ? { Authorization: `Bearer ${tok}` } : {}
 }
 
+// ---- Receipt photos -------------------------------------------------------
+// Same buckets and labels as the Add Receipt sheet in OwnerDashboard.js.
+const CATEGORY_LABELS = {
+  materials: 'Materials', fuel: 'Fuel / Gas', tools: 'Tools', permits: 'Permits',
+  subcontractor: 'Subcontractor', supplies: 'Supplies', insurance: 'Insurance', meals: 'Meals', other: 'Other',
+}
+const RECEIPT_CATEGORIES = Object.keys(CATEGORY_LABELS)
+const moneyStr = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const toNum = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0 }
+const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100
+
+// The one thing stopping the receipt card from saving, or '' when it can.
+function receiptProblem(r) {
+  if (!r.projectId) return 'Pick the job this receipt goes on.'
+  if (!(toNum(r.amount) > 0)) return 'Put in the amount before tax.'
+  if (toNum(r.amount) > 100000) return 'That amount looks too big. Check it.'
+  if (toNum(r.tax) < 0) return "The tax can't be negative."
+  if (toNum(r.tax) > 0 && toNum(r.tax) >= toNum(r.amount)) return "The tax can't be more than the amount before tax."
+  return ''
+}
+
+function receiptSummary(r) {
+  const job = (r.jobs || []).find((j) => j.id === r.projectId)
+  const total = toNum(r.amount) + Math.max(0, toNum(r.tax))
+  return `Add a ${moneyStr(total)} receipt${r.store ? ` from ${r.store}` : ''}${job ? ` to “${job.name}”` : ''}, with the photo`
+}
+
+// photo -> /api/scan-receipt (Haiku vision). `amount` is the PRE-TAX subtotal
+// and `tax` the sales tax: exactly the pair add_expense books (cost = amount +
+// tax). Never a lone "total", or the tax gets counted twice.
+async function scanReceiptImage(base64) {
+  const resp = await fetch('/api/scan-receipt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+    body: JSON.stringify({ imageBase64: base64, mediaType: 'image/jpeg' }),
+  })
+  const data = await resp.json().catch(() => null)
+  if (!resp.ok) return { error: (data && data.error) || 'scan failed' }
+  return {
+    store: data && data.store ? String(data.store).slice(0, 80) : '',
+    amount: data && Number(data.amount) > 0 ? Number(data.amount).toFixed(2) : '',
+    tax: data && Number(data.tax) > 0 ? Number(data.tax).toFixed(2) : '',
+    total: data && Number(data.total) > 0 ? Number(data.total).toFixed(2) : '',
+    date: data && /^\d{4}-\d{2}-\d{2}$/.test(String(data.date || '')) ? data.date : '',
+  }
+}
+
+// Every job the card can offer, under the caller's own RLS. An owner sees his
+// jobs; a crew member only the ones he's on (the worker_projects view).
+async function loadReceiptJobs(isOwner) {
+  if (isOwner) {
+    let res = await supabase.from('projects').select('id,name,stage,is_sample').order('created_at', { ascending: false }).limit(200)
+    // is_sample came with FIX-DATABASE-24; a database without it still lists jobs.
+    if (res.error) res = await supabase.from('projects').select('id,name,stage').order('created_at', { ascending: false }).limit(200)
+    if (res.error) throw res.error
+    return orderJobsForPicker(res.data)
+  }
+  const res = await supabase.from('worker_projects').select('id,name')
+  if (res.error) throw res.error
+  return orderJobsForPicker(res.data)
+}
+
+// The confirm card for a receipt photo. Everything on it can be fixed before
+// it saves: a misread total, the wrong day, the job. When the job isn't clear
+// the picker starts empty and Confirm stays off until he picks one.
+function ReceiptCard({ receipt: r, busy, onChange, onConfirm, onCancel }) {
+  const problem = receiptProblem(r)
+  const amount = toNum(r.amount)
+  const tax = Math.max(0, toNum(r.tax))
+  const field = { width: '100%', boxSizing: 'border-box', minHeight: 44, padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 16, background: 'white', color: NAVY }
+  const label = { display: 'block', fontSize: 12, fontWeight: 700, color: '#6b7280', marginBottom: 4 }
+  const jobs = r.jobs || []
+  return (
+    <div style={{ alignSelf: 'stretch', background: '#FFF4ED', border: `1px solid ${ORANGE}`, borderRadius: 14, padding: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: ORANGE, marginBottom: 8, letterSpacing: 0.3 }}>ABOUT TO ADD THIS RECEIPT:</div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+        <img src={r.previewUrl} alt="Receipt photo" style={{ width: 84, height: 112, objectFit: 'cover', borderRadius: 10, border: '1px solid #e5e7eb', flexShrink: 0, background: 'white' }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: NAVY, overflowWrap: 'anywhere' }}>{r.store || 'Store not read'}</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: NAVY, marginTop: 2 }}>{moneyStr(amount + tax)}</div>
+          <div style={{ fontSize: 13, color: '#4b5563', marginTop: 2 }}>{moneyStr(amount)} before tax{tax > 0 ? ` + ${moneyStr(tax)} tax` : ', no tax'}</div>
+          {r.date && <div style={{ fontSize: 13, color: '#4b5563', marginTop: 2 }}>Dated {r.date}</div>}
+          <div style={{ fontSize: 13, color: '#4b5563', marginTop: 2 }}>{CATEGORY_LABELS[r.category] || 'Materials'}</div>
+        </div>
+      </div>
+      {r.readFailed && (
+        <div style={{ fontSize: 13, color: '#b45309', fontWeight: 700, marginBottom: 8 }}>Couldn't read the numbers off this one. Type them in below.</div>
+      )}
+      <label style={label} htmlFor="rc-job">Which job?</label>
+      <select
+        id="rc-job"
+        value={r.projectId}
+        onChange={(e) => onChange('projectId', e.target.value)}
+        style={{ ...field, fontWeight: 700, border: r.projectId ? field.border : `2px solid ${ORANGE}` }}
+      >
+        <option value="">{jobs.length ? 'Pick the job…' : 'No jobs to pick'}</option>
+        {jobs.map((j) => <option key={j.id} value={j.id}>{j.name}{j.stage === 'end' ? ' (done)' : ''}</option>)}
+      </select>
+      {r.jobsFailed && <div style={{ fontSize: 13, color: '#b91c1c', fontWeight: 700, marginTop: 6 }}>Couldn't load your jobs. Cancel and try again when you have signal.</div>}
+      {!r.jobsFailed && !jobs.length && <div style={{ fontSize: 13, color: '#b91c1c', fontWeight: 700, marginTop: 6 }}>There's no job to put this on yet. Make the job first, then add the receipt.</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={label} htmlFor="rc-store">Store</label>
+          <input id="rc-store" value={r.store} onChange={(e) => onChange('store', e.target.value)} placeholder="Home Depot" style={field} />
+        </div>
+        <div>
+          <label style={label} htmlFor="rc-amount">Before tax ($)</label>
+          <input id="rc-amount" type="number" inputMode="decimal" value={r.amount} onChange={(e) => onChange('amount', e.target.value)} placeholder="0.00" style={field} />
+        </div>
+        <div>
+          <label style={label} htmlFor="rc-tax">Sales tax ($)</label>
+          <input id="rc-tax" type="number" inputMode="decimal" value={r.tax} onChange={(e) => onChange('tax', e.target.value)} placeholder="0.00" style={field} />
+        </div>
+        <div>
+          <label style={label} htmlFor="rc-date">Date on it</label>
+          <input id="rc-date" type="date" value={r.date} onChange={(e) => onChange('date', e.target.value)} style={field} />
+        </div>
+        <div>
+          <label style={label} htmlFor="rc-cat">Category</label>
+          <select id="rc-cat" value={r.category} onChange={(e) => onChange('category', e.target.value)} style={field}>
+            {RECEIPT_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+          </select>
+        </div>
+      </div>
+      {problem && <div style={{ fontSize: 13, color: '#b91c1c', fontWeight: 700, marginTop: 10 }}>{problem}</div>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button onClick={onConfirm} disabled={busy || !!problem} style={{ flex: 1, minHeight: 48, border: 'none', borderRadius: 10, background: ORANGE, color: 'white', fontWeight: 800, fontSize: 16, cursor: 'pointer', opacity: busy || problem ? 0.5 : 1 }}>Confirm</button>
+        <button onClick={onCancel} disabled={busy} style={{ flex: 1, minHeight: 48, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', color: NAVY, fontWeight: 800, fontSize: 16, cursor: 'pointer' }}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 // `open` + `onOpenChange` make this a CONTROLLED panel — the owner's bottom nav
 // owns the ✨ button now, because talking to it is meant to read as a place you
 // go, not a helper hovering over the screen you're already on. Left uncontrolled
 // (the crew side) it keeps its own floating button and behaves exactly as before.
-export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange, autoTalk = false, projectId = null }) {
+// `projectId` = the job he opened this from (Talk it out). It goes to the
+// server with every message and preselects the job on a receipt card.
+// `ownerId` = the crew side's boss. A crew receipt photo is stored in the
+// boss's folder, the same way crew job photos are.
+export default function AssistantPanel({ onDataChanged, role = 'owner', open: openProp, onOpenChange, autoTalk = false, projectId = null, ownerId = null }) {
   const isOwner = role !== 'worker'
   const controlled = typeof openProp === 'boolean'
   const [openState, setOpenState] = useState(false)
@@ -166,6 +308,13 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
   const [listening, setListening] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [speakMode, setSpeakMode] = useState(speakPref)
+  // A receipt photo waiting in the tray above the composer:
+  // { blob, previewUrl, name, scan } where scan is undefined while reading.
+  const [attach, setAttach] = useState(null)
+  const scanPromiseRef = useRef(null)
+  // Every preview URL made, so they are all let go when the panel unmounts.
+  const urlsRef = useRef([])
+  useEffect(() => () => { urlsRef.current.forEach((u) => { try { URL.revokeObjectURL(u) } catch { /* gone */ } }) }, [])
   const scrollRef = useRef(null)
   const recogRef = useRef(null)
   const fileRef = useRef(null)
@@ -205,9 +354,66 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
   useEffect(() => { if (!open) hush() }, [open, hush])
   useEffect(() => hush, [hush])
 
+  // A receipt photo plus whatever he said with it becomes a receipt card.
+  // This never calls the model: the numbers come off the scan, the job comes
+  // from the job he opened this from, the job his note names, or his only live
+  // job, and otherwise he picks. Nothing is uploaded or saved here.
+  const proposeReceipt = useCallback(async (staged, note) => {
+    setAttach(null)
+    setPending(null)
+    pushMsg({ role: 'user', text: note || 'Receipt photo', image: staged.previewUrl })
+    setBusy(true)
+    try {
+      const scanP = staged.scan !== undefined ? Promise.resolve(staged.scan) : (scanPromiseRef.current || Promise.resolve(null))
+      const [scan, jobsRes] = await Promise.all([
+        scanP.catch(() => null),
+        loadReceiptJobs(isOwner).then((jobs) => ({ jobs }), () => ({ jobs: [], failed: true })),
+      ])
+      const s = scan && !scan.error ? scan : {}
+      const pick = jobsRes.failed ? null : pickReceiptJob({ jobs: jobsRes.jobs, note, projectId })
+      const receipt = {
+        blob: staged.blob,
+        previewUrl: staged.previewUrl,
+        name: staged.name,
+        store: s.store || '',
+        amount: s.amount || '',
+        tax: s.tax || '',
+        date: s.date || '',
+        category: guessCategory(note),
+        projectId: pick ? pick.id : '',
+        jobs: jobsRes.jobs,
+        jobsFailed: !!jobsRes.failed,
+        readFailed: !(s.store || s.amount),
+      }
+      const summary = receiptSummary(receipt)
+      setPending({ kind: 'receipt', receipt, summary })
+      say(receipt.projectId
+        ? `About to: ${summary}. Tap confirm to save it, or cancel.`
+        : 'I read the receipt. Pick which job it goes on, then tap confirm.', true)
+      pushMsg({ role: 'assistant', text: `[proposed for confirmation] ${summary}`, hidden: true })
+    } finally {
+      setBusy(false)
+    }
+  }, [isOwner, projectId, say])
+
+  const updateReceipt = useCallback((field, value) => {
+    setPending((p) => {
+      if (!p || p.kind !== 'receipt') return p
+      const receipt = { ...p.receipt, [field]: value }
+      return { ...p, receipt, summary: receiptSummary(receipt) }
+    })
+  }, [])
+
+  const removeAttach = useCallback(() => {
+    setAttach(null)
+    scanPromiseRef.current = null
+  }, [])
+
   const send = useCallback(async (overrideText, keepVoice) => {
     const text = (typeof overrideText === 'string' ? overrideText : input).trim()
-    if (!text || busy) return
+    // A receipt photo in the tray can go with no words at all.
+    const staged = attach
+    if ((!text && !staged) || busy) return
     // A template tap or a receipt scan is not a spoken turn — it silences
     // talk-back until the mic is used again. `keepVoice` is the exception:
     // press-and-hold sends override text and IS a spoken turn.
@@ -219,10 +425,13 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
     // has looked at it and whatever the model decides to do with it. If the
     // routing gets it wrong, that costs a tap to fix. It must never cost the
     // note. Fire-and-forget: this can fail silently, the ask still goes.
-    if (projectId && (keepVoice || voiceTurnRef.current)) {
+    if (text && projectId && (keepVoice || voiceTurnRef.current)) {
       supabase.rpc('post_job_message', { p_project_id: projectId, p_body: text })
         .then(() => {}, () => {})
     }
+    // A photo in the tray means this message is about THAT receipt: the words,
+    // if any, are the note ("for the Smith deck"). It becomes a receipt card.
+    if (staged) { await proposeReceipt(staged, text); return }
     setPending(null)
     pushMsg({ role: 'user', text })
     setBusy(true)
@@ -235,7 +444,9 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
       const r = await fetch('/api/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-        body: JSON.stringify({ message: text, history, tz: new Date().getTimezoneOffset() }),
+        // project_id: the job on screen, so "add 2x4s to the buy list" from
+        // inside a job lands on that job without a "which job?" round trip.
+        body: JSON.stringify({ message: text, history, tz: new Date().getTimezoneOffset(), ...(projectId ? { project_id: projectId } : {}) }),
       })
       // Parse defensively: a 5xx from Vercel can be an HTML error page, not JSON.
       // Falling through to the connection-error catch would mislabel a server
@@ -277,7 +488,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
     } finally {
       setBusy(false)
     }
-  }, [input, busy, msgs, say, hush, projectId])
+  }, [input, busy, msgs, say, hush, projectId, attach, proposeReceipt])
 
   // Cancel has to leave a trace in the history, otherwise the model only sees
   // an unfinished setup and proposes the exact same write again on the next
@@ -288,8 +499,84 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
     pushMsg({ role: 'user', text: '[cancelled that — do not do it. Move on to what I say next.]', hidden: true })
   }, [busy])
 
+  // Confirm on a receipt card. Upload FIRST, then save, so a receipt row never
+  // points at a photo that isn't there. If the upload fails nothing is saved
+  // and the card comes straight back, so one more tap retries it.
+  const confirmReceipt = useCallback(async () => {
+    const p = pending
+    if (!p || p.kind !== 'receipt' || busy) return
+    const r = p.receipt
+    if (receiptProblem(r)) return
+    setBusy(true)
+    setPending(null)
+    let path = null
+    try {
+      const { data } = await supabase.auth.getSession()
+      const session = data && data.session
+      const uid = session && session.user && session.user.id
+      // Owner: his own folder, the exact shape the Add Receipt sheet uses.
+      // Crew: the boss's folder under receipts/ (storage lets an assigned
+      // worker write there, and the boss reads it like any receipt of his).
+      let folder = null
+      if (isOwner) {
+        folder = uid ? `${uid}/` : null
+      } else {
+        let boss = ownerId
+        if (!boss && uid) {
+          const { data: me } = await supabase.from('profiles').select('owner_id').eq('id', uid).maybeSingle()
+          boss = me && me.owner_id
+        }
+        folder = boss ? `${boss}/receipts/` : null
+      }
+      if (!folder) throw new Error('no storage folder')
+      path = `${folder}${Date.now()}_${r.name || 'receipt.jpg'}`
+      const { error: upErr } = await supabase.storage.from('receipts').upload(path, r.blob, { contentType: 'image/jpeg' })
+      if (upErr) throw upErr
+    } catch {
+      setPending(p)
+      pushMsg({ role: 'assistant', text: "Couldn't upload the photo, so nothing was saved. Check your signal and tap Confirm again." })
+      setBusy(false)
+      return
+    }
+    const job = (r.jobs || []).find((j) => j.id === r.projectId)
+    const args = {
+      project_id: r.projectId,
+      job_name: job ? job.name : '',
+      amount: round2(toNum(r.amount)),
+      category: r.category || 'materials',
+      photo_path: path,
+    }
+    if (toNum(r.tax) > 0) args.sales_tax = round2(toNum(r.tax))
+    if (r.store && r.store.trim()) args.store = r.store.trim().slice(0, 120)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(r.date || '')) args.purchase_date = r.date
+    try {
+      const resp = await fetch('/api/assistant-execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+        body: JSON.stringify({ actions: [{ tool: 'add_expense', args }], tool: 'add_expense', args, tz: new Date().getTimezoneOffset() }),
+      })
+      const data = await resp.json().catch(() => ({}))
+      const outcome = resp.ok ? (data.message || 'Done ✓') : (data.error || "Couldn't save that receipt.")
+      pushMsg({ role: 'assistant', text: outcome })
+      say(outcome, true)
+      if (resp.ok) {
+        if (typeof onDataChanged === 'function') onDataChanged()
+        if (activity) loadActivity()
+      } else {
+        // The save was refused, so the photo belongs to nothing. Best effort:
+        // storage may not allow the delete, and that is not worth a second error.
+        supabase.storage.from('receipts').remove([path]).then(() => {}, () => {})
+      }
+    } catch {
+      pushMsg({ role: 'assistant', text: "Couldn't reach the server, so that receipt may not have saved. Check the job before adding it again." })
+    } finally {
+      setBusy(false)
+    }
+  }, [pending, busy, isOwner, ownerId, activity, onDataChanged, say])
+
   const confirmAction = useCallback(async () => {
     if (!pending || busy) return
+    if (pending.kind === 'receipt') { await confirmReceipt(); return }
     setBusy(true)
     const p = pending
     setPending(null)
@@ -321,7 +608,7 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
     } finally {
       setBusy(false)
     }
-  }, [pending, busy, activity, onDataChanged, say])
+  }, [pending, busy, activity, onDataChanged, say, confirmReceipt])
 
   // ---------------------------------------------------------------------
   // ONE BIG BUTTON. TAP IT, TALK, TAP IT AGAIN.
@@ -569,66 +856,32 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
   }, [open, autoTalk, startRecording])
 
 
-  // Receipt photo (owner or crew): photo → /api/scan-receipt (Haiku vision) →
-  // auto-send the store/amount/date so the normal add_expense confirm flow takes
-  // over. `amount` is the PRE-TAX subtotal and `tax` is the sales tax, which is
-  // exactly what add_expense wants (it books cost = amount + sales_tax). The
-  // sentence below has to say so in words, because the model — not this code —
-  // is what fills in the tool call. A crew scan books to the boss's records
-  // server-side.
+  // Receipt photo (owner or crew), camera or library. The picked file is
+  // shrunk and turned into a JPEG first (an iPhone HEIC included, see
+  // utils/imageToJpeg), then it sits in the tray while the scan reads it in the
+  // background. He can say or type which job while that runs; Send makes the
+  // card. A photo this phone can't open gets a plain message, never silence.
   const onReceiptPick = useCallback(async (e) => {
     const file = e.target.files && e.target.files[0]
     e.target.value = ''
     if (!file || busy || scanning) return
-    if (!RECEIPT_TYPES.includes(file.type)) {
-      pushMsg({ role: 'assistant', text: 'That file type won’t work — send a photo (JPG, PNG, or WebP).' })
+    setScanning(true)
+    let img
+    try {
+      img = await toJpeg(file)
+    } catch (err) {
+      setScanning(false)
+      pushMsg({ role: 'assistant', text: imageErrorMessage(err) })
       return
     }
-    setScanning(true)
-    try {
-      const b64 = await new Promise((resolve, reject) => {
-        const r = new FileReader()
-        r.onload = () => resolve(String(r.result).split(',')[1] || '')
-        r.onerror = reject
-        r.readAsDataURL(file)
-      })
-      const resp = await fetch('/api/scan-receipt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-        body: JSON.stringify({ imageBase64: b64, mediaType: file.type }),
-      })
-      const data = await resp.json().catch(() => null)
-      const store = data && data.store ? String(data.store).slice(0, 80) : ''
-      const amount = data && Number(data.amount) > 0 ? Number(data.amount).toFixed(2) : ''
-      // date is YYYY-MM-DD or null; tax is a number string or null (both optional).
-      const date = data && /^\d{4}-\d{2}-\d{2}$/.test(String(data.date || '')) ? data.date : ''
-      const tax = data && Number(data.tax) > 0 ? Number(data.tax).toFixed(2) : ''
-      if (!resp.ok || (!store && !amount)) {
-        pushMsg({ role: 'assistant', text: (data && data.error) || 'Couldn’t read that receipt — try a clearer photo, or just tell me the store and amount.' })
-        return
-      }
-      setScanning(false)
-      // Spelled out as subtotal + tax, never as a single "total". add_expense
-      // takes the pre-tax figure in `amount` and the tax separately; a sentence
-      // that says "$108 total (includes $8 tax)" invites the model to put 108
-      // in amount and 8 in sales_tax, which bills the job $116.
-      await send(
-        `I scanned a receipt${store ? ` from ${store}` : ''}` +
-        (amount
-          ? (tax
-            ? ` — $${amount} before tax plus $${tax} sales tax`
-            : ` for $${amount} (no sales tax on it)`)
-          : '') +
-        `${date ? `, dated ${date}` : ''}. ` +
-        `Add it as an expense: amount $${amount}${tax ? `, sales tax $${tax}` : ''}. ` +
-        `Ask me which job if you need to.`
-      )
-    } catch {
-      pushMsg({ role: 'assistant', text: 'Couldn’t read that receipt. Tell me the store and amount instead.' })
-    } finally {
-      setScanning(false)
-    }
-  }, [busy, scanning, send])
+    setScanning(false)
+    let previewUrl = ''
+    try { previewUrl = URL.createObjectURL(img.blob); urlsRef.current.push(previewUrl) } catch { /* no preview, still works */ }
+    const scanP = scanReceiptImage(img.base64).catch(() => ({ error: 'scan failed' }))
+    scanPromiseRef.current = scanP
+    setAttach({ blob: img.blob, previewUrl, name: jpegName(file.name), scan: undefined })
+    scanP.then((scan) => setAttach((a) => (a && a.blob === img.blob ? { ...a, scan } : a)))
+  }, [busy, scanning])
 
   // A template chip is either "open the camera" or "say this for me".
   const templates = isOwner ? OWNER_TEMPLATES : CREW_TEMPLATES
@@ -728,14 +981,18 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
             <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
               {msgs.map((m, i) => m.hidden ? null : (
                 <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', background: m.role === 'user' ? ORANGE : 'white', color: m.role === 'user' ? 'white' : NAVY, padding: '10px 12px', borderRadius: 14, fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  {m.image && <img src={m.image} alt="Receipt photo" style={{ display: 'block', width: 160, maxWidth: '100%', borderRadius: 10, marginBottom: m.text ? 6 : 0 }} />}
                   {m.text}
                 </div>
               ))}
               {/* Nothing said yet → show the whole menu of what it can do. */}
-              {msgs.length <= 1 && !pending && (
+              {msgs.length <= 1 && !pending && !attach && (
                 <Templates items={templates} disabled={busy || scanning} onPick={pickTemplate} />
               )}
-              {pending && (
+              {pending && pending.kind === 'receipt' && (
+                <ReceiptCard receipt={pending.receipt} busy={busy} onChange={updateReceipt} onConfirm={confirmAction} onCancel={cancelAction} />
+              )}
+              {pending && pending.kind !== 'receipt' && (
                 <div style={{ alignSelf: 'flex-start', maxWidth: '92%', background: '#FFF4ED', border: `1px solid ${ORANGE}`, borderRadius: 14, padding: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: ORANGE, marginBottom: 4, letterSpacing: 0.3 }}>
                     {pending.actions && pending.actions.length > 1 ? `ABOUT TO DO ${pending.actions.length} THINGS:` : 'ABOUT TO:'}
@@ -756,12 +1013,12 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
                   </div>
                 </div>
               )}
-              {(busy || scanning) && <div style={{ alignSelf: 'flex-start', color: '#9ca3af', fontSize: 13, fontStyle: 'italic' }}>{scanning ? 'reading receipt…' : 'thinking…'}</div>}
+              {(busy || scanning) && <div style={{ alignSelf: 'flex-start', color: '#9ca3af', fontSize: 13, fontStyle: 'italic' }}>{scanning ? 'opening the photo…' : 'thinking…'}</div>}
             </div>
             {/* Mid-conversation the same list rides above the keyboard as a thin
                 scrolling row. Hidden while a Confirm card is up — one decision
                 on screen at a time. */}
-            {msgs.length > 1 && !pending && (
+            {msgs.length > 1 && !pending && !attach && (
               <div style={{ borderTop: '1px solid #e5e7eb' }}>
                 <Templates items={templates} compact disabled={busy || scanning} onPick={pickTemplate} />
               </div>
@@ -774,7 +1031,27 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
                 one tap arms it, one tap sends it, and it says both of those
                 things in words on its own face. Typing still works underneath
                 it for anyone who'd rather. */}
-            <div style={{ padding: 12, paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: msgs.length > 1 && !pending ? 'none' : '1px solid #e5e7eb', background: 'white' }}>
+            <div style={{ padding: 12, paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: msgs.length > 1 && !pending && !attach ? 'none' : '1px solid #e5e7eb', background: 'white' }}>
+              {/* The receipt photo waiting to go. It says what the scan read,
+                  and the one thing to do next. */}
+              {attach && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 8, marginBottom: 10, border: '1px solid #e5e7eb', borderRadius: 12, background: '#F7F8FA' }}>
+                  {attach.previewUrl
+                    ? <img src={attach.previewUrl} alt="Receipt photo to send" style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                    : <div style={{ width: 52, height: 52, borderRadius: 8, background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🧾</div>}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: NAVY, overflowWrap: 'anywhere' }}>
+                      {attach.scan === undefined
+                        ? 'Reading the receipt…'
+                        : attach.scan && !attach.scan.error && (attach.scan.store || attach.scan.amount)
+                          ? `${attach.scan.store || 'Receipt'}${attach.scan.amount ? ` · ${moneyStr(attach.scan.amount)} before tax` : ''}`
+                          : "Couldn't read it. You can type the numbers next."}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Say or type which job it's for, then Send. Nothing saves until you Confirm.</div>
+                  </div>
+                  <button onClick={removeAttach} disabled={busy} aria-label="Remove the receipt photo" style={{ width: 44, height: 44, flexShrink: 0, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', color: NAVY, fontSize: 20, cursor: 'pointer' }}>×</button>
+                </div>
+              )}
               {SR && (
                 <button
                   onClick={toggleMic}
@@ -802,21 +1079,22 @@ export default function AssistantPanel({ onDataChanged, role = 'owner', open: op
                 </button>
               )}
               <div style={{ display: 'flex', gap: 8 }}>
-                {/* Receipt scan — owner and crew both; a crew scan books to the boss server-side. */}
-                <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onReceiptPick} style={{ display: 'none' }} />
-                <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning || listening} aria-label="Scan a receipt" title="Scan a receipt" style={{ width: 44, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 18, cursor: 'pointer' }}>🧾</button>
+                {/* Receipt photo, owner and crew both. No `capture`, so the
+                    phone offers the camera AND the photo library. */}
+                <input ref={fileRef} type="file" accept="image/*" onChange={onReceiptPick} style={{ display: 'none' }} data-testid="receipt-file" />
+                <button onClick={() => { if (fileRef.current) fileRef.current.click() }} disabled={busy || scanning || listening} aria-label="Add a receipt photo" title="Add a receipt photo" style={{ width: 48, minHeight: 48, border: '1px solid #d1d5db', borderRadius: 10, background: 'white', fontSize: 20, cursor: 'pointer' }}>🧾</button>
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !listening) send() }}
                   readOnly={listening}
-                  placeholder={listening ? 'Listening…' : isOwner ? 'Or type it…' : 'Clock in, check hours, time off…'}
+                  placeholder={listening ? 'Listening…' : attach ? 'Which job? (optional)' : isOwner ? 'Or type it…' : 'Clock in, check hours, time off…'}
                   style={{ flex: 1, minWidth: 0, padding: '11px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 15, outline: 'none', background: listening ? '#F3F4F6' : 'white' }}
                 />
                 {/* Send is off while the mic is armed. There is exactly one way
                     to finish a spoken pile and it is the big red button — two
                     ways to send is how half a sentence goes out. */}
-                <button onClick={send} disabled={busy || listening || !input.trim()} style={{ padding: '0 16px', border: 'none', borderRadius: 10, background: input.trim() && !busy && !listening ? ORANGE : '#d1d5db', color: 'white', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Send</button>
+                <button onClick={send} disabled={busy || listening || (!input.trim() && !attach)} style={{ padding: '0 16px', minHeight: 48, border: 'none', borderRadius: 10, background: (input.trim() || attach) && !busy && !listening ? ORANGE : '#d1d5db', color: 'white', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Send</button>
               </div>
             </div>
           </>

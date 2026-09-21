@@ -3,6 +3,10 @@
   JobTally — Privacy Policy
   Operator: John Paul Kobrossi d/b/a JobTally (update to the LLC name if/when
   one is formed, here and in the Contact section and in terms.html).
+
+  Every sentence below was checked against the code on 2026-09-13. If you
+  change what the product does with data (a new provider, a new table, a new
+  email, what delete removes), change this page in the same PR.
   ============================================================================
 -->
 <!DOCTYPE html>
@@ -10,7 +14,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JobTally — Privacy Policy</title>
+<title>JobTally Privacy Policy</title>
 <style>
   :root {
     --navy: #1C2B3A;
@@ -123,16 +127,16 @@
   <header class="doc">
     <p class="brand">JobTally</p>
     <h1>Privacy Policy</h1>
-    <p class="meta">Effective date: July 5, 2026 &nbsp;&middot;&nbsp; Last updated: August 17, 2026</p>
+    <p class="meta">Effective date: July 5, 2026 &nbsp;&middot;&nbsp; Last updated: September 13, 2026</p>
   </header>
 
-  <p>This Privacy Policy explains how <strong>John Paul Kobrossi, doing business as JobTally</strong> ("JobTally," "we," "us," or "our") collects, uses, shares, and protects information when you use the JobTally web application and related websites at <strong>getjobtally.com</strong> and <strong>jobtallyapp.com</strong> (together, the "Service"). JobTally is a mobile-first job-costing and time-tracking tool built for small contractors and their crews.</p>
+  <p>This Privacy Policy explains how <strong>John Paul Kobrossi, doing business as JobTally</strong> ("JobTally," "we," "us," or "our") collects, uses, shares, and protects information when you use the JobTally web app and website at <strong>getjobtally.com</strong> (the "Service"). JobTally is a job-costing and time-tracking tool for small contractors and their crews.</p>
 
-  <p>We know contractors are busy, so we've tried to keep this readable. If anything here is unclear, contact us at <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>.</p>
+  <p>We wrote this in plain words on purpose. If anything is unclear, email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>.</p>
 
   <div class="callout important">
-    <h3>Workers, please read this: we track your location at clock-in and clock-out</h3>
-    <p style="margin-bottom:0">If your employer invited you to JobTally as a worker, the app captures your device's <strong>GPS location at the moment you clock in and the moment you clock out</strong>. That location is shared with the business owner who invited you. See <a href="#location">"Worker Location Tracking"</a> below for exactly what is collected and how it is used.</p>
+    <h3>Workers, please read this: your location is stamped when you clock in and when you clock out</h3>
+    <p style="margin-bottom:0">If a business owner invited you to JobTally as a worker, the app saves your phone's <strong>GPS location at the moment you clock in and the moment you clock out</strong>. The owner who invited you can see it in the app, and it is in the email the owner gets when you clock in or out. See <a href="#location">Section 3</a> for exactly what is saved.</p>
   </div>
 
   <div class="toc">
@@ -140,20 +144,22 @@
     <ol>
       <li><a href="#who">Who we are &amp; who uses JobTally</a></li>
       <li><a href="#collect">Information we collect</a></li>
-      <li><a href="#location">Worker location tracking</a></li>
+      <li><a href="#location">Worker location</a></li>
       <li><a href="#use">How we use information</a></li>
       <li><a href="#bases">Legal bases for processing</a></li>
-      <li><a href="#share">How we share information &amp; subprocessors</a></li>
+      <li><a href="#see">Who can see what inside JobTally</a></li>
+      <li><a href="#share">Companies that handle your data</a></li>
       <li><a href="#payments">Payments &amp; card data</a></li>
-      <li><a href="#ai">AI receipt scanning</a></li>
-      <li><a href="#retention">Data retention</a></li>
+      <li><a href="#ai">AI: receipt scanning &amp; the assistant</a></li>
+      <li><a href="#voice">Voice input</a></li>
+      <li><a href="#retention">Keeping &amp; deleting data</a></li>
       <li><a href="#security">Security</a></li>
       <li><a href="#rights">Your rights &amp; choices</a></li>
       <li><a href="#ccpa">California privacy rights (CCPA/CPRA)</a></li>
       <li><a href="#gdpr">EU/UK/EEA rights (GDPR)</a></li>
-      <li><a href="#cookies">Cookies &amp; analytics</a></li>
+      <li><a href="#cookies">Cookies, browser storage &amp; usage data</a></li>
       <li><a href="#children">Children</a></li>
-      <li><a href="#intl">International users</a></li>
+      <li><a href="#intl">Where your data is stored</a></li>
       <li><a href="#changes">Changes to this policy</a></li>
       <li><a href="#contact">Contact us</a></li>
     </ol>
@@ -162,138 +168,204 @@
   <h2 id="who">1. Who we are &amp; who uses JobTally</h2>
   <p>JobTally has two kinds of users:</p>
   <ul>
-    <li><strong>Business owners / contractors</strong> — paid subscribers who create an account, set up their company, add jobs and clients, and invite workers.</li>
-    <li><strong>Workers / crew</strong> — people invited by an owner to clock in and out of jobs. Workers use JobTally for free.</li>
+    <li><strong>Business owners</strong>. They create an account, set up their company, add jobs and clients, and invite workers. Owners pay for JobTally once they run more than one job at a time.</li>
+    <li><strong>Workers (crew)</strong>. An owner invites them to clock in and out and see their own jobs. Workers use JobTally for free.</li>
   </ul>
-  <p>For most data that a business owner enters about their company, jobs, clients, and workers, the <strong>business owner is the "controller"</strong> of that data and JobTally acts as a <strong>service provider / processor</strong> handling it on the owner's behalf. For account-level information and for operating the Service overall, JobTally acts as a controller. If you are a worker and have questions about how your data is used within a company's account, you should also contact the business owner who invited you.</p>
+  <p>For the business data an owner enters about their company, jobs, clients, and workers, the <strong>business owner is the "controller"</strong> of that data. JobTally is a <strong>service provider / processor</strong> that handles it for the owner. For account information and for running the Service itself, JobTally is a controller. If you are a worker with questions about how a company uses your data, you can also ask the owner who invited you.</p>
 
   <h2 id="collect">2. Information we collect</h2>
 
   <h3>a. Account information</h3>
-  <p>When you register or are invited, we collect your <strong>name, email address, company name</strong> (for owners), and a <strong>password</strong> (stored only in hashed/encrypted form — we never see your plain-text password).</p>
+  <p>Your <strong>name</strong>, <strong>email address</strong>, and, for owners, your <strong>company name</strong>. If you set a password, our login provider (Supabase) stores it only in hashed form. We cannot read it. Workers usually sign in with an invite link instead of a password.</p>
 
-  <h3>b. Location data</h3>
-  <p>For workers, we capture <strong>GPS geolocation at clock-in and clock-out</strong>. See <a href="#location">Section 3</a> for full detail. We do not continuously track location in the background between clock-in and clock-out.</p>
+  <h3>b. Location</h3>
+  <p>For workers, the <strong>GPS location at clock-in and at clock-out</strong>. See <a href="#location">Section 3</a>.</p>
 
-  <h3>c. Job, project &amp; business data (entered by the owner)</h3>
+  <h3>c. Business data the owner enters</h3>
   <ul>
-    <li>Job and project details (names, descriptions, addresses, status).</li>
-    <li><strong>Client / customer contact information</strong> entered by the owner (such as a customer's name, phone, email, address).</li>
-    <li>Estimates, invoices, and payment amounts.</li>
-    <li>Hourly pay rates and computed labor costs.</li>
-    <li>Time entries and hours worked.</li>
-    <li>Mileage.</li>
+    <li>Jobs: names, addresses, stage, budgets, prices, and notes.</li>
+    <li><strong>Client details</strong> the owner types in, such as a customer's name, phone, email, and address.</li>
+    <li>Estimates, invoices, change orders, and payments.</li>
+    <li>Workers' pay rates, hours, labor cost, and pay records.</li>
+    <li>Mileage, schedules, time off requests, shopping and fix-it lists, daily notes, permits, warranty callbacks, and insurance and license records.</li>
+    <li>Messages in each job's crew chat.</li>
   </ul>
 
-  <h3>d. Photos &amp; uploaded files</h3>
-  <p>Photos of <strong>receipts</strong> and <strong>jobsite photos</strong> that you or your workers upload. Receipt images are also processed by our AI provider to extract the store name and amount (see <a href="#ai">Section 8</a>).</p>
+  <h3>d. Photos &amp; files</h3>
+  <p>Receipt photos, job photos, job documents, and insurance or license files that owners or workers upload. They are kept in a <strong>private storage bucket</strong>, not on a public web address. See <a href="#ai">Section 9</a> for how receipt photos are read.</p>
 
-  <h3>e. Payment information</h3>
-  <p>Subscription billing is handled by <strong>Stripe</strong>. JobTally does <strong>not</strong> collect or store full payment card numbers — Stripe does. We receive limited billing metadata such as your subscription status, plan, the last four digits and card brand, and billing history. See <a href="#payments">Section 7</a>.</p>
+  <h3>e. What you ask the assistant</h3>
+  <p>What you type or say to the Ask assistant, and a log of every change the assistant made (what it changed and who asked for it). See <a href="#ai">Section 9</a>.</p>
 
-  <h3>f. Technical &amp; usage information</h3>
-  <p>Like most web apps, we automatically receive certain technical data when you use the Service: IP address, browser and device type, operating system, timestamps, pages/screens viewed, and basic diagnostic/error logs. This helps us keep the Service secure and working.</p>
+  <h3>f. Billing information</h3>
+  <p>Stripe handles card payments. We keep your Stripe customer ID, subscription ID, plan, subscription status, and renewal date. We do <strong>not</strong> receive or store card numbers. See <a href="#payments">Section 8</a>.</p>
 
-  <h2 id="location">3. Worker location tracking</h2>
+  <h3>g. Product usage and signup source</h3>
+  <ul>
+    <li><strong>Usage events.</strong> When you do certain things in the app (open it, create a job, add a receipt, reach the payment screen), we save an event in our own database. Each event holds your account ID (once you are signed in), a random ID stored in your browser, the event name, and a few small details such as which screen or which plan. We do not put names, emails, addresses, or dollar amounts in these events. They are tied to your account, not just added up.</li>
+    <li><strong>Signup source.</strong> If you arrived through a tagged link, an ad, or a partner's link, we save which one (the link's tags, the partner name, the page you landed on, and when you first visited) with your new account.</li>
+  </ul>
+
+  <h3>h. Technical information</h3>
+  <p>Like any website, our hosts see your IP address and browser type when your phone or computer talks to the Service. If the app crashes, it sends us an error report by email with the error, the page, your account ID and role, the app version, and your browser type.</p>
+
+  <h2 id="location">3. Worker location</h2>
   <div class="callout important">
-    <p><strong>What is collected:</strong> your device's GPS coordinates (latitude/longitude), captured only at the moment you tap "clock in" and the moment you tap "clock out." An approximate accuracy radius and timestamp are stored with each point.</p>
-    <p><strong>Why:</strong> so the business owner can verify that time was recorded at or near the jobsite and can accurately cost labor to a job.</p>
-    <p><strong>Who sees it:</strong> the business owner (and their authorized account users) who invited you. JobTally personnel may access it only as needed to operate or support the Service.</p>
-    <p style="margin-bottom:0"><strong>What is <em>not</em> collected:</strong> we do not track your location continuously, in the background, or while you are off the clock. Location is a snapshot at clock-in and clock-out only.</p>
+    <p><strong>What is saved:</strong> your phone's latitude and longitude at the moment you tap clock in, and again at the moment you tap clock out on the clock screen. Your browser asks your permission first.</p>
+    <p><strong>Why:</strong> so the owner can see that time was recorded at or near the job and can cost labor to the right job.</p>
+    <p><strong>Who sees it:</strong> the owner who invited you. It shows in the owner's app, and the email the owner gets when you clock in or out includes a map link to that spot. You can see your own. JobTally looks at it only if needed to run or fix the Service.</p>
+    <p style="margin-bottom:0"><strong>What is <em>not</em> saved:</strong> anything between clock-in and clock-out. There is no background tracking and nothing while you are off the clock. Clocking in or out by asking the assistant saves no location at all.</p>
   </div>
-  <p>Your device or browser controls location permissions. If you deny location access, clock-in/clock-out may be limited or may record without a location point, depending on your employer's settings. <strong>The decision to require location-based time tracking is made by your employer, not by JobTally.</strong> If you are uncomfortable with location capture, raise it with the business owner who invited you.</p>
+  <p>If you block location, or your phone cannot get a signal, your shift still saves. It just has no location. <strong>Your employer decides to use JobTally for time tracking, not JobTally.</strong> If location capture bothers you, talk to the owner who invited you.</p>
 
   <h2 id="use">4. How we use information</h2>
   <ul>
-    <li>Provide, operate, and maintain the Service (accounts, time tracking, job costing, estimates, invoices).</li>
-    <li>Capture and display clock-in/clock-out times and locations to the business owner.</li>
-    <li>Extract store name and amount from receipt photos using AI to speed up expense entry.</li>
-    <li>Process subscription payments and manage billing.</li>
-    <li>Send transactional messages such as invitations, clock-in/clock-out notifications, password resets, and billing notices.</li>
-    <li>Provide customer support and respond to your requests.</li>
-    <li>Monitor, secure, debug, and improve the Service.</li>
-    <li>Comply with legal obligations and enforce our Terms of Service.</li>
+    <li>Run the Service: accounts, time tracking, job costing, estimates, invoices, schedules, and crew chat.</li>
+    <li>Show owners their crew's hours and clock-in and clock-out locations.</li>
+    <li>Read receipt photos and run the assistant, using Anthropic (<a href="#ai">Section 9</a>).</li>
+    <li>Handle subscription billing through Stripe.</li>
+    <li>Send email: clock-in and clock-out alerts to the owner, welcome emails, a weekly summary to owners, an alert to the owner when a worker is waiting to be put on a job, payment receipts and failed-payment notices, and account emails such as password resets.</li>
+    <li>Answer support requests.</li>
+    <li>Find and fix bugs, keep the Service secure, and improve it. Usage events and signup source are used for this.</li>
+    <li>Follow the law and enforce our Terms of Service.</li>
   </ul>
-  <p>We do <strong>not</strong> sell your personal information, and we do not use your business's job, client, location, or financial data to serve you third-party advertising.</p>
+  <p>We do <strong>not</strong> sell your personal information. We do not use your job, client, location, or money data to show you ads, and there are no ads in JobTally.</p>
 
   <h2 id="bases">5. Legal bases for processing</h2>
-  <p>Where data-protection laws such as the GDPR apply, we rely on the following legal bases:</p>
+  <p>Where laws such as the GDPR apply, we rely on:</p>
   <ul>
-    <li><strong>Contract</strong> — to provide the Service you or your employer signed up for (e.g., creating your account, tracking time, billing subscriptions).</li>
-    <li><strong>Legitimate interests</strong> — to secure, maintain, and improve the Service and prevent fraud and abuse, balanced against your rights.</li>
-    <li><strong>Consent</strong> — where required, for example device-level location permissions, which you grant through your browser/device and can withdraw.</li>
-    <li><strong>Legal obligation</strong> — to keep records and comply with tax, accounting, and other laws.</li>
+    <li><strong>Contract</strong>: to provide the Service you or your employer signed up for.</li>
+    <li><strong>Legitimate interests</strong>: to secure, fix, and improve the Service and prevent abuse, balanced against your rights.</li>
+    <li><strong>Consent</strong>: where required, for example the location permission you grant in your browser, which you can take back.</li>
+    <li><strong>Legal obligation</strong>: to keep records the law requires.</li>
   </ul>
-  <p>For worker data processed on an owner's behalf, the business owner is responsible for having an appropriate legal basis and for informing workers about location tracking as required by their local laws.</p>
+  <p>For worker data handled for an owner, the owner is responsible for having a legal basis and for telling workers about location capture where their local law requires it.</p>
 
-  <h2 id="share">6. How we share information &amp; subprocessors</h2>
-  <p>We share information only as needed to run JobTally. Our key subprocessors and service providers are:</p>
+  <h2 id="see">6. Who can see what inside JobTally</h2>
+  <ul>
+    <li><strong>Other contractors: nothing.</strong> The database itself checks who is asking on every request, so one business cannot read another business's jobs, clients, crew, or files.</li>
+    <li><strong>Owners</strong> see everything in their own account, including their crew's hours, pay, clock-in and clock-out locations, and job chat.</li>
+    <li><strong>Workers</strong> see:
+      <ul>
+        <li>their own shifts, hours, and pay, and their own schedule and time off;</li>
+        <li>the jobs they are assigned to: the job name, address, and stage, but not the client's phone number or email, the budget, or the price;</li>
+        <li>the shopping and fix-it lists, crew chat, and photos for those jobs;</li>
+        <li>the names of the crewmates on those jobs.</li>
+      </ul>
+      A worker can add a receipt to a job he is on, but cannot see receipts. Workers cannot see other workers' pay, job budgets or profit, estimates, or invoices.</li>
+    <li><strong>JobTally.</strong> One person runs JobTally. He can reach account data to keep the Service working, to fix a problem, or to answer a request you make.</li>
+  </ul>
+
+  <h2 id="share">7. Companies that handle your data</h2>
+  <p>We share information only as needed to run JobTally. These are the companies that handle it:</p>
   <div class="table-scroll">
   <table>
     <thead>
-      <tr><th>Provider</th><th>Purpose</th><th>Data involved</th></tr>
+      <tr><th>Company</th><th>What it does for us</th><th>What it handles</th></tr>
     </thead>
     <tbody>
-      <tr><td><strong>Supabase</strong></td><td>Database, file/photo storage, and authentication</td><td>Account data, job/client data, time &amp; location entries, photos, hashed passwords</td></tr>
-      <tr><td><strong>Vercel</strong></td><td>Application hosting &amp; delivery</td><td>Technical/request data needed to serve the app</td></tr>
-      <tr><td><strong>Stripe</strong></td><td>Subscription payment processing</td><td>Billing details and payment card data (handled by Stripe; see Section 7)</td></tr>
-      <tr><td><strong>Anthropic (Claude API)</strong></td><td>AI scanning of receipt images to extract store name &amp; amount</td><td>Receipt image and extracted text</td></tr>
-      <tr><td><strong>Resend</strong></td><td>Transactional email (invitations, clock-in/out notifications, billing/account emails)</td><td>Email address and message contents</td></tr>
-      <tr><td><strong>Cloudflare</strong></td><td>DNS and email routing</td><td>Network/routing metadata</td></tr>
+      <tr><td><strong>Supabase</strong></td><td>Database, file storage, and logins. Hosted on Amazon Web Services in the United States (Northern California region).</td><td>Everything in your account: account details, jobs, client details, hours, locations, pay, photos and files, hashed passwords, usage events</td></tr>
+      <tr><td><strong>Vercel</strong></td><td>Runs the website and the app's server code</td><td>Your requests (IP address, browser type) and the data passing through our server code on its way to the database or the companies below</td></tr>
+      <tr><td><strong>Anthropic</strong></td><td>Reads receipt photos. Runs the Ask assistant.</td><td>Receipt photos. Your assistant messages and the job, client, price, crew, pay, and invoice details the assistant reads or writes to answer you (<a href="#ai">Section 9</a>)</td></tr>
+      <tr><td><strong>Stripe</strong></td><td>Subscription billing</td><td>Your email address, your JobTally account ID, the card and billing details you enter on Stripe's page, and a partner tag if you signed up through a partner's link</td></tr>
+      <tr><td><strong>Resend</strong></td><td>Sends our emails</td><td>The recipient's address and the email's contents. Clock-in and clock-out alerts include the worker's name, the job, the time, a map link to the location, and hours worked.</td></tr>
+      <tr><td><strong>Cloudflare</strong></td><td>Answers domain name (DNS) lookups for getjobtally.com</td><td>Domain lookups only. Site traffic does not pass through it.</td></tr>
+      <tr><td><strong>ImprovMX</strong></td><td>Forwards email sent to our @getjobtally.com addresses</td><td>Emails you send us, such as to support@getjobtally.com</td></tr>
     </tbody>
   </table>
   </div>
-  <p>We may also disclose information: (a) to comply with law, legal process, or a lawful government request; (b) to protect the rights, safety, and property of JobTally, our users, or the public; (c) to enforce our Terms; and (d) in connection with a merger, acquisition, financing, or sale of assets, in which case we will require the recipient to honor this Policy. Business owners control sharing within their own account (for example, inviting additional users).</p>
+  <p>Your browser's maker may also handle audio if you use voice input (<a href="#voice">Section 10</a>). If an owner taps the map link in a clock-in email, that opens Google Maps, which is Google's service, not ours.</p>
+  <p>We may also disclose information: (a) to comply with law, legal process, or a lawful government request; (b) to protect the rights, safety, and property of JobTally, our users, or the public; (c) to enforce our Terms; and (d) in a merger, acquisition, financing, or sale of assets, in which case we will require the recipient to honor this Policy.</p>
 
-  <h2 id="payments">7. Payments &amp; card data</h2>
-  <p>Subscriptions are billed through <strong>Stripe</strong>, a PCI-DSS-certified payment processor. When you enter payment details, they go directly to Stripe. <strong>JobTally never receives or stores your full card number, CVC, or full card details.</strong> We store only limited billing metadata (such as subscription status, plan, card brand, last four digits, and billing history) so we can manage your subscription. Stripe's handling of your payment data is governed by <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe's Privacy Policy</a>.</p>
+  <h2 id="payments">8. Payments &amp; card data</h2>
+  <p>Subscriptions are billed through <strong>Stripe</strong>. You enter card details on Stripe's page, and they go to Stripe. <strong>JobTally never receives or stores your card number, security code, or full card details.</strong> We send Stripe your email address and your JobTally account ID so it can match the payment to your account. We keep your Stripe customer ID, subscription ID, plan, status, and renewal date. Stripe's handling of your payment data is covered by <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe's Privacy Policy</a>.</p>
 
-  <h2 id="ai">8. AI receipt scanning</h2>
-  <p>When you upload a receipt photo, we send the image to the <strong>Anthropic Claude API</strong> to automatically read the <strong>store name and amount</strong> so you don't have to type them. We use this only to populate your expense entry. The extracted results are shown to you and can be edited. Anthropic processes the image as our subprocessor. AI extraction may occasionally be inaccurate, so you should review scanned values — see the disclaimers in our Terms of Service.</p>
+  <h2 id="ai">9. AI: receipt scanning &amp; the assistant</h2>
+  <p>JobTally uses <strong>Anthropic's Claude</strong> for two things. Anthropic handles this data under Anthropic's commercial terms, and we use it only to do what you asked.</p>
+  <h3>Receipt scanning</h3>
+  <p>When you add a receipt photo, we send the image to Anthropic to read what is printed on it: the store, date, subtotal, tax, and total. You see the result and can change it before saving.</p>
+  <h3>The Ask assistant</h3>
+  <p>When you ask the assistant something, by typing or talking, your message goes to Anthropic. So does the account data the assistant looks up to answer, which can include your jobs, your clients and their contact details, prices and budgets, crew names, hours and pay rates, estimates, and invoices. When a worker uses the assistant, it looks up only his own hours, schedule, and jobs. When the assistant wants to change something, it shows a confirm card first, and nothing is saved until you tap Confirm. Every change it makes is logged in your account.</p>
+  <p>AI can get things wrong. Check scanned amounts and assistant answers before you rely on them. See the disclaimers in our <a href="terms.html">Terms of Service</a>.</p>
 
-  <h2 id="retention">9. Data retention</h2>
-  <p>We retain personal information for as long as your (or your employer's) account is active and as needed to provide the Service. After an account is deleted, we delete or de-identify associated personal data within a commercially reasonable period, except where we must retain certain records to comply with legal, tax, accounting, or dispute-resolution obligations, or to enforce our agreements. Backups are purged on a rolling schedule. Because a business owner controls their workers' and clients' data, some worker or client data may persist in an owner's account until the owner deletes it or their account.</p>
+  <h2 id="voice">10. Voice input</h2>
+  <p>The microphone button uses your browser's built-in speech recognition. Depending on your browser, the audio may be sent to the browser's maker to turn it into text (for example, Google in Chrome, or Apple in Safari). JobTally only gets the text, never the audio. If you would rather not use it, type instead.</p>
 
-  <h2 id="security">10. Security</h2>
+  <h2 id="retention">11. Keeping &amp; deleting data</h2>
+  <h3>While your account is open</h3>
+  <p>We keep your data as long as the account is open. <strong>Cancelling your subscription does not delete anything.</strong> The account drops to the free plan and your records stay.</p>
+
+  <h3>When an owner deletes their account</h3>
+  <p>Owners can delete their account in the app, under <strong>Settings &rarr; Delete my account</strong>. You type your own email to confirm. Then:</p>
+  <ol>
+    <li><strong>Billing stops first.</strong> Any live Stripe subscription is canceled. If we cannot confirm billing has stopped, nothing is deleted and we ask you to email us.</li>
+    <li><strong>Your records are deleted:</strong> jobs and client details, estimates, invoices, change orders, receipts, hours, pay records, mileage, schedules, time off requests, lists, daily notes, permits, warranty callbacks, insurance and license records, job chat, the assistant's change log, your usage events and signup source, your subscription record, and your login.</li>
+    <li><strong>Receipt photos you uploaded yourself are deleted</strong> from storage.</li>
+  </ol>
+  <p><strong>Not yet removed by the delete button:</strong> job photos, job documents, insurance and license files, and receipt photos your crew added. Those files stay in private storage. Email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a> and we will delete them. If you want to be sure every file is gone, email us after you delete.</p>
+  <p>Your workers' logins are theirs, so they are not deleted. They are unlinked from your company. Their hours on your jobs are deleted along with your jobs.</p>
+
+  <h3>When a worker's account is deleted</h3>
+  <p>Workers cannot delete their own account from the app yet. Email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a> and we will do it. <strong>Deleting a worker's account also deletes his hours, pay records, schedule, and time off requests, including the copies in his boss's account.</strong> Owners should download their data first if they need those records. Chat messages the worker wrote, and photos and receipts he added to a job, stay in the owner's account.</p>
+
+  <h3>What can remain after a delete</h3>
   <ul>
-    <li><strong>Encryption in transit and at rest</strong> — data is transmitted over HTTPS/TLS and stored encrypted at rest by our infrastructure providers.</li>
-    <li><strong>Row-Level Security (RLS)</strong> — our database enforces row-level security policies so that each account can only access its own data; one company cannot see another company's jobs, clients, workers, or files.</li>
-    <li><strong>Hashed passwords</strong> — passwords are stored using industry-standard one-way hashing; we cannot read them.</li>
-    <li><strong>Access controls</strong> — internal access to production data is limited to personnel who need it to operate and support the Service.</li>
+    <li>Copies in our database host's daily backups, for up to about 8 days, until those backups roll off.</li>
+    <li>Emails already sent, including the notice we get that an account was closed.</li>
+    <li>Stripe's own records of your customer account and past payments.</li>
+    <li>Anything we must keep by law.</li>
   </ul>
-  <p>No system is perfectly secure. While we work hard to protect your information, we cannot guarantee absolute security. If we become aware of a data breach affecting your personal information, we will notify you and regulators as required by law.</p>
+  <p>An owner controls the worker and client data in their own account and can change or delete it there.</p>
 
-  <h2 id="rights">11. Your rights &amp; choices</h2>
-  <p>Depending on where you live, you may have some or all of the following rights over your personal information:</p>
+  <h2 id="security">12. Security</h2>
   <ul>
-    <li><strong>Access / portability</strong> — business owners can download their entire account at any time from <strong>Settings &rarr; Your data &rarr; Download everything I have</strong>. You can also request a copy from us.</li>
-    <li><strong>Correction</strong> — fix inaccurate information (owners and workers can edit much of this directly in the app).</li>
-    <li><strong>Deletion</strong> — request deletion of your data. <strong>Business owners can delete their account and all associated business data from inside the app</strong>, under Settings &rarr; Delete my account; it takes effect immediately and cannot be undone (subject to the retention rules above). You can also email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a> if you would rather we do it for you.</li>
-    <li><strong>Objection / restriction</strong> — object to or ask us to limit certain processing.</li>
-    <li><strong>Withdraw consent</strong> — for example, revoke device location permissions at any time.</li>
+    <li><strong>HTTPS only.</strong> Every connection is encrypted, and the site refuses to load any other way.</li>
+    <li><strong>Database rules on every request.</strong> Row-level security in the database decides which rows each login can read, as described in <a href="#see">Section 6</a>.</li>
+    <li><strong>Private file storage.</strong> Photos and files are in a private bucket. The app gives short-lived links only to people allowed to see them.</li>
+    <li><strong>Hashed passwords.</strong> We cannot read your password.</li>
+    <li><strong>Limited access.</strong> Only the one person who runs JobTally can reach account data.</li>
   </ul>
-  <p>To make a request, email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>. We will verify your identity and respond within the timeframe required by applicable law. Workers: some requests must be directed to the business owner who controls your data; we will help route your request where appropriate. We will not discriminate against you for exercising your privacy rights.</p>
+  <p>No system is perfectly secure, and we cannot promise absolute security. If we learn of a breach affecting your personal information, we will notify you and regulators as the law requires.</p>
 
-  <h2 id="ccpa">12. California privacy rights (CCPA/CPRA)</h2>
-  <p>If you are a California resident, you have the right to: know what personal information we collect and how we use and disclose it; request access to and deletion of your personal information; correct inaccurate personal information; and be free from discrimination for exercising these rights.</p>
-  <p><strong>We do not "sell" your personal information, and we do not "share" it for cross-context behavioral advertising</strong>, as those terms are defined under the CCPA/CPRA. The categories of personal information we collect and our purposes are described in Sections 2–4; the categories of recipients are described in Section 6. To exercise your rights, contact <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>. You may use an authorized agent to submit a request on your behalf, subject to verification.</p>
+  <h2 id="rights">13. Your rights &amp; choices</h2>
+  <p>Depending on where you live, you may have some or all of these rights:</p>
+  <ul>
+    <li><strong>Access / a copy.</strong> Owners can download their whole account any time from <strong>Settings &rarr; Your data &rarr; Download everything I have</strong>. It is a spreadsheet file with every record, plus links to job photos, receipt photos, and documents that work for 7 days. Anyone can also ask us for a copy.</li>
+    <li><strong>Correction.</strong> Fix wrong information. Owners and workers can edit much of it in the app.</li>
+    <li><strong>Deletion.</strong> Owners can delete their account in the app (<a href="#retention">Section 11</a>). Workers, or anyone who prefers, can email us.</li>
+    <li><strong>Objection / restriction.</strong> Ask us to stop or limit certain uses.</li>
+    <li><strong>Withdraw consent.</strong> For example, turn off location permission for the site in your browser.</li>
+  </ul>
+  <p>To make a request, email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>. We will confirm it is you and answer within the time the law requires. Workers: some requests are for the owner who controls your data, and we will help route them. We will not treat you differently for using your privacy rights.</p>
 
-  <h2 id="gdpr">13. EU/UK/EEA rights (GDPR)</h2>
-  <p>If you are in the European Economic Area, the United Kingdom, or Switzerland, you have the rights described in Section 11 under the GDPR/UK GDPR, and you have the right to lodge a complaint with your local data-protection authority. Our legal bases for processing are set out in Section 5. Where we transfer data internationally, we rely on appropriate safeguards such as Standard Contractual Clauses. For any GDPR request, contact <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>.</p>
+  <h2 id="ccpa">14. California privacy rights (CCPA/CPRA)</h2>
+  <p>If you live in California, you have the right to know what personal information we collect and how we use and disclose it; to request access to it and deletion of it; to correct it; and to be free from discrimination for using these rights.</p>
+  <p><strong>We do not "sell" your personal information, and we do not "share" it for cross-context behavioral advertising</strong>, as the CCPA/CPRA defines those terms. What we collect and why is in Sections 2 to 4. Who receives it is in Section 7. To use your rights, email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>. You may use an authorized agent, subject to verification.</p>
 
-  <h2 id="cookies">14. Cookies &amp; analytics</h2>
-  <p>JobTally uses cookies and similar technologies that are <strong>strictly necessary</strong> to run the app — chiefly to keep you signed in (authentication/session) and to keep the Service secure. We may use a limited amount of privacy-respecting, aggregate analytics and error monitoring to understand performance and fix bugs. We do not use advertising cookies or third-party ad trackers. You can control cookies through your browser settings, though disabling essential cookies may prevent you from signing in.</p>
+  <h2 id="gdpr">15. EU/UK/EEA rights (GDPR)</h2>
+  <p>If you are in the European Economic Area, the United Kingdom, or Switzerland, you have the rights in Section 13 under the GDPR or UK GDPR, and the right to complain to your local data-protection authority. Our legal bases are in Section 5. JobTally is built for U.S. contractors, and your data is stored in the United States (Section 18). For any GDPR request, email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a>.</p>
 
-  <h2 id="children">15. Children</h2>
-  <p>JobTally is a business tool and is <strong>not intended for anyone under 18</strong>. We do not knowingly collect personal information from children under 18. If you believe a minor has provided us information, contact <a href="mailto:support@getjobtally.com">support@getjobtally.com</a> and we will delete it.</p>
+  <h2 id="cookies">16. Cookies, browser storage &amp; usage data</h2>
+  <p><strong>No ad trackers and no outside analytics.</strong> The site and app load no third-party scripts. We do not use advertising cookies.</p>
+  <p>The app keeps a few things in your browser's own storage:</p>
+  <ul>
+    <li>Your sign-in, so you stay signed in. If you uncheck "stay signed in" when you log in, it is cleared when you close the app.</li>
+    <li>A random ID for your browser, used with the usage events in <a href="#collect">Section 2g</a>.</li>
+    <li>The link tags from your first visit, if any, for signup source.</li>
+    <li>A few settings, such as whether the assistant reads answers out loud.</li>
+  </ul>
+  <p>You can clear these in your browser settings. Clearing your sign-in will sign you out.</p>
 
-  <h2 id="intl">16. International users</h2>
-  <p>JobTally is operated from the United States, and our infrastructure providers may process and store data in the U.S. and other countries. By using the Service, you understand that your information may be transferred to and processed in the United States, which may have data-protection laws different from those in your country.</p>
+  <h2 id="children">17. Children</h2>
+  <p>JobTally is a business tool and is <strong>not for anyone under 18</strong>. We do not knowingly collect personal information from anyone under 18. If you believe a minor has given us information, email <a href="mailto:support@getjobtally.com">support@getjobtally.com</a> and we will delete it.</p>
 
-  <h2 id="changes">17. Changes to this policy</h2>
-  <p>We may update this Privacy Policy from time to time. When we do, we will revise the "Last updated" date above and, for material changes, provide additional notice (such as an in-app notice or email). Your continued use of the Service after an update means you accept the revised Policy.</p>
+  <h2 id="intl">18. Where your data is stored</h2>
+  <p>JobTally is run from the United States. Your account data and files are stored with Supabase on Amazon Web Services in the United States (Northern California region). If you use the Service from outside the United States, your information is transferred to and handled in the United States, whose data-protection laws may differ from yours.</p>
 
-  <h2 id="contact">18. Contact us</h2>
+  <h2 id="changes">19. Changes to this policy</h2>
+  <p>We may update this Privacy Policy. When we do, we will change the "Last updated" date above, and for major changes we will give extra notice, such as in the app or by email. If you keep using the Service after an update, you accept the updated Policy.</p>
+
+  <h2 id="contact">20. Contact us</h2>
   <p>Questions, requests, or complaints about privacy? Reach us at:</p>
   <p>
     <strong>John Paul Kobrossi d/b/a JobTally</strong><br>
@@ -302,7 +374,7 @@
   </p>
 
   <footer class="doc">
-    <p>JobTally &middot; getjobtally.com &middot; jobtallyapp.com &middot; Effective July 5, 2026.</p>
+    <p>JobTally &middot; getjobtally.com &middot; Effective July 5, 2026 &middot; Last updated September 13, 2026.</p>
     <p>This document is provided for general informational purposes and is not legal advice. Consult a licensed attorney to confirm it meets your specific legal obligations.</p>
   </footer>
 

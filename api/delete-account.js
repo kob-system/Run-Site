@@ -12,20 +12,30 @@
 //      body — you can only ever delete YOURSELF.
 //   2. Typed confirmation. The body must carry the account's own email
 //      exactly. A misrouted or replayed POST cannot destroy an account.
-//   3. Owners take their tenant with them; a worker deletes only themselves and
+//   3. Billing stops FIRST. Any live Stripe subscription is canceled before a
+//      single row is touched. If Stripe will not confirm it is stopped, NOTHING
+//      is deleted: a deleted account that keeps getting charged every month is
+//      the worst outcome this endpoint can produce, and the customer would have
+//      no login left to cancel it from.
+//   4. Owners take their tenant with them; a worker deletes only themselves and
 //      is unlinked from their boss, whose job records must survive — those hours
 //      are the boss's payroll and tax history, not the worker's to erase.
-//   4. Storage first, then rows, then the auth user LAST. If anything fails
+//   5. Storage first, then rows, then the auth user LAST. If anything fails
 //      part-way the account still exists and can be retried; the alternative
 //      ordering strands files nobody can ever reach or authenticate to.
-//   5. Rate limited, and JP is alerted on every deletion — a churned customer
+//   6. Rate limited, and JP is alerted on every deletion — a churned customer
 //      is something he needs to know about the same day, not at month end.
 import { alertOwner } from './_alert'
 
 const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY
 
 const svc = () => ({ apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` })
+
+// Stripe subscription statuses that can never charge again. Everything else
+// (active, trialing, past_due, unpaid, incomplete, paused) can.
+const DEAD = ['canceled', 'incomplete_expired']
 
 async function getUser(req) {
   const auth = req.headers.authorization || ''
@@ -86,6 +96,84 @@ async function deleteStorage(uid) {
   } catch { return 0 }
 }
 
+// ── Billing ─────────────────────────────────────────────────────────────────
+// No Stripe SDK, same as create-checkout-session.js and stripe-webhook.js:
+// REST via fetch with the secret key.
+async function stripeCall(method, path) {
+  const r = await fetch('https://api.stripe.com/v1/' + path, {
+    method,
+    headers: { Authorization: 'Bearer ' + STRIPE_SECRET },
+  })
+  let data = null
+  try { data = await r.json() } catch { /* empty body */ }
+  return { ok: r.ok, status: r.status, data }
+}
+
+const stripeErrCode = (res) => (res && res.data && res.data.error && res.data.error.code) || null
+
+class BillingError extends Error {}
+
+// Cancel every subscription that could still charge this account. Returns the
+// ids it canceled. THROWS (BillingError) whenever it cannot be sure billing is
+// stopped, and the caller then deletes nothing.
+//
+// Two sources, because either alone can miss one:
+//   - our subscriptions row (stripe_subscription_id), written by the webhook
+//   - Stripe's own list for the row's customer, which also catches a second
+//     live subscription the row never recorded (e.g. a double checkout)
+// A 'comp' row has no Stripe ids and costs nothing to skip.
+export async function cancelBilling(uid) {
+  let rows
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/subscriptions?owner_id=eq.${encodeURIComponent(uid)}&select=stripe_subscription_id,stripe_customer_id,status`,
+      { headers: svc() }
+    )
+    if (!r.ok) throw new Error('status ' + r.status)
+    rows = await r.json()
+  } catch (e) {
+    // "Couldn't read it" is not "there isn't one". Fail closed.
+    throw new BillingError('subscriptions read failed: ' + ((e && e.message) || e))
+  }
+  const row = Array.isArray(rows) ? rows[0] : null
+  if (!row) return []
+
+  const ids = new Set()
+  if (row.stripe_subscription_id && !DEAD.includes(row.status)) ids.add(row.stripe_subscription_id)
+
+  if (!STRIPE_SECRET) {
+    // Nothing live on record: nothing to cancel, carry on. Something live on
+    // record and no way to reach Stripe: refuse.
+    if (ids.size) throw new BillingError('STRIPE_SECRET_KEY is not set, so a live subscription cannot be canceled')
+    return []
+  }
+
+  if (row.stripe_customer_id) {
+    const list = await stripeCall('GET', `subscriptions?customer=${encodeURIComponent(row.stripe_customer_id)}&status=all&limit=100`)
+    if (list.ok) {
+      const subs = (list.data && Array.isArray(list.data.data)) ? list.data.data : []
+      for (const s of subs) if (s && s.id && !DEAD.includes(s.status)) ids.add(s.id)
+    } else if (stripeErrCode(list) !== 'resource_missing') {
+      // The customer being gone means there is nothing left to bill. Anything
+      // else means we could not see, so we cannot say it is stopped.
+      throw new BillingError(`Stripe would not list subscriptions for ${row.stripe_customer_id} (HTTP ${list.status})`)
+    }
+  }
+
+  const canceled = []
+  for (const id of ids) {
+    const del = await stripeCall('DELETE', `subscriptions/${encodeURIComponent(id)}`)
+    if (del.ok) { canceled.push(id); continue }
+    // Refused. Believe Stripe's record of the subscription, not the error
+    // text: already canceled, or gone entirely, both mean nothing will charge.
+    const chk = await stripeCall('GET', `subscriptions/${encodeURIComponent(id)}`)
+    if (chk.ok && chk.data && DEAD.includes(chk.data.status)) continue
+    if (!chk.ok && stripeErrCode(chk) === 'resource_missing') continue
+    throw new BillingError(`Stripe refused to cancel ${id} (HTTP ${del.status}${stripeErrCode(del) ? ' ' + stripeErrCode(del) : ''})`)
+  }
+  return canceled
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Not configured' })
@@ -101,6 +189,23 @@ export default async function handler(req, res) {
   const typed = typeof (req.body || {}).confirmEmail === 'string' ? req.body.confirmEmail.trim() : ''
   if (!typed || !user.email || typed.toLowerCase() !== String(user.email).toLowerCase()) {
     return res.status(400).json({ error: 'Type your account email exactly to confirm.' })
+  }
+
+  // Billing before anything else. Run for every account, not just owners: a
+  // worker has no subscriptions row and this costs one read.
+  let billingCanceled = []
+  try {
+    billingCanceled = await cancelBilling(user.id)
+  } catch (err) {
+    const why = (err && err.message) || String(err)
+    console.error('delete-account: billing cancel failed, nothing deleted:', why)
+    await alertOwner('delete-account', 'Account delete STOPPED: could not cancel billing', {
+      user: user.id, email: user.email, error: why,
+      impact: 'Nothing was deleted and they may still be billed. Cancel the subscription in Stripe by hand, then they can delete again.',
+    })
+    return res.status(502).json({
+      error: "We couldn't stop your billing, so nothing was deleted. Email support@getjobtally.com and we'll cancel it and close the account.",
+    })
   }
 
   try {
@@ -178,6 +283,7 @@ export default async function handler(req, res) {
       console.error('delete-account: auth user delete failed', del.status, body)
       await alertOwner('delete-account', 'Account data was deleted but the LOGIN survived', {
         user: user.id, email: user.email, status: del.status,
+        billing_canceled: billingCanceled.length,
         impact: 'Delete this user by hand in Supabase → Authentication. They can still sign in to an empty account.',
       })
       return res.status(500).json({ error: 'Could not finish deleting your account. Email support@getjobtally.com — nothing is lost.' })
@@ -188,6 +294,7 @@ export default async function handler(req, res) {
       company: (prof && prof.company_name) || '',
       role: isOwner ? 'owner' : 'worker',
       files_removed: filesDeleted,
+      billing_canceled: billingCanceled.length,
     })
 
     return res.json({ ok: true })
@@ -195,6 +302,7 @@ export default async function handler(req, res) {
     console.error('delete-account error:', err)
     await alertOwner('delete-account', 'Account deletion threw', {
       user: user.id, error: (err && err.message) || String(err),
+      billing_canceled: billingCanceled.length,
     })
     return res.status(500).json({ error: 'Could not delete your account. Email support@getjobtally.com.' })
   }
