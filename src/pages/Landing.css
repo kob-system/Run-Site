@@ -309,15 +309,6 @@
 @media (prefers-reduced-motion: reduce) { .ld-scroll-cue-line { animation: none; } }
 @media (max-width: 640px) { .ld-scroll-cue { display: none; } }
 
-/* ── Ticker ─────────────────────────────────────────────────────────── */
-.ld-ticker { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(255,240,222,0.015); overflow: hidden; padding: 18px 0; }
-.ld-ticker-track { display: flex; width: max-content; gap: 44px; animation: ld-marquee 34s linear infinite; }
-@keyframes ld-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-@media (prefers-reduced-motion: reduce) { .ld-ticker-track { animation: none; } }
-.ld-ticker-item { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; color: var(--ink-mute); white-space: nowrap; display: flex; align-items: center; gap: 44px; }
-.ld-ticker-item b { color: var(--ink-dim); font-weight: 600; }
-.ld-ticker-item::after { content: '/'; color: var(--ember); opacity: 0.5; margin-left: 44px; }
-
 /* ── How this works ─────────────────────────────────────────────────── */
 .ld-story { }
 .ld-process { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 44px; }
@@ -403,8 +394,26 @@
 .ld-portfolio-grid { list-style: none; padding: 0; margin: 44px 0 0; display: grid; grid-template-columns: 1fr; gap: 14px; text-align: left; }
 @media (min-width: 640px) { .ld-portfolio-grid { grid-template-columns: 1fr 1fr; } }
 @media (min-width: 960px) { .ld-portfolio-grid { grid-template-columns: repeat(3, 1fr); } }
-.ld-portfolio-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; transition: transform .18s ease, border-color .18s ease, background .18s ease; }
-.ld-portfolio-card:hover { transform: translateY(-3px); border-color: var(--line-strong); background: var(--panel-hover); }
+.ld-portfolio-card {
+  position: relative;
+  background: rgba(52, 38, 26, 0.4);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 40px -24px rgba(0,0,0,0.55);
+  transition: transform .18s ease, border-color .18s ease, background .18s ease, box-shadow .18s ease;
+}
+.ld-portfolio-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 45%);
+  pointer-events: none;
+}
+.ld-portfolio-card:hover { transform: translateY(-3px); border-color: var(--line-strong); background: rgba(66, 48, 32, 0.55); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 24px 50px -22px rgba(0,0,0,0.6); }
 .ld-portfolio-card a, .ld-portfolio-static { display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit; }
 .ld-portfolio-logo { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 9px; color: var(--on-ember); font-family: var(--font-mono); font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
 .ld-portfolio-logo--green { background: var(--green); color: #06231a; }

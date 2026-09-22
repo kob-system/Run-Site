@@ -189,7 +189,7 @@ export default function Landing() {
         <a className="ld-logo" href="/">
           <span className="ld-logo-mark" aria-hidden="true" />
           KOBROSSI SYSTEMS
-          <span className="ld-logo-sub">&#47;&#47; menands, ny</span>
+          <span className="ld-logo-sub">&#47;&#47; capital region, ny</span>
         </a>
         <nav>
           <a className="ld-cta-sm" href={CONTACT_MAILTO} onClick={cta('topbar')}>Get in touch</a>
@@ -203,12 +203,12 @@ export default function Landing() {
           <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Civil engineer, systems builder &middot; Capital Region, NY</div>
           <h1>Every business has a leak. I find it, then I fix it.</h1>
           <p className="ld-sub">
-            I'm not just a web guy. I look at how you actually run, find what's costing you
-            time or money, and build the exact fix: a website, a CRM, custom software, or
-            something nobody else has built yet.
+            I'm a business consultant for Capital Region businesses. I look at how you
+            actually run, find what's costing you time or money, and build the exact
+            fix for it.
           </p>
           <ul className="ld-trust">
-            <li>Local, Capital Region, will travel up to an hour</li>
+            <li>Based in the Capital Region, meetings in person or online</li>
             <li>7 businesses fixed so far</li>
             <li>Talk to me directly, not a call center</li>
           </ul>
@@ -220,15 +220,6 @@ export default function Landing() {
         </div>
         <div className="ld-scroll-cue"><span className="ld-scroll-cue-line" />Scroll</div>
       </section>
-
-      {/* Ticker — quick credibility read before anyone scrolls to the grid */}
-      <div className="ld-ticker" aria-hidden="true">
-        <div className="ld-ticker-track">
-          {[...PORTFOLIO, ...PORTFOLIO].map((p, i) => (
-            <span className="ld-ticker-item" key={`${p.name}-${i}`}><b>{p.name}</b></span>
-          ))}
-        </div>
-      </div>
 
       {/* How this works — the consultant framing as a 3-step blueprint strip */}
       <Reveal as="section" className="ld-story">
@@ -257,9 +248,10 @@ export default function Landing() {
             <span className="ld-kicker-label">Why construction</span>
             <h2>Built by someone who's also on the job site.</h2>
             <p>
-              I'm a civil engineering student, so estimates, crews, schedules, and change
-              orders aren't a foreign language I'm reading off a brief. <strong>That's the
-              lean, not the limit.</strong>
+              I'm a last-year civil engineering student who's worked inspection on New York
+              State highway and bridge construction, so estimates, crews, schedules, and
+              change orders aren't a foreign language I'm reading off a brief. <strong>That's
+              the lean, not the limit.</strong>
             </p>
             <ul className="ld-niche-list">
               <li>Job costing that matches how a bid actually gets built</li>
