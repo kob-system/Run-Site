@@ -387,6 +387,15 @@
 .ld-tier-price { font-family: var(--font-mono); color: var(--tier-c); font-weight: 600; font-size: 22px; margin-bottom: 12px; }
 .ld-tier-forwho { font-size: 13px; font-weight: 600; color: var(--ink-mute); margin-bottom: 14px; line-height: 1.5; }
 .ld-tier-card p { font-size: 14.5px; color: var(--ink-dim); line-height: 1.6; }
+.ld-tier-note {
+  margin-top: 14px !important;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px !important;
+  color: var(--tier-c) !important;
+  line-height: 1.5 !important;
+}
 .ld-how-cta { margin-top: 40px; text-align: center; }
 
 /* ── Portfolio ──────────────────────────────────────────────────────── */
@@ -444,6 +453,23 @@
 .ld-final h2 { position: relative; }
 .ld-final p { position: relative; color: var(--ink-dim); font-size: 15.5px; max-width: 440px; margin: 14px auto 0; line-height: 1.6; }
 .ld-final .ld-cta-row { position: relative; }
+
+.ld-final-split { position: relative; display: flex; align-items: center; gap: 24px; margin-top: 34px; }
+.ld-final-form { flex: 1 1 320px; display: flex; justify-content: center; }
+.ld-final-form .lf { margin: 0 auto; }
+.ld-final-or { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; align-self: stretch; }
+.ld-final-or::before, .ld-final-or::after { content: ''; flex: 1; width: 1px; background: var(--line); }
+.ld-final-or span { font-family: var(--font-mono); font-size: 12px; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.1em; }
+.ld-final-direct { flex: 1 1 220px; text-align: left; }
+.ld-final-direct .ld-cta-row { margin-top: 0; }
+
+@media (max-width: 760px) {
+  .ld-final-split { flex-direction: column; }
+  .ld-final-or { flex-direction: row; align-self: stretch; width: 100%; }
+  .ld-final-or::before, .ld-final-or::after { height: 1px; width: auto; }
+  .ld-final-direct { text-align: center; }
+  .ld-final-direct .ld-cta-row { justify-content: center; }
+}
 
 /* ── Footer ─────────────────────────────────────────────────────────── */
 .ld-footer { border-top: 1px solid var(--line); padding: 28px 20px; text-align: center; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-mute); }

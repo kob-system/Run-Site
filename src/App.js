@@ -23,6 +23,7 @@ const WorkerDashboard = React.lazy(() => import('./pages/WorkerDashboard'))
 const Billing = React.lazy(() => import('./pages/Billing'))
 const Remodelers = React.lazy(() => import('./pages/Remodelers'))
 const Landing = React.lazy(() => import('./pages/Landing'))
+const Switch = React.lazy(() => import('./pages/Switch'))
 const FounderMetrics = React.lazy(() => import('./pages/FounderMetrics'))
 // Public, self-contained, and lazily loaded like every other screen — the demo's
 // sample data and CSS must never ride in the bundle a paying customer downloads.
@@ -337,6 +338,12 @@ export default function App() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/'
   if (path === '/remodelers') {
     return <Screen><Remodelers /></Screen>
+  }
+  // Meta-ad landing page for the GHL-takeover offer (Hormozi "Scale or Fail"
+  // lesson: one offer, one dedicated page per traffic source, not the
+  // 10-section homepage). Same public/no-auth treatment as /remodelers.
+  if (path === '/switch') {
+    return <Screen><Switch /></Screen>
   }
   // /demo is public and stateless — it holds its own sample data and never
   // touches Supabase, so a signed-in owner can open it too (to show somebody)

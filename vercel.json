@@ -10,6 +10,11 @@
       "destination": "/remodelers?ref=fb&utm_source=facebook&utm_medium=group&utm_campaign=fb-groups",
       "permanent": false
     },
+    {
+      "source": "/ghl",
+      "destination": "/switch?utm_source=meta&utm_medium=paid-social&utm_campaign=ghl-takeover",
+      "permanent": false
+    },
     { "source": "/job-costing-app-for-contractors", "destination": "/", "permanent": true },
     { "source": "/job-costing-app-for-contractors/", "destination": "/", "permanent": true },
     { "source": "/contractor-profit-tracking", "destination": "/", "permanent": true },

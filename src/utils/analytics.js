@@ -39,6 +39,8 @@ export const EV = {
   TESTIMONIAL_PROMPTED: 'testimonial_prompted',
   TESTIMONIAL_SUBMITTED: 'testimonial_submitted',
   TESTIMONIAL_DISMISSED: 'testimonial_dismissed',
+  LEAD_SUBMITTED: 'lead_submitted',
+  LEAD_FAILED: 'lead_failed',
 }
 
 // Same sanitizer contract as utils/attribution.js: strip control chars,

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import './Landing.css'
 import { track, trackOnce, EV } from '../utils/analytics'
+import LeadForm from '../components/LeadForm'
 
 // Public landing page at / — what a stranger sees before they have an account.
 // Rendered before the Login screen (App.js) for logged-out visitors.
@@ -50,6 +51,7 @@ const TIERS = [
     price: '$1,000',
     forWho: "You've got nothing online worth finding",
     body: 'A real website built to be found, plus the Google Business Profile and local SEO work that gets you showing up when someone actually searches.',
+    note: "Half down, half when it's live. Unlimited revisions until you're happy with it, before that second half is ever due.",
   },
   {
     n: '02',
@@ -58,6 +60,7 @@ const TIERS = [
     price: '$2,000',
     forWho: "You've got a site or a start, but leads still slip",
     body: 'Everything in the Starter Kit, plus the CRM set up underneath it: the pipeline, the missed-call texting, the review requests, the follow-up that makes sure a lead never goes cold.',
+    note: "Half down, half when it's live. Unlimited revisions until you're happy with it, before that second half is ever due.",
   },
   {
     n: '03',
@@ -66,6 +69,7 @@ const TIERS = [
     price: 'Quoted after we talk',
     forWho: "You know something's off, you just don't know what",
     body: "Bring me the problem, not the fix. I'll walk through your business and show you exactly where you're losing money, where things aren't organized, and where jobs aren't tracked the way they should be. Then I figure out the real solution, whether that's a CRM, custom software, or something new, and price it for the job.",
+    note: 'A full custom build runs $10,000–$15,000 scoped from scratch. This prices exactly what your business needs, not the whole thing.',
   },
 ]
 
@@ -276,7 +280,7 @@ export default function Landing() {
         <div className="ld-inner">
           <span className="ld-kicker-label">Pricing</span>
           <h2>Three ways to start</h2>
-          <p className="ld-kicker">Pick the one that matches where you're at, not a bundle you're pushed into.</p>
+          <p className="ld-kicker">Pick the one that matches where you're at, not a bundle you're pushed into. I take on 3 new builds a month, so whichever one you pick gets real attention, not a template.</p>
           <div className="ld-tier-grid">
             {TIERS.map((t) => (
               <div className={`ld-tier-card ld-corners ld-tier-card--${t.accent}`} key={t.n}>
@@ -285,6 +289,7 @@ export default function Landing() {
                 <div className="ld-tier-price">{t.price}</div>
                 <div className="ld-tier-forwho">{t.forWho}</div>
                 <p>{t.body}</p>
+                {t.note && <p className="ld-tier-note">{t.note}</p>}
               </div>
             ))}
           </div>
@@ -362,11 +367,21 @@ export default function Landing() {
           <div className="ld-final-glow" aria-hidden="true" />
           <h2>Tell me what's broken.</h2>
           <p>I'll tell you straight whether I can fix it and what it's worth doing.</p>
-          <div className="ld-cta-row ld-cta-row--center">
-            <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email me</a>
-            <a className="ld-cta ld-cta-call" href={CONTACT_PHONE_HREF} onClick={cta('final-call')}>Call me</a>
+          <div className="ld-final-split">
+            <div className="ld-final-form">
+              <LeadForm source="homepage-final" ctaLabel="Tell me the leak" />
+            </div>
+            <div className="ld-final-or">
+              <span>or</span>
+            </div>
+            <div className="ld-final-direct">
+              <div className="ld-cta-row">
+                <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email me</a>
+                <a className="ld-cta ld-cta-call" href={CONTACT_PHONE_HREF} onClick={cta('final-call')}>Call me</a>
+              </div>
+              <div className="ld-cta-note">Or text {CONTACT_PHONE_DISPLAY}</div>
+            </div>
           </div>
-          <div className="ld-cta-note">Or text {CONTACT_PHONE_DISPLAY}</div>
         </div>
       </Reveal>
 
