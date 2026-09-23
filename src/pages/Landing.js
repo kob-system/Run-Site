@@ -39,7 +39,6 @@ import LeadForm from '../components/LeadForm'
 // session that already exists — this file only changes what a logged-out
 // stranger hitting the bare root sees.
 const CONTACT_EMAIL = 'kobrossisystems@gmail.com'
-const CONTACT_PHONE_DISPLAY = '(518) 608-9344'
 const CONTACT_PHONE_HREF = 'tel:+15186089344'
 const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Let's talk about my business")}`
 
@@ -51,7 +50,6 @@ const TIERS = [
     price: '$1,000',
     forWho: "You've got nothing online worth finding",
     body: 'A real website built to be found, plus the Google Business Profile and local SEO work that gets you showing up when someone actually searches.',
-    note: "Half down, half when it's live. Unlimited revisions until you're happy with it, before that second half is ever due.",
   },
   {
     n: '02',
@@ -60,7 +58,6 @@ const TIERS = [
     price: '$2,000',
     forWho: "You've got a site or a start, but leads still slip",
     body: 'Everything in the Starter Kit, plus the CRM set up underneath it: the pipeline, the missed-call texting, the review requests, the follow-up that makes sure a lead never goes cold.',
-    note: "Half down, half when it's live. Unlimited revisions until you're happy with it, before that second half is ever due.",
   },
   {
     n: '03',
@@ -68,8 +65,8 @@ const TIERS = [
     name: 'The Diagnostic',
     price: 'Quoted after we talk',
     forWho: "You know something's off, you just don't know what",
-    body: "Bring me the problem, not the fix. I'll walk through your business and show you exactly where you're losing money, where things aren't organized, and where jobs aren't tracked the way they should be. Then I figure out the real solution, whether that's a CRM, custom software, or something new, and price it for the job.",
-    note: 'A full custom build runs $10,000–$15,000 scoped from scratch. This prices exactly what your business needs, not the whole thing.',
+    body: "Bring me the problem, not the fix. I'll walk through your business and show you exactly where you're losing money, where things aren't organized, and where jobs aren't tracked the way they should be. Then I figure out the real solution, whether that's a CRM, a client portal, custom software, or making your data actually usable, and price it for the job.",
+    note: 'Full custom work starts around $10,000 and scales with what you actually need. Priced for the job, not a rate card.',
   },
 ]
 
@@ -80,7 +77,8 @@ const PORTFOLIO = [
   { name: 'Half Moon Smoke World', domain: 'halfmoonsmokeworld.com' },
   { name: 'USA Kitchen & Cabinets', domain: 'usakitchencabinets518.com' },
   { name: 'All Phase Maintenance', domain: 'allphasemaintenance.com' },
-  { name: 'D&K Tax Services', domain: null, note: 'In build' },
+  { name: 'D&K Tax Services', domain: 'dktaxservice.com' },
+  { name: 'Job & Crew Tracker', domain: null, href: '/demo', note: 'My own build — click through the demo, live builds available on request' },
 ]
 
 // Self-select by stage rather than a generic Q&A — JP's own framing ("it
@@ -89,30 +87,33 @@ const PORTFOLIO = [
 const STAGES = [
   {
     n: '1',
+    tier: 'Offer 1 — The Online Starter Kit',
     accent: 'green',
     q: "I don't have anything online",
-    a: 'Start with the Online Starter Kit. Get found first, everything else comes after that.',
+    a: 'Get found first, everything else comes after that.',
   },
   {
     n: '2',
+    tier: 'Offer 2 — The Follow-Up System',
     accent: 'orange',
     q: "I've got a website or some presence, but it's not really doing anything for me",
-    a: "That's the Follow-Up System. The site usually isn't the real problem, leads slipping through the cracks is.",
+    a: "The site usually isn't the real problem. Leads slipping through the cracks is.",
   },
   {
     n: '3',
+    tier: 'Offer 3 — The Diagnostic',
     accent: 'amber',
     q: "I don't know exactly what's wrong, I just know something's off",
-    a: "That's the Diagnostic. Tell me how you run your business and I'll find the leak myself.",
+    a: "Tell me how you run your business and I'll find the leak myself.",
   },
 ]
 
 // The consultant-framing "how this works" walk, now a 3-step blueprint strip
 // instead of a paragraph block.
 const PROCESS = [
-  { n: 'STEP — 01', h: 'Walk the business', p: "I look at how you actually run, not a checklist. Site, phone, the way a lead turns into a job, or doesn't." },
-  { n: 'STEP — 02', h: 'Find the leak', p: 'One thing is usually costing you the most, whether that\'s time, money, or jobs going to someone else.' },
-  { n: 'STEP — 03', h: 'Build the fix', p: 'A website, a CRM and texting system, or custom software. Whatever actually closes the leak, priced on the job.' },
+  { n: 'STEP — 01', h: 'Walk the business', p: 'How you actually run, not a checklist.' },
+  { n: 'STEP — 02', h: 'Find the leak', p: 'The one thing costing you time, money, or jobs.' },
+  { n: 'STEP — 03', h: 'Build the fix', p: 'Site, CRM, or custom software, priced on the job.' },
 ]
 
 // Construction leans first (JP's own background, BS CET) but the panel next
@@ -207,20 +208,13 @@ export default function Landing() {
           <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Civil engineer, systems builder &middot; Capital Region, NY</div>
           <h1>Every business has a leak. I find it, then I fix it.</h1>
           <p className="ld-sub">
-            I'm a business consultant for Capital Region businesses. I look at how you
-            actually run, find what's costing you time or money, and build the exact
-            fix for it.
+            Two years and seven businesses in, still just me on the phone. No account
+            managers, no call center, no ticket number.
           </p>
-          <ul className="ld-trust">
-            <li>Based in the Capital Region, meetings in person or online</li>
-            <li>7 businesses fixed so far</li>
-            <li>Talk to me directly, not a call center</li>
-          </ul>
           <div className="ld-cta-row">
             <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email me</a>
             <a className="ld-cta ld-cta-call" href={CONTACT_PHONE_HREF} onClick={cta('hero-call')}>Call me</a>
           </div>
-          <div className="ld-cta-note">Or text {CONTACT_PHONE_DISPLAY}, same number either way</div>
         </div>
         <div className="ld-scroll-cue"><span className="ld-scroll-cue-line" />Scroll</div>
       </section>
@@ -252,10 +246,10 @@ export default function Landing() {
             <span className="ld-kicker-label">Why construction</span>
             <h2>Built by someone who's also on the job site.</h2>
             <p>
-              I'm a last-year civil engineering student who's worked inspection on New York
-              State highway and bridge construction, so estimates, crews, schedules, and
-              change orders aren't a foreign language I'm reading off a brief. <strong>That's
-              the lean, not the limit.</strong>
+              I've worked NY State highway and bridge inspection, so job costing, crews, and
+              change orders aren't foreign to me. <strong>That's the lean, not the limit.</strong> I
+              also built <a href="/demo" className="ld-inline-link">getjobtally.com</a>, a
+              job-tracking app for contractors, from scratch.
             </p>
             <ul className="ld-niche-list">
               <li>Job costing that matches how a bid actually gets built</li>
@@ -293,6 +287,7 @@ export default function Landing() {
               </div>
             ))}
           </div>
+          <p className="ld-tiers-guarantee">Tiers 1 and 2: half down, half when it's live, unlimited revisions until it's right, before that second half is ever due.</p>
           <div className="ld-how-cta">
             <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('tiers')}>Tell me the problem</a>
           </div>
@@ -313,26 +308,21 @@ export default function Landing() {
                 </span>
               )
               const num = `PROJECT — ${String(i + 1).padStart(2, '0')}`
+              const text = (
+                <span className="ld-portfolio-text">
+                  <span className="ld-portfolio-num">{num}</span>
+                  <span className="ld-portfolio-name">{p.name}</span>
+                  <span className="ld-portfolio-domain">{p.domain || p.note}</span>
+                </span>
+              )
               return (
                 <li className="ld-portfolio-card" key={p.name}>
-                  {p.domain ? (
-                    <a href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">
-                      {avatar}
-                      <span className="ld-portfolio-text">
-                        <span className="ld-portfolio-num">{num}</span>
-                        <span className="ld-portfolio-name">{p.name}</span>
-                        <span className="ld-portfolio-domain">{p.domain}</span>
-                      </span>
-                    </a>
+                  {p.href ? (
+                    <a href={p.href}>{avatar}{text}</a>
+                  ) : p.domain ? (
+                    <a href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">{avatar}{text}</a>
                   ) : (
-                    <div className="ld-portfolio-static">
-                      {avatar}
-                      <span className="ld-portfolio-text">
-                        <span className="ld-portfolio-num">{num}</span>
-                        <span className="ld-portfolio-name">{p.name}</span>
-                        <span className="ld-portfolio-domain">{p.note}</span>
-                      </span>
-                    </div>
+                    <div className="ld-portfolio-static">{avatar}{text}</div>
                   )}
                 </li>
               )
@@ -352,6 +342,7 @@ export default function Landing() {
               <div className={`ld-faq-item ld-faq-item--${s.accent}`} key={s.q}>
                 <div className="ld-faq-num">{s.n}</div>
                 <div>
+                  <span className="ld-faq-tier">{s.tier}</span>
                   <h3>"{s.q}"</h3>
                   <p>{s.a}</p>
                 </div>
@@ -379,7 +370,6 @@ export default function Landing() {
                 <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email me</a>
                 <a className="ld-cta ld-cta-call" href={CONTACT_PHONE_HREF} onClick={cta('final-call')}>Call me</a>
               </div>
-              <div className="ld-cta-note">Or text {CONTACT_PHONE_DISPLAY}</div>
             </div>
           </div>
         </div>

@@ -356,6 +356,8 @@
 .ld-niche .ld-kicker-label { text-align: left; }
 .ld-niche-copy p { color: var(--ink-dim); font-size: 16px; line-height: 1.7; margin-top: 18px; }
 .ld-niche-copy p strong { color: var(--ink); }
+.ld-inline-link { color: var(--ember); text-decoration: underline; text-decoration-color: rgba(255,138,66,0.4); text-underline-offset: 3px; }
+.ld-inline-link:hover { text-decoration-color: var(--ember); }
 .ld-niche-list { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 10px; }
 .ld-niche-list li { font-family: var(--font-mono); font-size: 13.5px; color: var(--ink-dim); padding-left: 22px; position: relative; }
 .ld-niche-list li::before { content: ''; position: absolute; left: 0; top: 7px; width: 8px; height: 8px; border: 1.5px solid var(--green); border-radius: 2px; transform: rotate(45deg); }
@@ -396,7 +398,8 @@
   color: var(--tier-c) !important;
   line-height: 1.5 !important;
 }
-.ld-how-cta { margin-top: 40px; text-align: center; }
+.ld-tiers-guarantee { font-family: var(--font-mono); font-size: 13px; color: var(--ink-mute); text-align: center; max-width: 520px; margin: 30px auto 0; line-height: 1.6; }
+.ld-how-cta { margin-top: 28px; text-align: center; }
 
 /* ── Portfolio ──────────────────────────────────────────────────────── */
 .ld-portfolio { text-align: center; }
@@ -443,6 +446,7 @@
 .ld-faq-item--orange { --faq-c: var(--orange); }
 .ld-faq-item--amber { --faq-c: var(--amber); }
 .ld-faq-num { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(255,240,222,0.04); border: 1px solid var(--line); color: var(--faq-c, var(--ember)); font-family: var(--font-mono); font-weight: 700; font-size: 13px; }
+.ld-faq-tier { display: block; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faq-c, var(--ember)); margin-bottom: 8px; }
 .ld-faq-item h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; font-style: italic; color: var(--ink); }
 .ld-faq-item p { font-size: 14.5px; color: var(--ink-dim); line-height: 1.55; }
 
