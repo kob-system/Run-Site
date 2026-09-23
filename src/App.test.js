@@ -245,12 +245,14 @@ test('the not-found page tells search engines not to index it', async () => {
   expect(tag.getAttribute('content')).toMatch(/noindex/)
 })
 
-test('/demo renders the public walkthrough without touching an account', async () => {
+test('/demo renders the public video walkthrough without touching an account', async () => {
   goTo('/demo')
   render(<App />)
-  expect(await screen.findByText(/Have a poke around/i, {}, ROUTE_LOAD)).toBeInTheDocument()
-  // The demo must be visibly a sample, so nobody mistakes it for their own data.
-  expect(screen.getByText(/SAMPLE/)).toBeInTheDocument()
+  expect(await screen.findByText(/See it before you touch it/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  // All three videos must be present: the intro plus both narrated walkthroughs.
+  expect(screen.getByText('The introduction')).toBeInTheDocument()
+  expect(screen.getByText('Your side')).toBeInTheDocument()
+  expect(screen.getByText("Your crew's side")).toBeInTheDocument()
 })
 
 test('a trailing slash still reaches the root landing page', async () => {

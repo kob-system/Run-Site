@@ -207,10 +207,6 @@ export default function Landing() {
         <div className="ld-hero-inner">
           <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Civil engineer, systems builder &middot; Capital Region, NY</div>
           <h1>Every business has a leak. I find it, then I fix it.</h1>
-          <p className="ld-sub">
-            Two years and seven businesses in, still just me on the phone. No account
-            managers, no call center, no ticket number.
-          </p>
           <div className="ld-cta-row">
             <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email me</a>
             <a className="ld-cta ld-cta-call" href={CONTACT_PHONE_HREF} onClick={cta('hero-call')}>Call me</a>
@@ -331,22 +327,24 @@ export default function Landing() {
         </div>
       </Reveal>
 
-      {/* Which one's you — self-select by stage */}
+      {/* Which one's you — self-select by stage. Each card is its own link,
+          not just a label, so picking the one that sounds like you actually
+          takes you to that offer instead of leaving you to scroll for it. */}
       <Reveal as="section" className="ld-faq">
         <div className="ld-inner">
-          <span className="ld-kicker-label">Start here</span>
+          <a className="ld-kicker-label ld-kicker-link" href="#tiers">Start here</a>
           <h2>Which one's you?</h2>
-          <p className="ld-kicker">Say the one that sounds like you and that's where you start.</p>
+          <p className="ld-kicker">Tap the one that sounds like you, it'll take you straight to that offer.</p>
           <div className="ld-faq-list">
             {STAGES.map((s) => (
-              <div className={`ld-faq-item ld-faq-item--${s.accent}`} key={s.q}>
+              <a className={`ld-faq-item ld-faq-item--${s.accent}`} href="#tiers" key={s.q} onClick={cta('faq-' + s.n)}>
                 <div className="ld-faq-num">{s.n}</div>
                 <div>
                   <span className="ld-faq-tier">{s.tier}</span>
                   <h3>"{s.q}"</h3>
                   <p>{s.a}</p>
                 </div>
-              </div>
+              </a>
             ))}
           </div>
         </div>
