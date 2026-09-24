@@ -56,8 +56,10 @@ const TIERS = [
     accent: 'orange',
     name: 'The Follow-Up System',
     price: '$2,000',
+    monthly: 'then from $197/mo to keep it running',
     forWho: "You've got a site or a start, but leads still slip",
-    body: 'Everything in the Starter Kit, plus the CRM set up underneath it: the pipeline, the missed-call texting, the review requests, the follow-up that makes sure a lead never goes cold.',
+    body: 'Everything in the Starter Kit, plus every missed call texted back, every customer asked for a review, and every lead in one list on your phone. Full breakdown below.',
+    link: { href: '#stack', label: "See everything that's in it" },
   },
   {
     n: '03',
@@ -68,6 +70,31 @@ const TIERS = [
     body: "Bring me the problem, not the fix. I'll walk through your business and show you exactly where you're losing money, where things aren't organized, and where jobs aren't tracked the way they should be. Then I figure out the real solution, whether that's a CRM, a client portal, custom software, or making your data actually usable, and price it for the job.",
     note: 'Full custom work starts around $10,000 and scales with what you actually need. Priced for the job, not a rate card.',
   },
+]
+
+// ── 2026-09-24: Hormozi pass ($100M Offers value stack + $100M Leads magnet
+// and referral ask). Council-checked before shipping: the monthly shows only
+// the founding rate ("from $197/mo") because JP hasn't ruled $200 vs $297 for
+// the full rate; the guarantee covers setup (what he controls), never a
+// result; review asks go to every customer (no gating, no incentive, FTC
+// 16 CFR 465); texts only to customers who opted in (A2P + NY GBL 399-z).
+// Stack values are what comparable services charge, labelled that way on
+// the page, not a promise of results.
+const STACK = [
+  { item: 'Every missed call gets a text back', detail: 'Asks what they need and gets them booked, while you keep working.', worth: 'Answering services run $300/mo' },
+  { item: 'Every customer asked for a review', detail: 'Sent after every visit, to every customer. Never filtered.', worth: 'Review tools run $299/mo and up' },
+  { item: 'Every review answered', detail: 'Drafted in your voice, good ones and bad ones.', worth: 'Included' },
+  { item: 'Google profile fixed', detail: 'Right phone, right hours, right category. Owner keeps the login.', worth: '$300 on its own' },
+  { item: 'A clean website', detail: 'Built to be found, same as the Starter Kit.', worth: '$1,000 on its own' },
+  { item: 'Yelp, Bing and Apple Maps listings', detail: 'Set up once, matching your Google profile.', worth: 'Included' },
+  { item: 'Past customers brought back', detail: 'Seasonal check-in texts to customers who opted in.', worth: 'Included' },
+  { item: 'One number a month', detail: 'Calls, missed calls, texts back, new reviews. One text, no dashboard to learn.', worth: 'Included' },
+]
+
+const BONUSES = [
+  'Your 3 most recent unanswered reviews, answered on day one',
+  'A counter card with a QR code that opens your Google review page',
+  'The Missed Call Check below, free, whether you buy or not',
 ]
 
 const PORTFOLIO = [
@@ -235,6 +262,27 @@ export default function Landing() {
         </div>
       </Reveal>
 
+      {/* Free lead magnet — $100M Leads: solve one narrow problem free, which
+          shows the bigger one. Costs JP ~20 minutes per request. */}
+      <Reveal as="section" className="ld-check" id="check">
+        <div className="ld-inner ld-check-grid">
+          <div>
+            <span className="ld-kicker-label">Free, no strings</span>
+            <h2>The Missed Call Check</h2>
+            <p className="ld-kicker">Most owners don't know how many calls they miss. I'll find out for you.</p>
+            <ol className="ld-check-list">
+              <li>I call your business after hours from a few different phones and hear exactly what a customer hears.</li>
+              <li>I check your Google profile: phone, hours, category, photos.</li>
+              <li>I count your reviews against the top 3 near you.</li>
+              <li>You get a one-page result. Keep it, fix it yourself, or have me do it.</li>
+            </ol>
+          </div>
+          <div className="ld-check-form">
+            <LeadForm source="missed-call-check" ctaLabel="Check my business" askMessage="Business name and the number customers call" />
+          </div>
+        </div>
+      </Reveal>
+
       {/* Niche — construction leans, doesn't lock. JP's explicit ask. */}
       <Reveal as="section" className="ld-niche">
         <div className="ld-inner ld-niche-grid">
@@ -277,16 +325,51 @@ export default function Landing() {
                 <div className="ld-tier-num">{t.n}</div>
                 <h3>{t.name}</h3>
                 <div className="ld-tier-price">{t.price}</div>
+                {t.monthly && <div className="ld-tier-monthly">{t.monthly}</div>}
                 <div className="ld-tier-forwho">{t.forWho}</div>
                 <p>{t.body}</p>
                 {t.note && <p className="ld-tier-note">{t.note}</p>}
+                {t.link && <a className="ld-inline-link ld-tier-link" href={t.link.href}>{t.link.label} &rarr;</a>}
               </div>
             ))}
           </div>
-          <p className="ld-tiers-guarantee">Tiers 1 and 2: half down, half when it's live, unlimited revisions until it's right, before that second half is ever due.</p>
+          <p className="ld-tiers-guarantee"><strong>Tiers 1 and 2: live in 14 days from the day you hand me your logins, or your setup fee comes back.</strong> Half down, half when it's live, unlimited revisions until it's right.</p>
           <div className="ld-how-cta">
             <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('tiers')}>Tell me the problem</a>
           </div>
+        </div>
+      </Reveal>
+
+      {/* The value stack for offer 2 — $100M Offers: show everything that's
+          in it and what it's worth before the price does the talking. */}
+      <Reveal as="section" className="ld-stack" id="stack">
+        <div className="ld-inner">
+          <span className="ld-kicker-label">Offer 2, all of it</span>
+          <h2>Every call answered. Every customer asked for a review.</h2>
+          <p className="ld-kicker">Done for you. One visit to set it up, then one short call a month. You don't learn anything new.</p>
+          <ul className="ld-stack-list">
+            {STACK.map((s) => (
+              <li className="ld-stack-row" key={s.item}>
+                <div>
+                  <h3>{s.item}</h3>
+                  <p>{s.detail}</p>
+                </div>
+                <div className="ld-stack-worth">{s.worth}</div>
+              </li>
+            ))}
+          </ul>
+          <div className="ld-stack-price ld-corners">
+            <div className="ld-stack-price-label">Your price</div>
+            <div className="ld-stack-price-big">$2,000 setup</div>
+            <div className="ld-stack-price-sub">then from $197/mo, founding rate for the first 5 businesses, month to month</div>
+          </div>
+          <div className="ld-stack-bonus">
+            <div className="ld-stack-price-label">Plus, when you sign up</div>
+            <ul>
+              {BONUSES.map((b) => <li key={b}>{b}</li>)}
+            </ul>
+          </div>
+          <p className="ld-stack-fine">The prices next to each item are what similar services charge on their own, for comparison. Not a promise of results.</p>
         </div>
       </Reveal>
 
@@ -350,6 +433,22 @@ export default function Landing() {
         </div>
       </Reveal>
 
+      {/* Referral ask — $100M Leads, Lead Getters: customers are the best
+          source. 7 of JP's 9 clients came by referral. Paid on the referred
+          business's first payment only. */}
+      <Reveal as="section" className="ld-refer" id="refer">
+        <div className="ld-inner ld-check-grid">
+          <div>
+            <span className="ld-kicker-label">Know someone?</span>
+            <h2>Send me a business. Get a month free.</h2>
+            <p className="ld-kicker">When a business you send me pays, you get your next month free. Not on a monthly plan? You get $150 instead. Most of my clients came from someone they trust, that's the point.</p>
+          </div>
+          <div className="ld-check-form">
+            <LeadForm source="referral" ctaLabel="Send the intro" askMessage="Your name, and the business you're sending me" />
+          </div>
+        </div>
+      </Reveal>
+
       {/* Final CTA */}
       <Reveal as="section" className="ld-final">
         <div className="ld-final-panel ld-corners">
@@ -374,7 +473,7 @@ export default function Landing() {
       </Reveal>
 
       <footer className="ld-footer">
-        <a href={CONTACT_MAILTO}>Email</a>&middot;<a href={CONTACT_PHONE_HREF}>Call/text</a>&middot;<a href="/login">Client sign in</a>&middot;<a href="/privacy.html">Privacy</a>&middot;<a href="/terms.html">Terms</a>
+        <a href={CONTACT_MAILTO}>Email</a>&middot;<a href={CONTACT_PHONE_HREF}>Call</a>&middot;<a href="/login">Client sign in</a>&middot;<a href="/privacy.html">Privacy</a>&middot;<a href="/terms.html">Terms</a>
         <div className="ld-footer-sig">Kobrossi Systems &middot; getjobtally.com</div>
       </footer>
     </div>

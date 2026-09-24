@@ -29,7 +29,7 @@ const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Sw
 
 const COMPARE = [
   { label: 'Setup', them: 'Locked into whatever they built', us: '$1,000 once, built around how you actually work' },
-  { label: 'Monthly', them: '$350/mo and up', us: '$200/mo flat' },
+  { label: 'Monthly', them: '$350/mo and up', us: '$197/mo flat' },
   { label: 'Contract', them: 'Usually 6–12 months', us: 'Month to month, cancel anytime' },
   { label: 'Who answers', them: 'A support queue', us: 'Me, directly, same number you already have' },
 ]
@@ -69,12 +69,12 @@ export default function Switch() {
           <h1 className="sw-h1">Same missed-call system. $150 less a month.</h1>
           <p className="ld-sub sw-sub">
             If you're already paying an agency $300–$400/mo for missed-call texting and review
-            requests, I'll take it over, keep it running, and cut the bill to $200/mo. Month to
+            requests, I'll take it over, keep it running, and cut the bill to $197/mo. Month to
             month. Nobody puts you on hold.
           </p>
           <ul className="ld-trust">
             <li>$1,000 to switch it over, no downtime</li>
-            <li>$200/mo after that, flat, no contract</li>
+            <li>$197/mo after that, flat, no contract</li>
             <li>I only take on 3 of these a month</li>
           </ul>
         </div>
@@ -120,7 +120,7 @@ export default function Switch() {
         <div className="ld-inner sw-offer-grid">
           <div className="sw-offer-copy">
             <span className="ld-kicker-label">The offer</span>
-            <h2 className="sw-offer-h2">$1,000 to switch. $200/mo after.</h2>
+            <h2 className="sw-offer-h2">$1,000 to switch. $197/mo after.</h2>
             <p>
               I move what's already working over, so there's no gap where calls go unanswered
               during the change. If it's not fully running within 2 weeks of us starting, you
@@ -137,7 +137,7 @@ export default function Switch() {
           <div className="sw-offer-form">
             <LeadForm
               source="ghl-switch"
-              ctaLabel="Get my $200/mo quote"
+              ctaLabel="Get my $197/mo quote"
               askMessage="Who's your CRM through now, and what are you paying?"
             />
           </div>
