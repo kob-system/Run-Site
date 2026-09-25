@@ -6,33 +6,13 @@ import LeadForm from '../components/LeadForm'
 // Public landing page at / — what a stranger sees before they have an account.
 // Rendered before the Login screen (App.js) for logged-out visitors.
 //
-// ── 2026-09-21 night: visual system replaced again, same content ──────────
-// The "digital blueprint" pass (commit 075d8d6, same evening) went live and
-// JP rejected it on sight: "looks like a first try with AI... anime
-// futuristic... I want it to look real futuristic. Look at the new X video
-// Elon Musk posted about Mars." Translation: he means the SpaceX/NASA
-// concept-render aesthetic — dramatic light, atmospheric depth, real
-// material and scale — not the flat neon-grid/particle-canvas/hacker-HUD
-// look that was live. That look, not the construction lean, was the "generic
-// AI template" tell.
-//
-// So the particle-network canvas, the cyan/violet neon glow blobs, and the
-// glassy neon buttons are gone. In their place: one real photograph (a
-// tower crane silhouetted against a sunset construction site — Unsplash,
-// Unsplash License, free for commercial use, no attribution required),
-// self-hosted at src/images/ and graded in CSS with a duotone wash, a
-// vignette and film grain instead of a flat color overlay, so it reads as a
-// cinematic frame instead of a stock photo with a filter slapped on. The
-// same still-image reappears, cropped differently, behind the construction
-// section further down — one photographic thread running through the page
-// instead of a decorative image plus an unrelated illustration style.
-// (Self-hosted, not linked, for the same CSP reason as the fonts below:
-// img-src is 'self' only, so an external URL would 404 silently in prod.)
-//
-// Content is untouched: same headline (asserted on by App.test.js — do not
-// edit without updating those tests), same three tiers, same portfolio, same
-// stage-select, same construction-leans-doesn't-lock section. Only the look
-// changed.
+// 2026-09-25 revision (JP's review): written as the business, not in first
+// person. Speaks to one buyer, the local owner-operator who works in the
+// business every day and wants to be found on Google and stop losing
+// customers who call or text when they can't pick up. Removed: the free
+// "Missed Call Check" section and the review QR counter card (not offered).
+// Hero photo is now a Capital Region image (see HeroPhoto below). The hero
+// headline is asserted on by App.test.js, update both together.
 //
 // The actual app (OwnerDashboard, WorkerDashboard, Billing, crew invites) is
 // untouched underneath this page and still works exactly as before for any
@@ -48,9 +28,8 @@ const TIERS = [
     accent: 'green',
     name: 'The Online Starter Kit',
     price: '$1,500',
-    step: 'Website $1,000 + $500 of Google SEO, included',
-    forWho: "You've got nothing online worth finding",
-    body: 'A real website, plus your Google Business Profile and local search set up right, so you show up on Google Maps and search when people nearby look for what you do.',
+    forWho: 'You want a real website and to show up on Google',
+    body: 'A clean, professional website plus your Google profile set up right, so you show up on Google Maps and search when people nearby look for what you do. Local SEO included.',
   },
   {
     n: '02',
@@ -59,18 +38,17 @@ const TIERS = [
     price: '$2,000',
     step: '+$500 over the Starter Kit',
     monthly: 'then from $197/mo to keep it running',
-    forWho: "You've got a site or a start, but leads still slip",
-    body: 'Everything in the Starter Kit, plus every missed call texted back, every customer asked for a review, and every lead in one list on your phone. Full breakdown below.',
-    link: { href: '#stack', label: "See everything that's in it" },
+    forWho: "Customers call and text when you can't pick up",
+    body: 'Everything in the Starter Kit, plus every missed call texted back and every customer asked for a review.',
+    link: { href: '#stack', label: "See what's included" },
   },
   {
     n: '03',
     accent: 'amber',
     name: 'The Diagnostic',
     price: 'Quoted after we talk',
-    forWho: "You know something's off, you just don't know what",
-    body: "Bring me the problem, not the fix. I'll walk through your business and show you exactly where you're losing money, where things aren't organized, and where jobs aren't tracked the way they should be. Then I figure out the real solution, whether that's a CRM, a client portal, custom software, or making your data actually usable, and price it for the job.",
-    note: 'Full custom work starts around $10,000 and scales with what you actually need. Priced for the job, not a rate card.',
+    forWho: "Something's off and you want it found",
+    body: 'We walk through how you run, show you where time and money are slipping, then quote the fix.',
   },
 ]
 
@@ -83,19 +61,17 @@ const TIERS = [
 // Stack values are what comparable services charge, labelled that way on
 // the page, not a promise of results.
 const STACK = [
-  { item: 'Every missed call gets a text back', detail: 'Asks what they need and gets them booked, while you keep working.', worth: 'Answering services run $300/mo' },
-  { item: 'Every customer asked for a review', detail: 'Sent after every visit, to every customer. Never filtered.', worth: 'Review tools run $299/mo and up' },
-  { item: 'Every review answered', detail: 'Drafted in your voice, good ones and bad ones.', worth: 'Included' },
-  { item: 'The whole Starter Kit', detail: 'A clean website, plus your Google profile fixed (right phone, hours, category) so you show up on Maps and search nearby. Owner keeps the login.', worth: '$1,500 on its own' },
-  { item: 'Yelp, Bing and Apple Maps listings', detail: 'Set up once, matching your Google profile.', worth: 'Included' },
+  { item: 'Every missed call gets a text back', detail: 'They hear from you right away, while you keep working.', worth: 'Answering services run $300/mo' },
+  { item: 'Every customer asked for a review', detail: 'Sent after every visit, to every customer.', worth: 'Review tools run $299/mo and up' },
+  { item: 'Every review answered', detail: 'Written in your voice, good and bad.', worth: 'Included' },
+  { item: 'The whole Starter Kit', detail: 'Website, Google Maps and local search. You keep the login.', worth: '$1,500 on its own' },
+  { item: 'Yelp, Bing and Apple Maps', detail: 'Listed once, matching your Google profile.', worth: 'Included' },
   { item: 'Past customers brought back', detail: 'Seasonal check-in texts to customers who opted in.', worth: 'Included' },
-  { item: 'One number a month', detail: 'Calls, missed calls, texts back, new reviews. One text, no dashboard to learn.', worth: 'Included' },
+  { item: 'One text a month', detail: 'Calls, texts back and new reviews. Nothing new to learn.', worth: 'Included' },
 ]
 
 const BONUSES = [
   'Your 3 most recent unanswered reviews, answered on day one',
-  'A counter card with a QR code that opens your Google review page',
-  'The Missed Call Check below, free, whether you buy or not',
 ]
 
 const PORTFOLIO = [
@@ -106,7 +82,7 @@ const PORTFOLIO = [
   { name: 'USA Kitchen & Cabinets', domain: 'usakitchencabinets518.com' },
   { name: 'All Phase Maintenance', domain: 'allphasemaintenance.com' },
   { name: 'D&K Tax Services', domain: 'dktaxservice.com' },
-  { name: 'Job & Crew Tracker', domain: null, href: '/demo', note: 'My own build, click through the demo, live builds available on request' },
+  { name: 'Job & Crew Tracker', domain: null, href: '/demo', note: 'Custom build, tap through the demo' },
 ]
 
 // Self-select by stage rather than a generic Q&A — JP's own framing ("it
@@ -118,35 +94,33 @@ const STAGES = [
     tier: 'Offer 1: The Online Starter Kit',
     accent: 'green',
     q: "I don't have anything online",
-    a: 'Get found first, everything else comes after that.',
+    a: 'Get found first. Everything else comes after.',
   },
   {
     n: '2',
     tier: 'Offer 2: The Follow-Up System',
     accent: 'orange',
-    q: "I've got a website or some presence, but it's not really doing anything for me",
-    a: "The site usually isn't the real problem. Leads slipping through the cracks is.",
+    q: "I've got a website, but the phone isn't ringing",
+    a: 'The site is rarely the problem. Customers slipping away after the first call is.',
   },
   {
     n: '3',
     tier: 'Offer 3: The Diagnostic',
     accent: 'amber',
-    q: "I don't know exactly what's wrong, I just know something's off",
-    a: "Tell me how you run your business and I'll find the leak myself.",
+    q: "I just know something's off",
+    a: "Tell us how you run and we'll find it.",
   },
 ]
 
-// The consultant-framing "how this works" walk, now a 3-step blueprint strip
-// instead of a paragraph block.
 const PROCESS = [
-  { n: 'STEP 01', h: 'Walk the business', p: 'How you actually run, not a checklist.' },
-  { n: 'STEP 02', h: 'Find the leak', p: 'The one thing costing you time, money, or jobs.' },
-  { n: 'STEP 03', h: 'Build the fix', p: 'Site, CRM, or custom software, priced on the job.' },
+  { n: 'STEP 01', h: 'We talk', p: 'What you want, and how you run today.' },
+  { n: 'STEP 02', h: 'We build it', p: 'Website, Google profile and follow-up, done for you.' },
+  { n: 'STEP 03', h: 'You go live', p: 'Live in 14 days. You keep every login.' },
 ]
 
 // Construction leans first (JP's own background, BS CET) but the panel next
 // to it is the explicit "not only construction" answer he asked for.
-const INDUSTRIES = ['Property Services', 'Laundromats', 'Retail & Smoke Shops', 'Kitchen & Cabinet Shops', 'Facilities Maintenance', 'Tax & Professional Services']
+const INDUSTRIES = ['Home & Property Services', 'Laundromats', 'Retail Shops', 'Kitchen & Cabinet Shops', 'Contractors & Trades', 'Tax & Small Offices']
 
 // First pass pulled each business's real favicon off Google's public proxy —
 // looked fine locally but silently 404'd in production because the site's
@@ -190,19 +164,26 @@ function Reveal({ as: Tag = 'div', className = '', children, ...rest }) {
   )
 }
 
-// ── Hero background: one real photograph, cinematically graded ───────────
-// Replaces the old particle-network canvas. Three stacked layers, all pure
-// CSS (Landing.css): the photo itself (.ld-hero-photo, a slow 26s Ken-Burns
-// drift), a duotone/vignette color grade on top of it (.ld-hero-grade), and
-// a faint drifting dust layer (.ld-hero-dust) for atmosphere. No canvas, no
-// per-frame JS — cheaper than the field it replaced and doesn't fight
-// prefers-reduced-motion the way a requestAnimationFrame loop did.
+// Hero photo (2026-09-25): "Albany, New York" by Quintin Soloviev, an aerial
+// of downtown Albany over the Hudson.
+// Source: https://commons.wikimedia.org/wiki/File:Albany,_New_York.jpg
+// License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), free for
+// commercial use with attribution. Attribution is in the page footer.
+// Resized to 1680w / 960w webp, self-hosted in public/media/hero/ so it serves
+// same-origin under the CSP (img-src 'self'). Passed in as CSS variables so
+// Landing.css can swap to the small file on phones.
+const HERO_IMG = `${process.env.PUBLIC_URL || ''}/media/hero/hero-albany.webp`
+const HERO_IMG_SM = `${process.env.PUBLIC_URL || ''}/media/hero/hero-albany-sm.webp`
+
 function HeroPhoto() {
   return (
-    <div className="ld-hero-photo-wrap" aria-hidden="true">
+    <div
+      className="ld-hero-photo-wrap"
+      aria-hidden="true"
+      style={{ '--hero-img': `url(${HERO_IMG})`, '--hero-img-sm': `url(${HERO_IMG_SM})` }}
+    >
       <div className="ld-hero-photo" />
       <div className="ld-hero-grade" />
-      <div className="ld-hero-dust" />
     </div>
   )
 }
@@ -225,7 +206,7 @@ export default function Landing() {
           <span className="ld-logo-sub">&#47;&#47; capital region, ny</span>
         </a>
         <nav>
-          <a className="ld-cta-sm" href={CONTACT_MAILTO} onClick={cta('topbar')}>Get in touch</a>
+          <a className="ld-cta-sm" href={CONTACT_PHONE_HREF} onClick={cta('topbar')}>Call</a>
         </nav>
       </header>
 
@@ -233,21 +214,22 @@ export default function Landing() {
       <section className="ld-hero">
         <HeroPhoto />
         <div className="ld-hero-inner">
-          <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Civil engineer, systems builder &middot; Capital Region, NY</div>
-          <h1>Every business has a leak. I find it, then I fix it.</h1>
+          <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Local businesses &middot; Capital Region, NY</div>
+          <h1>Get found on Google. Get the call. Keep the customer.</h1>
+          <p className="ld-sub">Websites, Google Maps and follow-up for shops, service businesses and small offices that are too busy to chase every call.</p>
           <div className="ld-cta-row">
-            <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email me</a>
-            <a className="ld-cta ld-cta-call" href={CONTACT_PHONE_HREF} onClick={cta('hero-call')}>Call me</a>
+            <a className="ld-cta" href={CONTACT_PHONE_HREF} onClick={cta('hero-call')}>Call</a>
+            <a className="ld-cta ld-cta-call" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email</a>
           </div>
         </div>
         <div className="ld-scroll-cue"><span className="ld-scroll-cue-line" />Scroll</div>
       </section>
 
-      {/* How this works — the consultant framing as a 3-step blueprint strip */}
+      {/* How it works */}
       <Reveal as="section" className="ld-story">
         <div className="ld-inner">
-          <span className="ld-kicker-label">How this works</span>
-          <h2>I look for the leak first. The fix comes second.</h2>
+          <span className="ld-kicker-label">How it works</span>
+          <h2>You run the business. We get you found.</h2>
           <div className="ld-process">
             {PROCESS.map((s) => (
               <div className="ld-process-step" key={s.n}>
@@ -257,54 +239,28 @@ export default function Landing() {
               </div>
             ))}
           </div>
-          <p className="ld-story-punch">
-            <strong>That's the whole job.</strong> Find what's actually costing you, build whichever fix closes it.
-          </p>
         </div>
       </Reveal>
 
-      {/* Free lead magnet — $100M Leads: solve one narrow problem free, which
-          shows the bigger one. Costs JP ~20 minutes per request. */}
-      <Reveal as="section" className="ld-check" id="check">
-        <div className="ld-inner ld-check-grid">
-          <div>
-            <span className="ld-kicker-label">Free, no strings</span>
-            <h2>The Missed Call Check</h2>
-            <p className="ld-kicker">Most owners don't know how many calls they miss. I'll find out for you.</p>
-            <ol className="ld-check-list">
-              <li>I call your business after hours from a few different phones and hear exactly what a customer hears.</li>
-              <li>I check your Google profile: phone, hours, category, photos.</li>
-              <li>I count your reviews against the top 3 near you.</li>
-              <li>You get a one-page result. Keep it, fix it yourself, or have me do it.</li>
-            </ol>
-          </div>
-          <div className="ld-check-form">
-            <LeadForm source="missed-call-check" ctaLabel="Check my business" askMessage="Business name and the number customers call" />
-          </div>
-        </div>
-      </Reveal>
-
-      {/* Niche — construction leans, doesn't lock. JP's explicit ask. */}
+      {/* Who it's for: the owner-operator who works in the business every day */}
       <Reveal as="section" className="ld-niche">
         <div className="ld-inner ld-niche-grid">
           <div className="ld-niche-copy">
-            <span className="ld-kicker-label">Why construction</span>
-            <h2>Built by someone who's also on the job site.</h2>
+            <span className="ld-kicker-label">Who it's for</span>
+            <h2>Owners who are in the business every day.</h2>
             <p>
-              I've worked NY State highway and bridge inspection, so job costing, crews, and
-              change orders aren't foreign to me. <strong>That's the lean, not the limit.</strong> I
-              also built <a href="/demo" className="ld-inline-link">getjobtally.com</a>, a
-              job-tracking app for contractors, from scratch.
+              You're behind the counter or on the job. <strong>We make sure the customers looking
+              for you find you, and hear back.</strong>
             </p>
             <ul className="ld-niche-list">
-              <li>Job costing that matches how a bid actually gets built</li>
-              <li>Crew scheduling and time tracking that works from a phone in a truck</li>
-              <li>Follow-up systems so a lead never goes cold between jobs</li>
+              <li>A website that looks like a real business</li>
+              <li>Show up on Google Maps when people nearby search</li>
+              <li>Every missed call gets a text back</li>
             </ul>
           </div>
           <div className="ld-niche-panel ld-corners">
-            <div className="ld-niche-panel-label">Also built for</div>
-            <h3>Any business with the same leak</h3>
+            <div className="ld-niche-panel-label">Who we work with</div>
+            <h3>Local businesses across the Capital Region</h3>
             <div className="ld-industry-grid">
               {INDUSTRIES.map((ind) => (
                 <div className="ld-industry-chip" key={ind}>{ind}</div>
@@ -319,7 +275,7 @@ export default function Landing() {
         <div className="ld-inner">
           <span className="ld-kicker-label">Pricing</span>
           <h2>Three ways to start</h2>
-          <p className="ld-kicker">Pick the one that matches where you're at, not a bundle you're pushed into. I take on 3 new builds a month, so whichever one you pick gets real attention, not a template.</p>
+          <p className="ld-kicker">Pick the one that matches where you are.</p>
           <div className="ld-tier-grid">
             {TIERS.map((t) => (
               <div className={`ld-tier-card ld-corners ld-tier-card--${t.accent}`} key={t.n}>
@@ -330,25 +286,23 @@ export default function Landing() {
                 {t.monthly && <div className="ld-tier-monthly">{t.monthly}</div>}
                 <div className="ld-tier-forwho">{t.forWho}</div>
                 <p>{t.body}</p>
-                {t.note && <p className="ld-tier-note">{t.note}</p>}
                 {t.link && <a className="ld-inline-link ld-tier-link" href={t.link.href}>{t.link.label} &rarr;</a>}
               </div>
             ))}
           </div>
-          <p className="ld-tiers-guarantee"><strong>Tiers 1 and 2: live in 14 days from the day you hand me your logins, or your setup fee comes back.</strong> Half down, half when it's live, unlimited revisions until it's right.</p>
+          <p className="ld-tiers-guarantee"><strong>Starter Kit and Follow-Up System: live in 14 days from the day we get your logins, or your setup fee comes back.</strong> Half down, half when it's live.</p>
           <div className="ld-how-cta">
-            <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('tiers')}>Tell me the problem</a>
+            <a className="ld-cta" href={CONTACT_PHONE_HREF} onClick={cta('tiers')}>Get started</a>
           </div>
         </div>
       </Reveal>
 
-      {/* The value stack for offer 2 — $100M Offers: show everything that's
-          in it and what it's worth before the price does the talking. */}
+      {/* The value stack for offer 2 */}
       <Reveal as="section" className="ld-stack" id="stack">
         <div className="ld-inner">
-          <span className="ld-kicker-label">Offer 2, all of it</span>
-          <h2>Every call answered. Every customer asked for a review.</h2>
-          <p className="ld-kicker">Done for you. One visit to set it up, then one short call a month. You don't learn anything new.</p>
+          <span className="ld-kicker-label">The Follow-Up System</span>
+          <h2>Stop losing customers who call after hours.</h2>
+          <p className="ld-kicker">Done for you. Nothing new to learn.</p>
           <ul className="ld-stack-list">
             {STACK.map((s) => (
               <li className="ld-stack-row" key={s.item}>
@@ -363,24 +317,24 @@ export default function Landing() {
           <div className="ld-stack-price ld-corners">
             <div className="ld-stack-price-label">Your price</div>
             <div className="ld-stack-price-big">$2,000 setup</div>
-            <div className="ld-stack-price-sub">then from $197/mo, founding rate for the first 5 businesses, month to month</div>
+            <div className="ld-stack-price-sub">then from $197/mo, founding rate, month to month</div>
           </div>
           <div className="ld-stack-bonus">
-            <div className="ld-stack-price-label">Plus, when you sign up</div>
+            <div className="ld-stack-price-label">Plus, on day one</div>
             <ul>
               {BONUSES.map((b) => <li key={b}>{b}</li>)}
             </ul>
           </div>
-          <p className="ld-stack-fine">The prices next to each item are what similar services charge on their own, for comparison. Not a promise of results.</p>
+          <p className="ld-stack-fine">Prices next to each item are what similar services charge on their own, for comparison. Not a promise of results.</p>
         </div>
       </Reveal>
 
-      {/* Portfolio — real client work, named. */}
+      {/* Portfolio: real client work, named. */}
       <Reveal as="section" className="ld-portfolio" id="portfolio">
         <div className="ld-inner">
           <span className="ld-kicker-label">Portfolio</span>
-          <h2>Work I've actually shipped</h2>
-          <p className="ld-kicker">Real businesses, real sites. Click through and check for yourself.</p>
+          <h2>Recent work</h2>
+          <p className="ld-kicker">Real local businesses, live sites. Tap one and look.</p>
           <ul className="ld-portfolio-grid">
             {PORTFOLIO.map((p, i) => {
               const avatar = (
@@ -412,14 +366,11 @@ export default function Landing() {
         </div>
       </Reveal>
 
-      {/* Which one's you — self-select by stage. Each card is its own link,
-          not just a label, so picking the one that sounds like you actually
-          takes you to that offer instead of leaving you to scroll for it. */}
+      {/* Which one's you: each card links to the offers */}
       <Reveal as="section" className="ld-faq">
         <div className="ld-inner">
           <a className="ld-kicker-label ld-kicker-link" href="#tiers">Start here</a>
           <h2>Which one's you?</h2>
-          <p className="ld-kicker">Tap the one that sounds like you, it'll take you straight to that offer.</p>
           <div className="ld-faq-list">
             {STAGES.map((s) => (
               <a className={`ld-faq-item ld-faq-item--${s.accent}`} href="#tiers" key={s.q} onClick={cta('faq-' + s.n)}>
@@ -435,18 +386,16 @@ export default function Landing() {
         </div>
       </Reveal>
 
-      {/* Referral ask — $100M Leads, Lead Getters: customers are the best
-          source. 7 of JP's 9 clients came by referral. Paid on the referred
-          business's first payment only. */}
+      {/* Referral ask. Paid on the referred business's first payment only. */}
       <Reveal as="section" className="ld-refer" id="refer">
         <div className="ld-inner ld-check-grid">
           <div>
             <span className="ld-kicker-label">Know someone?</span>
-            <h2>Send me a business. Get a month free.</h2>
-            <p className="ld-kicker">When a business you send me pays, you get your next month free. Not on a monthly plan? You get $150 instead. Most of my clients came from someone they trust, that's the point.</p>
+            <h2>Refer a business. Get a month free.</h2>
+            <p className="ld-kicker">When a business you refer pays, your next month is free. Not on a monthly plan? You get $150.</p>
           </div>
           <div className="ld-check-form">
-            <LeadForm source="referral" ctaLabel="Send the intro" askMessage="Your name, and the business you're sending me" />
+            <LeadForm source="referral" ctaLabel="Send the intro" askMessage="Your name, and the business you're referring" />
           </div>
         </div>
       </Reveal>
@@ -455,19 +404,19 @@ export default function Landing() {
       <Reveal as="section" className="ld-final">
         <div className="ld-final-panel ld-corners">
           <div className="ld-final-glow" aria-hidden="true" />
-          <h2>Tell me what's broken.</h2>
-          <p>I'll tell you straight whether I can fix it and what it's worth doing.</p>
+          <h2>Ready to get found?</h2>
+          <p>Tell us about your business. You'll get a straight answer on what's worth doing.</p>
           <div className="ld-final-split">
             <div className="ld-final-form">
-              <LeadForm source="homepage-final" ctaLabel="Tell me the leak" />
+              <LeadForm source="homepage-final" ctaLabel="Send" />
             </div>
             <div className="ld-final-or">
               <span>or</span>
             </div>
             <div className="ld-final-direct">
               <div className="ld-cta-row">
-                <a className="ld-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email me</a>
-                <a className="ld-cta ld-cta-call" href={CONTACT_PHONE_HREF} onClick={cta('final-call')}>Call me</a>
+                <a className="ld-cta" href={CONTACT_PHONE_HREF} onClick={cta('final-call')}>Call</a>
+                <a className="ld-cta ld-cta-call" href={CONTACT_MAILTO} onClick={cta('final')}>Email</a>
               </div>
             </div>
           </div>
@@ -476,7 +425,10 @@ export default function Landing() {
 
       <footer className="ld-footer">
         <a href={CONTACT_MAILTO}>Email</a>&middot;<a href={CONTACT_PHONE_HREF}>Call</a>&middot;<a href="/login">Client sign in</a>&middot;<a href="/privacy.html">Privacy</a>&middot;<a href="/terms.html">Terms</a>
-        <div className="ld-footer-sig">Kobrossi Systems &middot; getjobtally.com</div>
+        <div className="ld-footer-sig">Kobrossi Systems &middot; Menands, NY</div>
+        <div className="ld-footer-credit">
+          Photo: <a href="https://commons.wikimedia.org/wiki/File:Albany,_New_York.jpg" target="_blank" rel="noopener noreferrer">Albany, New York</a> by Quintin Soloviev, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>
+        </div>
       </footer>
     </div>
   )

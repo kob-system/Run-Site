@@ -6,9 +6,9 @@ import { track, trackOnce, EV } from '../utils/analytics'
 // Public page at /jp: the ONE link JP texts past clients and their friends
 // when he asks "do you know a business owner who...?" (2026-09-25).
 //
-// Written for someone opening it cold on a phone, from a text, with no idea
-// who JP is: who he is, the three offers at a glance, real live work they can
-// tap, and one way to reach him (call, text or email). No hero photo, so
+// Written for someone opening it cold on a phone, from a text. 2026-09-25:
+// written as the business, not first person (JP's review). The three offers
+// at a glance, real live work they can tap, and Call / Text / Email only. No hero photo, so
 // it loads fast on a phone. Reuses Landing.css's .ld tokens, same as /switch.
 //
 // Proof rules: only sites that were curl-checked live on 2026-09-25, one line
@@ -25,8 +25,7 @@ const OFFERS = [
     accent: 'green',
     name: 'The Online Starter Kit',
     price: '$1,500',
-    step: "Website $1,000 + $500 of Google SEO, included",
-    line: 'A real website, plus your Google profile set up so you show up on Google Maps and search when people nearby look for what you do.',
+    line: 'A clean, professional website plus your Google profile set up, so you show up on Google Maps and search when people nearby look for you. Local SEO included.',
   },
   {
     accent: 'orange',
@@ -39,7 +38,7 @@ const OFFERS = [
     accent: 'amber',
     name: 'The Diagnostic',
     price: 'Quoted after we talk',
-    line: "I walk your business, show you where you're losing time or money, then price the real fix.",
+    line: 'We walk your business, show you where time or money is slipping, then quote the fix.',
   },
 ]
 
@@ -68,7 +67,7 @@ const PROOF = [
 
 export default function Meet() {
   React.useEffect(() => {
-    document.title = 'JP Kobrossi | Kobrossi Systems, Menands NY'
+    document.title = 'Kobrossi Systems, Menands NY'
     trackOnce(EV.LANDING_VIEW, { page: 'jp' })
   }, [])
 
@@ -87,20 +86,18 @@ export default function Meet() {
         </nav>
       </header>
 
-      {/* Who JP is + the one way to reach him, all above the fold on a phone */}
+      {/* What the business does + the way to reach it, above the fold on a phone */}
       <section className="mt-hero">
         <div className="mt-inner">
-          <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Local &middot; Menands, NY</div>
-          <h1 className="mt-h1">Hi, I'm JP.</h1>
+          <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Local businesses &middot; Capital Region, NY</div>
+          <h1 className="mt-h1">Get found. Get the call.</h1>
           <p className="mt-sub">
-            If someone sent you this, they probably worked with me. I help local businesses around the
-            Capital Region get found on Google, stop missing calls, and fix whatever is costing them time
-            or money. It's just me, and I answer my own phone.
+            Websites, Google Maps and follow-up for local businesses across the Capital Region.
           </p>
           <div className="ld-cta-row ld-cta-row--center">
-            <a className="ld-cta" href={PHONE_HREF} onClick={cta('hero-call-btn')}>Call me</a>
-            <a className="ld-cta ld-cta-call" href={SMS_HREF} onClick={cta('hero-text')}>Text me</a>
-            <a className="ld-cta ld-cta-call" href={EMAIL_HREF} onClick={cta("hero-email")}>Email me</a>
+            <a className="ld-cta" href={PHONE_HREF} onClick={cta('hero-call-btn')}>Call</a>
+            <a className="ld-cta ld-cta-call" href={SMS_HREF} onClick={cta('hero-text')}>Text</a>
+            <a className="ld-cta ld-cta-call" href={EMAIL_HREF} onClick={cta("hero-email")}>Email</a>
           </div>
         </div>
       </section>
@@ -108,7 +105,7 @@ export default function Meet() {
       {/* The three offers at a glance */}
       <section className="mt-section" id="offers">
         <div className="mt-inner">
-          <span className="ld-kicker-label">What I do</span>
+          <span className="ld-kicker-label">What we do</span>
           <h2>Three ways to start</h2>
           <ul className="mt-offers">
             {OFFERS.map((o) => (
@@ -130,8 +127,8 @@ export default function Meet() {
       <section className="mt-section" id="work">
         <div className="mt-inner">
           <span className="ld-kicker-label">Real work</span>
-          <h2>Local businesses I've built for</h2>
-          <p className="ld-kicker">All live right now. Tap one and look for yourself.</p>
+          <h2>Recent work</h2>
+          <p className="ld-kicker">All live. Tap one and look.</p>
           <ul className="mt-proof">
             {PROOF.map((p) => (
               <li key={p.domain}>
@@ -149,9 +146,9 @@ export default function Meet() {
       {/* One clear way in */}
       <section className="mt-section" id="reach">
         <div className="mt-inner mt-reach">
-          <span className="ld-kicker-label">Reach me</span>
-          <h2>Tell me about your business.</h2>
-          <p className="ld-kicker">{PHONE_DISPLAY}. Whatever is easiest for you, I usually answer same day.</p>
+          <span className="ld-kicker-label">Contact</span>
+          <h2>Tell us about your business.</h2>
+          <p className="ld-kicker">{PHONE_DISPLAY}. Call, text or email.</p>
           <div className="ld-cta-row ld-cta-row--center">
             <a className="ld-cta" href={PHONE_HREF} onClick={cta("reach-call")}>Call</a>
             <a className="ld-cta ld-cta-call" href={SMS_HREF} onClick={cta("reach-text")}>Text</a>

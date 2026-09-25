@@ -82,7 +82,7 @@ beforeEach(() => goTo('/'))
 
 test('a logged-out visitor at the root gets the public landing page', async () => {
   render(<App />)
-  expect(await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByText(/Get found on Google. Get the call/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
 
 test('a logged-out visitor at /login gets the login screen', async () => {
@@ -124,7 +124,7 @@ test('the installed icon never answers a crew member with the sales page', async
   goTo('/?home=1')
   render(<App />)
   expect(await screen.findByText(/get you to your clock/i, {}, ROUTE_LOAD)).toBeInTheDocument()
-  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Get found on Google. Get the call/i)).not.toBeInTheDocument()
 })
 
 test('/crew tells him his link IS his password and puts his boss one tap away', async () => {
@@ -190,7 +190,7 @@ test('a saved crew key gets him back in with NO tap at all', async () => {
     ROUTE_LOAD
   )
   // Never the marketing page aimed at his boss.
-  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Get found on Google. Get the call/i)).not.toBeInTheDocument()
 })
 
 test('a URL invite is NOT auto-redeemed — only a key off this phone is', async () => {
@@ -213,7 +213,7 @@ test('a revoked crew key is thrown away instead of stranding him', async () => {
   inviteReply = { valid: false, rejoinable: false, revoked: true }
   goTo('/')
   render(<App />)
-  expect(await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByText(/Get found on Google. Get the call/i, {}, ROUTE_LOAD)).toBeInTheDocument()
   expect(localStorage.getItem('jt_crew_key')).toBeNull()
 })
 
@@ -227,7 +227,7 @@ test('an unknown path gets a real not-found page, NOT the landing page', async (
   goTo('/some-old-link-that-no-longer-exists')
   render(<App />)
   expect(await screen.findByText(/That page isn't here/i, {}, ROUTE_LOAD)).toBeInTheDocument()
-  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Get found on Google. Get the call/i)).not.toBeInTheDocument()
 })
 
 test('the not-found page tells search engines not to index it', async () => {
@@ -261,23 +261,31 @@ test('a trailing slash still reaches the root landing page', async () => {
   // taken the entire marketing site down, so it gets its own test.
   goTo('/')
   render(<App />)
-  expect(await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByText(/Get found on Google. Get the call/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
 
 test('/jp, the referral link, renders with a tap-to-call phone and the new prices', async () => {
   goTo('/jp')
   render(<App />)
-  expect(await screen.findByText(/Hi, I'm JP/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByText(/Get found. Get the call./i, {}, ROUTE_LOAD)).toBeInTheDocument()
   const callLinks = screen.getAllByRole('link').filter((a) => a.getAttribute('href') === 'tel:+15186089344')
   expect(callLinks.length).toBeGreaterThan(0)
   expect(screen.getByText('$1,500')).toBeInTheDocument()
   expect(screen.getByText(/\+\$500 over the Starter Kit/)).toBeInTheDocument()
-  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Get found on Google. Get the call/i)).not.toBeInTheDocument()
 })
 
 test('the homepage Starter Kit shows $1,500, not the old $1,000', async () => {
   render(<App />)
-  await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)
+  await screen.findByText(/Get found on Google. Get the call/i, {}, ROUTE_LOAD)
   expect(screen.getByText('$1,500')).toBeInTheDocument()
   expect(screen.queryByText('$1,000')).not.toBeInTheDocument()
+})
+
+test('homepage no longer claims the Missed Call Check, the QR counter card, or the $1,000 + $500 breakdown', async () => {
+  render(<App />)
+  await screen.findByText(/Get found on Google\. Get the call/i, {}, ROUTE_LOAD)
+  expect(screen.queryByText(/Missed Call Check/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/QR code/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/\$500 of Google SEO/i)).not.toBeInTheDocument()
 })

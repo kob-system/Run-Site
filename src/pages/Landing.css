@@ -236,28 +236,23 @@
 
 .ld-hero-photo-wrap { position: absolute; inset: 0; z-index: 0; overflow: hidden; }
 
-/* The photograph: a real tower crane against a sunset construction site
-   (Unsplash, Unsplash License — free for commercial use, no attribution
-   required; self-hosted at src/images/hero-construction.jpg so it serves
-   same-origin under the CSP). A 26s Ken-Burns drift gives it the same slow,
-   deliberate movement a keynote render uses instead of a static screenshot. */
+/* The photograph: an aerial of downtown Albany over the Hudson ("Albany, New
+   York" by Quintin Soloviev, Wikimedia Commons, CC BY 4.0, credited in the
+   footer). Self-hosted in public/media/hero/ and passed in from Landing.js as
+   --hero-img / --hero-img-sm so it serves same-origin under the CSP. */
 .ld-hero-photo {
   position: absolute; inset: -3%;
-  background-image: url('../images/hero-construction.jpg');
-  /* Oversized past cover's minimum on purpose: the source photo's sun sits
-     dead-center (~50% x), which collides with the centered H1/CTA column.
-     The extra width gives background-position-x room to slide the sun off
-     to the left third, so it glows beside the copy instead of behind it. */
-  background-size: 165% auto;
-  background-position: 12% 46%;
-  filter: saturate(1.08) contrast(1.06) brightness(0.92);
+  background-image: var(--hero-img);
+  background-size: cover;
+  background-position: center 45%;
+  filter: saturate(0.95) contrast(1.05) brightness(0.8);
   animation: ld-kenburns 28s ease-in-out infinite alternate;
   will-change: transform;
 }
 @keyframes ld-kenburns { from { transform: scale(1); } to { transform: scale(1.045) translate(-0.4%, -0.3%); } }
 @media (prefers-reduced-motion: reduce) { .ld-hero-photo { animation: none; } }
 @media (max-width: 640px) {
-  .ld-hero-photo { background-image: url('../images/hero-construction-mobile.jpg'); background-size: cover; background-position: center 40%; }
+  .ld-hero-photo { background-image: var(--hero-img-sm); background-position: 40% 50%; }
 }
 
 /* The color grade — this is the "cinematic," not the photo itself. A cool
@@ -269,7 +264,7 @@
   background:
     linear-gradient(200deg, rgba(20, 30, 40, 0.35) 0%, transparent 38%),
     linear-gradient(340deg, rgba(120, 40, 10, 0.32) 0%, transparent 42%),
-    linear-gradient(180deg, rgba(10, 7, 5, 0.58) 0%, rgba(10, 7, 5, 0.32) 26%, rgba(10, 7, 5, 0.62) 66%, rgba(10, 7, 5, 0.97) 100%),
+    linear-gradient(180deg, rgba(10, 7, 5, 0.72) 0%, rgba(10, 7, 5, 0.6) 30%, rgba(10, 7, 5, 0.7) 66%, rgba(10, 7, 5, 0.97) 100%),
     radial-gradient(ellipse 85% 65% at 50% 100%, rgba(6, 4, 3, 0.9) 0%, transparent 68%),
     radial-gradient(ellipse 120% 90% at 50% 50%, transparent 45%, rgba(6, 4, 3, 0.55) 100%),
     radial-gradient(ellipse 58% 58% at 50% 46%, rgba(6, 4, 3, 0.4) 0%, transparent 72%);
@@ -513,3 +508,7 @@
 .ld-footer a { color: var(--ink-mute); text-decoration: none; margin: 0 8px; }
 .ld-footer a:hover { color: var(--ember); }
 .ld-footer-sig { margin-top: 8px; letter-spacing: 0.04em; }
+
+/* Hero photo credit (CC BY 4.0 attribution) */
+.ld-footer-credit { margin-top: 10px; font-size: 12px; color: var(--ink-mute); }
+.ld-footer-credit a { color: inherit; text-decoration: underline; }

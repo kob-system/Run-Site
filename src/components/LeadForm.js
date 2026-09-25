@@ -18,8 +18,8 @@ import './LeadForm.css'
 // dedicated columns for.
 export default function LeadForm({
   source,
-  ctaLabel = "Show me the leak",
-  askMessage = "What's costing you the most right now?",
+  ctaLabel = "Send",
+  askMessage = "Tell us about your business",
   compact = false,
   // When true, the thank-you state offers a one-tap prefilled text to JP.
   // public.leads has no alert on insert (nothing pings JP), so on the pages
@@ -84,9 +84,9 @@ export default function LeadForm({
         <span className="lf-done-mark" aria-hidden="true">&#10003;</span>
         <div>
           <strong>Got it.</strong>
-          <p>I read these myself. I'll reach out directly, usually same day.</p>
+          <p>Thanks. We'll reach out soon.</p>
           {textMeAfter && (
-            <a className="lf-text-me" href={smsHref()}>Want it faster? Text me now</a>
+            <a className="lf-text-me" href={smsHref()}>Want it faster? Send a text</a>
           )}
         </div>
       </div>
@@ -145,10 +145,10 @@ export default function LeadForm({
       </button>
       {status === 'error' && (
         <div className="lf-error">
-          Couldn't send that. Double check the email, or just call me. It's faster anyway.
+          Couldn't send that. Check the email, or call (518) 608-9344.
         </div>
       )}
-      <div className="lf-note">No spam, no list. I read every one of these myself.</div>
+      <div className="lf-note">No spam, no list. Your info stays with us.</div>
     </form>
   )
 }
