@@ -2,14 +2,13 @@ import React from 'react'
 import './Landing.css'
 import './Meet.css'
 import { track, trackOnce, EV } from '../utils/analytics'
-import LeadForm from '../components/LeadForm'
 
 // Public page at /jp: the ONE link JP texts past clients and their friends
 // when he asks "do you know a business owner who...?" (2026-09-25).
 //
 // Written for someone opening it cold on a phone, from a text, with no idea
 // who JP is: who he is, the three offers at a glance, real live work they can
-// tap, and one way to reach him (call/text, or the form). No hero photo, so
+// tap, and one way to reach him (call, text or email). No hero photo, so
 // it loads fast on a phone. Reuses Landing.css's .ld tokens, same as /switch.
 //
 // Proof rules: only sites that were curl-checked live on 2026-09-25, one line
@@ -18,6 +17,7 @@ import LeadForm from '../components/LeadForm'
 // "software", "app", "platform", "automation" or "POS" (CLAUDE.md §4).
 const PHONE_DISPLAY = '(518) 608-9344'
 const PHONE_HREF = 'tel:+15186089344'
+const EMAIL_HREF = `mailto:kobrossisystems@gmail.com?subject=${encodeURIComponent('About my business')}`
 const SMS_HREF = `sms:+15186089344?&body=${encodeURIComponent("Hi JP, I got your link. I'd like to talk about my business.")}`
 
 const OFFERS = [
@@ -25,6 +25,7 @@ const OFFERS = [
     accent: 'green',
     name: 'The Online Starter Kit',
     price: '$1,500',
+    step: "Website $1,000 + $500 of Google SEO, included",
     line: 'A real website, plus your Google profile set up so you show up on Google Maps and search when people nearby look for what you do.',
   },
   {
@@ -96,13 +97,10 @@ export default function Meet() {
             Capital Region get found on Google, stop missing calls, and fix whatever is costing them time
             or money. It's just me, and I answer my own phone.
           </p>
-          <a className="mt-phone" href={PHONE_HREF} onClick={cta('hero-call')}>
-            <span className="mt-phone-label">Call or text</span>
-            <span className="mt-phone-num">{PHONE_DISPLAY}</span>
-          </a>
           <div className="ld-cta-row ld-cta-row--center">
             <a className="ld-cta" href={PHONE_HREF} onClick={cta('hero-call-btn')}>Call me</a>
             <a className="ld-cta ld-cta-call" href={SMS_HREF} onClick={cta('hero-text')}>Text me</a>
+            <a className="ld-cta ld-cta-call" href={EMAIL_HREF} onClick={cta("hero-email")}>Email me</a>
           </div>
         </div>
       </section>
@@ -153,12 +151,11 @@ export default function Meet() {
         <div className="mt-inner mt-reach">
           <span className="ld-kicker-label">Reach me</span>
           <h2>Tell me about your business.</h2>
-          <p className="ld-kicker">Call or text {PHONE_DISPLAY}, or leave your info and I'll reach out, usually same day.</p>
+          <p className="ld-kicker">{PHONE_DISPLAY}. Whatever is easiest for you, I usually answer same day.</p>
           <div className="ld-cta-row ld-cta-row--center">
-            <a className="ld-cta" href={PHONE_HREF} onClick={cta('reach-call')}>Call {PHONE_DISPLAY}</a>
-          </div>
-          <div className="mt-form">
-            <LeadForm source="referral-page" ctaLabel="Send it to JP" askMessage="Your business, and what you'd like help with" textMeAfter />
+            <a className="ld-cta" href={PHONE_HREF} onClick={cta("reach-call")}>Call</a>
+            <a className="ld-cta ld-cta-call" href={SMS_HREF} onClick={cta("reach-text")}>Text</a>
+            <a className="ld-cta ld-cta-call" href={EMAIL_HREF} onClick={cta("reach-email")}>Email</a>
           </div>
         </div>
       </section>

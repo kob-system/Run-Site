@@ -48,6 +48,7 @@ const TIERS = [
     accent: 'green',
     name: 'The Online Starter Kit',
     price: '$1,500',
+    step: 'Website $1,000 + $500 of Google SEO, included',
     forWho: "You've got nothing online worth finding",
     body: 'A real website, plus your Google Business Profile and local search set up right, so you show up on Google Maps and search when people nearby look for what you do.',
   },
