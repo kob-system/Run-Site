@@ -107,3 +107,5 @@
 @media (max-width: 480px) {
   .lf-row { flex-direction: column; }
 }
+
+.lf-text-me { display: inline-flex; align-items: center; min-height: 44px; margin-top: 10px; font-weight: 700; color: var(--ember, #ff8a42); text-decoration: underline; text-underline-offset: 3px; }

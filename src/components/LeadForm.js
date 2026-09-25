@@ -21,6 +21,11 @@ export default function LeadForm({
   ctaLabel = "Show me the leak",
   askMessage = "What's costing you the most right now?",
   compact = false,
+  // When true, the thank-you state offers a one-tap prefilled text to JP.
+  // public.leads has no alert on insert (nothing pings JP), so on the pages
+  // where speed matters this is the zero-infra way to make sure he sees it:
+  // the visitor's own phone sends the text, no key or server involved.
+  textMeAfter = false,
 }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -28,6 +33,16 @@ export default function LeadForm({
   const [message, setMessage] = useState('')
   const [company, setCompany] = useState('') // honeypot — real visitors never see or fill this
   const [status, setStatus] = useState('idle') // idle | sending | done | error
+
+  const smsHref = () => {
+    const body = [
+      'Hi JP, I just filled out your form on getjobtally.com.',
+      name.trim() && `I'm ${name.trim()}.`,
+      message.trim(),
+    ].filter(Boolean).join(' ').slice(0, 400)
+    // `?&body=` is the form both iOS and Android Messages accept.
+    return `sms:+15186089344?&body=${encodeURIComponent(body)}`
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -70,6 +85,9 @@ export default function LeadForm({
         <div>
           <strong>Got it.</strong>
           <p>I read these myself. I'll reach out directly, usually same day.</p>
+          {textMeAfter && (
+            <a className="lf-text-me" href={smsHref()}>Want it faster? Text me now</a>
+          )}
         </div>
       </div>
     )
@@ -127,7 +145,7 @@ export default function LeadForm({
       </button>
       {status === 'error' && (
         <div className="lf-error">
-          Couldn't send that. Double check the email, or just call/text {'—'} it's faster anyway.
+          Couldn't send that. Double check the email, or just call me. It's faster anyway.
         </div>
       )}
       <div className="lf-note">No spam, no list. I read every one of these myself.</div>

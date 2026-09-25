@@ -30,7 +30,7 @@ const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Sw
 const COMPARE = [
   { label: 'Setup', them: 'Locked into whatever they built', us: '$1,000 once, built around how you actually work' },
   { label: 'Monthly', them: '$350/mo and up', us: '$197/mo flat' },
-  { label: 'Contract', them: 'Usually 6–12 months', us: 'Month to month, cancel anytime' },
+  { label: 'Contract', them: 'Usually 6 to 12 months', us: 'Month to month, cancel anytime' },
   { label: 'Who answers', them: 'A support queue', us: 'Me, directly, same number you already have' },
 ]
 
@@ -38,12 +38,12 @@ const INCLUDED = [
   'Missed-call text-back so a call that goes unanswered still gets a reply',
   'Pipeline that actually shows where every lead is, not a spreadsheet nobody updates',
   'Google review requests that go out automatically after a job’s done',
-  'Everything moved over from what you’re on now — you don’t start from zero',
+  'Everything moved over from what you’re on now, so you don’t start from zero',
 ]
 
 export default function Switch() {
   React.useEffect(() => {
-    document.title = 'Switch your CRM — Kobrossi Systems'
+    document.title = 'Switch your CRM | Kobrossi Systems'
     trackOnce(EV.LANDING_VIEW, { page: 'switch' })
   }, [])
 
@@ -68,7 +68,7 @@ export default function Switch() {
           <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Already on a CRM &middot; paying too much for it</div>
           <h1 className="sw-h1">Same missed-call system. $150 less a month.</h1>
           <p className="ld-sub sw-sub">
-            If you're already paying an agency $300–$400/mo for missed-call texting and review
+            If you're already paying an agency $300 to $400/mo for missed-call texting and review
             requests, I'll take it over, keep it running, and cut the bill to $197/mo. Month to
             month. Nobody puts you on hold.
           </p>

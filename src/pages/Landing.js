@@ -47,15 +47,16 @@ const TIERS = [
     n: '01',
     accent: 'green',
     name: 'The Online Starter Kit',
-    price: '$1,000',
+    price: '$1,500',
     forWho: "You've got nothing online worth finding",
-    body: 'A real website built to be found, plus the Google Business Profile and local SEO work that gets you showing up when someone actually searches.',
+    body: 'A real website, plus your Google Business Profile and local search set up right, so you show up on Google Maps and search when people nearby look for what you do.',
   },
   {
     n: '02',
     accent: 'orange',
     name: 'The Follow-Up System',
     price: '$2,000',
+    step: '+$500 over the Starter Kit',
     monthly: 'then from $197/mo to keep it running',
     forWho: "You've got a site or a start, but leads still slip",
     body: 'Everything in the Starter Kit, plus every missed call texted back, every customer asked for a review, and every lead in one list on your phone. Full breakdown below.',
@@ -84,8 +85,7 @@ const STACK = [
   { item: 'Every missed call gets a text back', detail: 'Asks what they need and gets them booked, while you keep working.', worth: 'Answering services run $300/mo' },
   { item: 'Every customer asked for a review', detail: 'Sent after every visit, to every customer. Never filtered.', worth: 'Review tools run $299/mo and up' },
   { item: 'Every review answered', detail: 'Drafted in your voice, good ones and bad ones.', worth: 'Included' },
-  { item: 'Google profile fixed', detail: 'Right phone, right hours, right category. Owner keeps the login.', worth: '$300 on its own' },
-  { item: 'A clean website', detail: 'Built to be found, same as the Starter Kit.', worth: '$1,000 on its own' },
+  { item: 'The whole Starter Kit', detail: 'A clean website, plus your Google profile fixed (right phone, hours, category) so you show up on Maps and search nearby. Owner keeps the login.', worth: '$1,500 on its own' },
   { item: 'Yelp, Bing and Apple Maps listings', detail: 'Set up once, matching your Google profile.', worth: 'Included' },
   { item: 'Past customers brought back', detail: 'Seasonal check-in texts to customers who opted in.', worth: 'Included' },
   { item: 'One number a month', detail: 'Calls, missed calls, texts back, new reviews. One text, no dashboard to learn.', worth: 'Included' },
@@ -105,7 +105,7 @@ const PORTFOLIO = [
   { name: 'USA Kitchen & Cabinets', domain: 'usakitchencabinets518.com' },
   { name: 'All Phase Maintenance', domain: 'allphasemaintenance.com' },
   { name: 'D&K Tax Services', domain: 'dktaxservice.com' },
-  { name: 'Job & Crew Tracker', domain: null, href: '/demo', note: 'My own build — click through the demo, live builds available on request' },
+  { name: 'Job & Crew Tracker', domain: null, href: '/demo', note: 'My own build, click through the demo, live builds available on request' },
 ]
 
 // Self-select by stage rather than a generic Q&A — JP's own framing ("it
@@ -114,21 +114,21 @@ const PORTFOLIO = [
 const STAGES = [
   {
     n: '1',
-    tier: 'Offer 1 — The Online Starter Kit',
+    tier: 'Offer 1: The Online Starter Kit',
     accent: 'green',
     q: "I don't have anything online",
     a: 'Get found first, everything else comes after that.',
   },
   {
     n: '2',
-    tier: 'Offer 2 — The Follow-Up System',
+    tier: 'Offer 2: The Follow-Up System',
     accent: 'orange',
     q: "I've got a website or some presence, but it's not really doing anything for me",
     a: "The site usually isn't the real problem. Leads slipping through the cracks is.",
   },
   {
     n: '3',
-    tier: 'Offer 3 — The Diagnostic',
+    tier: 'Offer 3: The Diagnostic',
     accent: 'amber',
     q: "I don't know exactly what's wrong, I just know something's off",
     a: "Tell me how you run your business and I'll find the leak myself.",
@@ -138,9 +138,9 @@ const STAGES = [
 // The consultant-framing "how this works" walk, now a 3-step blueprint strip
 // instead of a paragraph block.
 const PROCESS = [
-  { n: 'STEP — 01', h: 'Walk the business', p: 'How you actually run, not a checklist.' },
-  { n: 'STEP — 02', h: 'Find the leak', p: 'The one thing costing you time, money, or jobs.' },
-  { n: 'STEP — 03', h: 'Build the fix', p: 'Site, CRM, or custom software, priced on the job.' },
+  { n: 'STEP 01', h: 'Walk the business', p: 'How you actually run, not a checklist.' },
+  { n: 'STEP 02', h: 'Find the leak', p: 'The one thing costing you time, money, or jobs.' },
+  { n: 'STEP 03', h: 'Build the fix', p: 'Site, CRM, or custom software, priced on the job.' },
 ]
 
 // Construction leans first (JP's own background, BS CET) but the panel next
@@ -325,6 +325,7 @@ export default function Landing() {
                 <div className="ld-tier-num">{t.n}</div>
                 <h3>{t.name}</h3>
                 <div className="ld-tier-price">{t.price}</div>
+                {t.step && <div className="ld-tier-step">{t.step}</div>}
                 {t.monthly && <div className="ld-tier-monthly">{t.monthly}</div>}
                 <div className="ld-tier-forwho">{t.forWho}</div>
                 <p>{t.body}</p>
@@ -386,7 +387,7 @@ export default function Landing() {
                   {initials(p.name)}
                 </span>
               )
-              const num = `PROJECT — ${String(i + 1).padStart(2, '0')}`
+              const num = `PROJECT ${String(i + 1).padStart(2, '0')}`
               const text = (
                 <span className="ld-portfolio-text">
                   <span className="ld-portfolio-num">{num}</span>

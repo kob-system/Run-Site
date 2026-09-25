@@ -263,3 +263,21 @@ test('a trailing slash still reaches the root landing page', async () => {
   render(<App />)
   expect(await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)).toBeInTheDocument()
 })
+
+test('/jp, the referral link, renders with a tap-to-call phone and the new prices', async () => {
+  goTo('/jp')
+  render(<App />)
+  expect(await screen.findByText(/Hi, I'm JP/i, {}, ROUTE_LOAD)).toBeInTheDocument()
+  const callLinks = screen.getAllByRole('link').filter((a) => a.getAttribute('href') === 'tel:+15186089344')
+  expect(callLinks.length).toBeGreaterThan(0)
+  expect(screen.getByText('$1,500')).toBeInTheDocument()
+  expect(screen.getByText(/\+\$500 over the Starter Kit/)).toBeInTheDocument()
+  expect(screen.queryByText(/Every business has a leak/i)).not.toBeInTheDocument()
+})
+
+test('the homepage Starter Kit shows $1,500, not the old $1,000', async () => {
+  render(<App />)
+  await screen.findByText(/Every business has a leak/i, {}, ROUTE_LOAD)
+  expect(screen.getByText('$1,500')).toBeInTheDocument()
+  expect(screen.queryByText('$1,000')).not.toBeInTheDocument()
+})
