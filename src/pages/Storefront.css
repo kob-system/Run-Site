@@ -521,3 +521,228 @@ section.ks-sheet, section.ks-paper, section.ks-ink { padding-top: clamp(80px, 11
 
 /* The contact sheet is the last one: nothing slides over it, so no extra room for a round top. */
 section.ks-contact, section.ks-jp-reach { padding-bottom: clamp(72px, 9vw, 120px); }
+
+/* ====================================================================
+   2026-09-25, second pass: craft sections. Same tokens, same motion rules:
+   compositor-only animation, a reduced-motion path for every one, nothing
+   tappable uses position: fixed.
+   ==================================================================== */
+
+/* Buttons that lean toward the pointer (JS sets transform, mouse only). */
+.ks [data-magnetic] { transition: transform 0.35s var(--k-ease), background-color 0.2s, border-color 0.2s, color 0.2s; }
+
+/* Cursor spotlight on the work stages (JS feeds --mx / --my, mouse only). */
+.ks-case-stage::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, -30%), rgba(255, 255, 255, 0.42), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.4s var(--k-ease);
+  pointer-events: none;
+}
+.ks-case-stage:hover::after { opacity: 1; }
+.ks-case-stage .ks-laptop { transition: transform 0.6s var(--k-ease); }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .ks-case-stage:hover .ks-laptop { transform: translateY(-6px); }
+}
+
+/* -- The craft, up close (ink) ------------------------------------- */
+.ks-craft {
+  background:
+    radial-gradient(900px 520px at 10% 10%, rgba(169, 171, 198, 0.10), transparent 70%),
+    radial-gradient(800px 520px at 95% 90%, rgba(224, 138, 79, 0.10), transparent 70%),
+    var(--k-ink);
+}
+.ks-craft-grid { display: grid; gap: 22px; }
+@media (min-width: 1000px) { .ks-craft-grid { grid-template-columns: 1.1fr 1fr; gap: 24px; align-items: stretch; } }
+.ks-craft-lang, .ks-craft-score {
+  background: var(--k-ink-2);
+  border: 1px solid var(--k-line-d);
+  border-radius: 28px;
+  padding: clamp(26px, 4vw, 48px);
+}
+.ks-craft-lang { display: grid; gap: 30px; align-items: center; }
+@media (min-width: 640px) { .ks-craft-lang { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr); gap: 36px; } }
+.ks-craft-lang-copy .ks-case-n { color: var(--k-dusk); }
+.ks-craft-lang-copy h3 { font-family: var(--k-serif); font-weight: 400; font-size: clamp(34px, 3.4vw, 48px); line-height: 1.02; letter-spacing: -0.015em; margin: 14px 0 14px; }
+.ks-craft-lang-copy h3 em { color: var(--k-copper); }
+.ks-craft-lang-copy p { color: var(--k-dusk); font-size: 16.5px; }
+
+/* Drag-to-compare phone */
+.ks-compare { max-width: 300px; margin: 0 auto; width: 100%; }
+.ks-compare-phone {
+  position: relative;
+  background: #0d0e12;
+  border-radius: 38px;
+  aspect-ratio: 618 / 1316;
+  box-shadow: 0 40px 70px -30px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08) inset, 0 0 0 1px rgba(224, 138, 79, 0.15);
+  isolation: isolate;
+  touch-action: pan-y;
+}
+.ks-compare-phone img {
+  position: absolute; top: 9px; left: 9px;
+  width: calc(100% - 18px); height: calc(100% - 18px);
+  object-fit: cover; object-position: top center;
+  border-radius: 30px;
+  background: #1c1e27;
+}
+.ks-compare-top { clip-path: inset(0 0 0 var(--pos)); }
+.ks-compare-bar {
+  position: absolute; top: 9px; bottom: 9px;
+  left: calc(9px + (100% - 18px) * var(--p, 50) / 100);
+  width: 2px; margin-left: -1px;
+  background: var(--k-copper);
+  box-shadow: 0 0 18px rgba(224, 138, 79, 0.7);
+  pointer-events: none;
+  z-index: 2;
+}
+.ks-compare-knob {
+  position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--k-copper);
+  box-shadow: 0 8px 22px -6px rgba(0, 0, 0, 0.6), 0 0 0 6px rgba(224, 138, 79, 0.22);
+}
+.ks-compare-knob::before, .ks-compare-knob::after {
+  content: ''; position: absolute; top: 50%; width: 0; height: 0;
+  border: 6px solid transparent; margin-top: -6px;
+}
+.ks-compare-knob::before { left: 6px; border-right-color: var(--k-ink); }
+.ks-compare-knob::after { right: 6px; border-left-color: var(--k-ink); }
+.ks-compare-tag {
+  position: absolute; bottom: 26px; z-index: 2;
+  font-family: var(--k-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 6px 10px; border-radius: 999px;
+  background: rgba(18, 19, 25, 0.82); color: var(--k-paper);
+  pointer-events: none;
+}
+.ks-compare-tag--l { left: 22px; }
+.ks-compare-tag--r { right: 22px; }
+.ks-compare-range {
+  position: absolute; inset: 0; z-index: 3;
+  width: 100%; height: 100%; margin: 0;
+  opacity: 0; cursor: ew-resize;
+  -webkit-appearance: none; appearance: none; background: transparent;
+}
+.ks-compare-range::-webkit-slider-thumb { -webkit-appearance: none; width: 64px; height: 600px; }
+.ks-compare-range::-moz-range-thumb { width: 64px; height: 600px; border: 0; }
+.ks-compare-phone:has(.ks-compare-range:focus-visible) { outline: 2px solid var(--k-copper); outline-offset: 4px; }
+/* First time it scrolls in, the knob wiggles once to show it moves. */
+@media (prefers-reduced-motion: no-preference) {
+  .ks-craft-lang.ks-in .ks-compare-knob { animation: ks-nudge 1.6s var(--k-ease) 0.8s 1 both; }
+}
+@keyframes ks-nudge { 0%, 100% { transform: translate(-50%, -50%); } 35% { transform: translate(-90%, -50%); } 70% { transform: translate(-10%, -50%); } }
+
+/* Lighthouse scores */
+.ks-craft-score { display: flex; flex-direction: column; }
+.ks-score-big { display: flex; align-items: baseline; gap: 8px; }
+.ks-score-num { font-family: var(--k-serif); font-size: clamp(120px, 15vw, 200px); line-height: 0.82; letter-spacing: -0.04em; color: var(--k-copper); font-variant-numeric: tabular-nums; }
+.ks-score-of { font-family: var(--k-mono); font-size: 16px; color: var(--k-dusk); }
+.ks-score-what { margin-top: 22px; color: var(--k-dusk); font-size: 16.5px; max-width: 460px; }
+.ks-score-what strong { color: var(--k-paper); font-weight: 600; }
+.ks-rings { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px 14px; margin-top: 30px; padding-top: 26px; border-top: 1px solid var(--k-line-d); }
+@media (min-width: 560px) { .ks-rings { grid-template-columns: repeat(4, 1fr); } }
+.ks-rings li { position: relative; display: grid; justify-items: center; text-align: center; gap: 10px; }
+.ks-rings svg { width: 76px; height: 76px; transform: rotate(-90deg); }
+.ks-ring-bg, .ks-ring-fg { fill: none; stroke-width: 3; }
+.ks-ring-bg { stroke: rgba(169, 171, 198, 0.16); }
+.ks-ring-fg { stroke: var(--k-copper); stroke-linecap: round; stroke-dasharray: 100 100; stroke-dashoffset: calc(100 - var(--v)); }
+.ks-ring-n { position: absolute; top: 0; left: 50%; width: 76px; height: 76px; margin-left: -38px; display: grid; place-items: center; font-family: var(--k-mono); font-size: 17px; color: var(--k-paper); }
+.ks-ring-name { font-size: 13.5px; line-height: 1.3; color: var(--k-dusk); max-width: 130px; }
+@media (prefers-reduced-motion: no-preference) {
+  .ks-craft-score .ks-ring-fg { transition: stroke-dashoffset 1.4s var(--k-ease); transition-delay: calc(0.3s + var(--i, 0) * 0.14s); }
+  .ks-craft-score:not(.ks-in) .ks-ring-fg { stroke-dashoffset: 100; }
+}
+.ks-score-more { margin-top: 26px; color: rgba(242, 237, 228, 0.9); font-size: 15.5px; }
+.ks-score-src { margin-top: auto; padding-top: 18px; font-family: var(--k-mono); font-size: 12px; letter-spacing: 0.04em; color: rgba(169, 171, 198, 0.8); }
+
+/* -- How we build it: a line that draws itself as you scroll ------- */
+.ks-flow-wrap { position: relative; }
+.ks-flow { display: grid; gap: 34px; position: relative; padding-left: 38px; }
+.ks-flow-line { position: absolute; left: 7px; top: 8px; bottom: 8px; width: 2px; background: var(--k-line-l); border-radius: 2px; overflow: hidden; }
+.ks-flow-fill { position: absolute; inset: 0; background: linear-gradient(var(--k-copper), var(--k-copper-deep)); transform-origin: top; }
+.ks-flow-step { position: relative; }
+.ks-flow-dot { position: absolute; left: -38px; top: 4px; width: 16px; height: 16px; border-radius: 50%; background: var(--k-paper); border: 2px solid var(--k-copper-deep); }
+.ks-flow-dot::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--k-copper-deep); }
+.ks-flow-n { font-family: var(--k-mono); font-size: 13px; letter-spacing: 0.1em; color: var(--k-copper-deep); }
+.ks-flow-step h3 { font-family: var(--k-serif); font-weight: 400; font-size: clamp(30px, 2.6vw, 38px); line-height: 1.05; margin: 8px 0 8px; }
+.ks-flow-step p { color: var(--k-stone); font-size: 16px; max-width: 360px; }
+@media (min-width: 900px) {
+  .ks-flow { grid-template-columns: repeat(5, 1fr); gap: 28px; padding-left: 0; padding-top: 44px; }
+  .ks-flow-line { left: 0; right: 0; top: 7px; bottom: auto; width: auto; height: 2px; }
+  .ks-flow-fill { transform-origin: left; }
+  .ks-flow-dot { left: 0; top: -44px; }
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .ks-flow-wrap { view-timeline: --flow block; }
+    .ks-flow-fill { animation: ks-draw-y linear both; animation-timeline: --flow; animation-range: entry 20% cover 70%; }
+    .ks-flow-step { animation: ks-step-in linear both; animation-timeline: view(); animation-range: entry 10% entry 90%; }
+  }
+  @media (prefers-reduced-motion: no-preference) and (min-width: 900px) {
+    .ks-flow-fill { animation-name: ks-draw-x; animation-range: entry 60% cover 55%; }
+    .ks-flow-step { animation-timeline: --flow; animation-range: entry calc(30% + var(--i) * 10%) cover calc(10% + var(--i) * 6%); }
+  }
+}
+@keyframes ks-draw-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes ks-draw-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes ks-step-in { from { opacity: 0.15; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+/* -- Contact follows Pricing (both ink): a hairline and its own glow so it reads as a new sheet -- */
+.ks-pricing + .ks-contact {
+  box-shadow: 0 -1px 0 rgba(169, 171, 198, 0.22);
+  background:
+    radial-gradient(1100px 620px at 0% 100%, rgba(224, 138, 79, 0.16), transparent 65%),
+    radial-gradient(900px 500px at 100% 0%, rgba(169, 171, 198, 0.10), transparent 70%),
+    #16171e;
+}
+
+/* -- Footer, homepage ---------------------------------------------- */
+.ks-footer { overflow: hidden; }
+.ks-footer-cols { display: grid; gap: 34px 28px; padding-top: 22px; }
+@media (min-width: 700px) { .ks-footer-cols { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1040px) { .ks-footer-cols { grid-template-columns: 1.5fr 1fr 1fr 0.7fr; } }
+.ks-footer-brand p { margin-top: 10px; max-width: 320px; }
+.ks-footer-phone { display: inline-flex; align-items: center; min-height: 44px; margin-top: 10px; font-family: var(--k-serif); font-size: 30px; color: var(--k-copper); text-decoration: none; }
+.ks-footer-phone:hover { color: var(--k-copper-hi); }
+.ks-footer-h { font-family: var(--k-mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--k-copper); margin-bottom: 8px; }
+.ks-footer-col { display: flex; flex-direction: column; align-items: flex-start; }
+.ks-footer-col a { text-decoration: none; min-height: 40px; display: inline-flex; align-items: center; color: var(--k-dusk); transition: color 0.2s; }
+.ks-footer-col a:hover { color: var(--k-paper); }
+.ks-footer-towns { max-width: 280px; line-height: 1.7; }
+.ks-footer-mark {
+  font-family: var(--k-serif);
+  font-size: clamp(56px, 15.2vw, 232px);
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+  text-align: center;
+  margin: clamp(40px, 6vw, 80px) 0 clamp(10px, 2vw, 24px);
+  color: transparent;
+  background: linear-gradient(180deg, rgba(242, 237, 228, 0.2), rgba(242, 237, 228, 0.03));
+  -webkit-background-clip: text; background-clip: text;
+  user-select: none;
+}
+.ks-footer-mark em { background: linear-gradient(180deg, rgba(224, 138, 79, 0.5), rgba(224, 138, 79, 0.06)); -webkit-background-clip: text; background-clip: text; }
+.ks-footer-base { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 24px; padding-top: 14px; }
+.ks-footer-base::before { content: ''; position: absolute; top: 0; left: var(--k-g); right: var(--k-g); height: 1px; background: var(--k-line-d); }
+.ks-footer-base .ks-footer-links { margin-top: 0; }
+.ks-footer-base .ks-credit { margin-top: 0; }
+
+/* Compare: English / Espanol pills under the phone; a tap glides the line all the way. */
+.ks-compare-pills { display: flex; justify-content: center; gap: 8px; margin-top: 18px; }
+.ks-compare-pills button {
+  min-height: 44px; padding: 0 20px; border-radius: 999px;
+  font-family: var(--k-mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+  background: transparent; color: var(--k-dusk); border: 1px solid var(--k-line-d); cursor: pointer;
+  transition: background-color 0.25s, color 0.25s, border-color 0.25s;
+}
+.ks-compare-pills button:hover { color: var(--k-paper); border-color: rgba(242, 237, 228, 0.4); }
+.ks-compare-pills button.is-on { background: var(--k-copper); color: var(--k-ink); border-color: var(--k-copper); }
+@media (prefers-reduced-motion: no-preference) {
+  .ks-compare--glide .ks-compare-top { transition: clip-path 0.7s var(--k-ease); }
+  .ks-compare--glide .ks-compare-bar { transition: left 0.7s var(--k-ease); }
+}
+.ks-compare-bar { transition: opacity 0.3s; }
+.ks-compare--end .ks-compare-bar { opacity: 0; }

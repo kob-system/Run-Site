@@ -123,3 +123,118 @@ export function Wordmark() {
     </a>
   )
 }
+
+// Google Lighthouse (v12.8.2, mobile, simulated throttling), run headless on
+// each live homepage the evening of 2026-09-25 (fetchTime 2026-09-26 00:21 to
+// 00:23 UTC). Only scores of 100 are shown, per site. Full results:
+//   dktaxservice.com           SEO 100, accessibility 100, best practices 100
+//   halfmoonsmokeworld.com     SEO 100, accessibility 100, best practices 100
+//   518firstclassservices.com  SEO 100 (other categories under 100, not shown)
+//   troymegawash.com           SEO 100 (other categories under 100, not shown)
+// Performance was under 100 on every site and is not shown anywhere.
+export const LIGHTHOUSE_DATE = 'September 25, 2026'
+export const LIGHTHOUSE = [
+  { key: 'dktax', name: 'D&K Tax Services', seo: 100 },
+  { key: 'firstclass', name: 'First Class Property Services', seo: 100 },
+  { key: 'troymega', name: 'Troy Mega Laundromat', seo: 100 },
+  { key: 'halfmoon', name: 'Half Moon Smoke World', seo: 100 },
+]
+
+const reducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// Counts from 0 up to a true number once it scrolls into view. Reduced motion,
+// or no observer (jsdom), shows the final number straight away.
+export function CountUp({ to, duration = 1400 }) {
+  const ref = useRef(null)
+  const [n, setN] = useState(to)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof IntersectionObserver === 'undefined' || reducedMotion()) return
+    // The true number shows until the moment it is seen; only then does it
+    // count up, so a missed observer can never leave a false 0 on screen.
+    let raf = 0
+    const io = new IntersectionObserver(([e]) => {
+      if (!e.isIntersecting) return
+      io.disconnect()
+      setN(0)
+      const t0 = performance.now()
+      const tick = (t) => {
+        const k = Math.min(1, (t - t0) / duration)
+        setN(Math.round(to * (1 - Math.pow(1 - k, 3))))
+        if (k < 1) raf = requestAnimationFrame(tick)
+      }
+      raf = requestAnimationFrame(tick)
+    }, { threshold: 0.4 })
+    io.observe(el)
+    return () => { io.disconnect(); cancelAnimationFrame(raf) }
+  }, [to, duration])
+  return <span ref={ref}>{n}</span>
+}
+
+// Drag to compare two real screenshots of the same page (English / Spanish).
+// A native range input drives it, so it works with a thumb, a mouse and the
+// keyboard, and a screen reader announces the position.
+export function Compare({ left, right, leftLabel, rightLabel, alt }) {
+  const [pos, setPos] = useState(50)
+  const [glide, setGlide] = useState(false)
+  const jump = (v) => { setGlide(true); setPos(v) }
+  return (
+    <div className={`ks-compare${glide ? ' ks-compare--glide' : ''}${pos <= 1 || pos >= 99 ? ' ks-compare--end' : ''}`} style={{ '--pos': `${pos}%`, '--p': pos }}>
+      <div className="ks-compare-phone">
+        <img src={left} alt={alt} width="600" height="1298" loading="lazy" decoding="async" />
+        <img className="ks-compare-top" src={right} alt="" aria-hidden="true" width="600" height="1298" loading="lazy" decoding="async" />
+        <span className="ks-compare-bar" aria-hidden="true"><span className="ks-compare-knob" /></span>
+        <input
+          className="ks-compare-range"
+          type="range"
+          min="0"
+          max="100"
+          value={pos}
+          onChange={(e) => { setGlide(false); setPos(Number(e.target.value)) }}
+          aria-label={`Slide between ${leftLabel} and ${rightLabel}`}
+        />
+      </div>
+      <div className="ks-compare-pills">
+        <button type="button" className={pos >= 60 ? 'is-on' : ''} aria-pressed={pos >= 60} onClick={() => jump(100)}>{leftLabel}</button>
+        <button type="button" className={pos <= 40 ? 'is-on' : ''} aria-pressed={pos <= 40} onClick={() => jump(0)}>{rightLabel}</button>
+      </div>
+    </div>
+  )
+}
+
+// Buttons lean a few pixels toward the pointer on desktop. Mouse only, never
+// on touch, never under reduced motion. Also feeds --mx / --my to any
+// [data-glow] panel for the soft spotlight that follows the cursor.
+export function usePointerCraft(rootRef) {
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root || typeof window === 'undefined' || !window.matchMedia) return
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches || reducedMotion()) return
+    const onMove = (e) => {
+      const glow = e.target.closest && e.target.closest('[data-glow]')
+      if (glow) {
+        const r = glow.getBoundingClientRect()
+        glow.style.setProperty('--mx', `${e.clientX - r.left}px`)
+        glow.style.setProperty('--my', `${e.clientY - r.top}px`)
+      }
+      const btn = e.target.closest && e.target.closest('[data-magnetic]')
+      if (btn) {
+        const r = btn.getBoundingClientRect()
+        const x = (e.clientX - (r.left + r.width / 2)) * 0.22
+        const y = (e.clientY - (r.top + r.height / 2)) * 0.32
+        btn.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`
+      }
+    }
+    const onOut = (e) => {
+      const btn = e.target.closest && e.target.closest('[data-magnetic]')
+      if (btn && !btn.contains(e.relatedTarget)) btn.style.transform = ''
+    }
+    root.addEventListener('pointermove', onMove)
+    root.addEventListener('pointerout', onOut)
+    return () => {
+      root.removeEventListener('pointermove', onMove)
+      root.removeEventListener('pointerout', onOut)
+    }
+  }, [rootRef])
+}

@@ -1,10 +1,11 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useRef } from 'react'
 import './Storefront.css'
 import { track, trackOnce, EV } from '../utils/analytics'
 import LeadForm from '../components/LeadForm'
 import {
   PHONE_DISPLAY, PHONE_HREF, emailHref, smsHref, asset,
   WORK, Devices, Reveal, Wordmark,
+  LIGHTHOUSE, LIGHTHOUSE_DATE, CountUp, Compare, usePointerCraft,
 } from './storefront'
 
 // Public homepage at / : what a logged-out stranger sees. Rendered before the
@@ -95,10 +96,13 @@ const OFFERS = [
   },
 ]
 
+// How a build actually runs, in order. Step 04 matches the pricing guarantee.
 const STEPS = [
-  { n: '1', h: 'We talk', p: 'Call, text or email. We learn how you run and what you want.' },
-  { n: '2', h: 'We build it', p: 'Website, Google profile and follow-up, done for you. Nothing new to learn.' },
-  { n: '3', h: 'You go live', p: 'Live in 14 days. You keep every login.' },
+  { n: '01', h: 'Walkthrough', p: 'We walk through your business with you and see how customers find you today.' },
+  { n: '02', h: 'Build', p: 'Your website, written for your customers and built for phones first.' },
+  { n: '03', h: 'Google profile', p: 'Your Google Business Profile set up right, so you show up on Maps.' },
+  { n: '04', h: 'Launch', p: 'Live in 14 days from the day we get your logins.' },
+  { n: '05', h: 'You own it', p: 'You own it and keep every login. Nothing held back.' },
 ]
 
 const SMS_HELLO = "Hi, I found getjobtally.com. I'd like to talk about my business."
@@ -111,9 +115,11 @@ export default function Landing() {
   }, [])
 
   const cta = useCallback((where) => () => track(EV.LANDING_CTA, { where }), [])
+  const rootRef = useRef(null)
+  usePointerCraft(rootRef)
 
   return (
-    <div className="ks">
+    <div className="ks" ref={rootRef}>
       {/* ── Hero (ink) ─────────────────────────────────────────────── */}
       <header className="ks-hero">
         <div className="ks-wrap ks-top">
@@ -139,9 +145,9 @@ export default function Landing() {
               nearby search for what you do, they find you.
             </p>
             <div className="ks-actions ks-rise" style={{ '--d': '420ms' }}>
-              <a className="ks-btn ks-btn--call" href={PHONE_HREF} onClick={cta('hero-call')}>Call {PHONE_DISPLAY}</a>
-              <a className="ks-btn ks-btn--ghost" href={smsHref(SMS_HELLO)} onClick={cta('hero-text')}>Text</a>
-              <a className="ks-btn ks-btn--ghost" href={emailHref("Let's talk about my business")} onClick={cta('hero-email')}>Email</a>
+              <a className="ks-btn ks-btn--call" data-magnetic href={PHONE_HREF} onClick={cta('hero-call')}>Call {PHONE_DISPLAY}</a>
+              <a className="ks-btn ks-btn--ghost" data-magnetic href={smsHref(SMS_HELLO)} onClick={cta('hero-text')}>Text</a>
+              <a className="ks-btn ks-btn--ghost" data-magnetic href={emailHref("Let's talk about my business")} onClick={cta('hero-email')}>Email</a>
             </div>
           </div>
 
@@ -215,7 +221,7 @@ export default function Landing() {
             <ol className="ks-cases">
               {WORK.map((w, i) => (
                 <Reveal as="li" className={`ks-case${i % 2 ? ' ks-case--flip' : ''}`} key={w.key}>
-                  <a className="ks-case-stage" href={`https://${w.domain}`} target="_blank" rel="noopener noreferrer" tabIndex={-1} aria-hidden="true">
+                  <a className="ks-case-stage" data-glow href={`https://${w.domain}`} target="_blank" rel="noopener noreferrer" tabIndex={-1} aria-hidden="true">
                     <Devices item={w} />
                   </a>
                   <div className="ks-case-copy">
@@ -232,6 +238,81 @@ export default function Landing() {
             <p className="ks-work-more">
               Need something built around how you run? <a className="ks-link" href="/demo">See a custom job and crew tracker we built</a>
             </p>
+          </div>
+        </section>
+
+        {/* ── The craft, up close (ink) ────────────────────────────── */}
+        <section className="ks-sheet ks-ink ks-craft" id="craft" aria-labelledby="craft-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">The craft, up close</p>
+              <h2 id="craft-h" className="ks-h2">Built right, <em>checked by Google.</em></h2>
+            </Reveal>
+
+            <div className="ks-craft-grid">
+              <Reveal className="ks-craft-lang">
+                <Compare
+                  left={asset('/media/work/dktax-en.webp')}
+                  right={asset('/media/work/dktax-es.webp')}
+                  leftLabel="English"
+                  rightLabel="Español"
+                  alt="The D&K Tax Services homepage on a phone, in English and in Spanish"
+                />
+                <div className="ks-craft-lang-copy">
+                  <span className="ks-case-n">D&amp;K Tax Services &middot; dktaxservice.com</span>
+                  <h3>One site. <em>Two languages.</em></h3>
+                  <p>D&amp;K serves customers in English and Spanish, so every page does too, with one tap to switch. Drag the line to see both.</p>
+                </div>
+              </Reveal>
+
+              <Reveal className="ks-craft-score">
+                <div className="ks-score-big">
+                  <span className="ks-score-num"><CountUp to={100} /></span>
+                  <span className="ks-score-of">/100</span>
+                </div>
+                <p className="ks-score-what">
+                  <strong>SEO score on all four sites above,</strong> from Google Lighthouse, the test Google
+                  publishes for how well a page is set up for search.
+                </p>
+                <ul className="ks-rings">
+                  {LIGHTHOUSE.map((l, i) => (
+                    <li key={l.key} style={{ '--i': i }}>
+                      <svg viewBox="0 0 44 44" aria-hidden="true">
+                        <circle className="ks-ring-bg" cx="22" cy="22" r="19" />
+                        <circle className="ks-ring-fg" cx="22" cy="22" r="19" pathLength="100" style={{ '--v': l.seo }} />
+                      </svg>
+                      <span className="ks-ring-n">{l.seo}</span>
+                      <span className="ks-ring-name">{l.name}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="ks-score-more">D&amp;K Tax Services and Half Moon Smoke World also score 100 for accessibility and 100 for best practices.</p>
+                <p className="ks-score-src">Lighthouse mobile test of each live homepage, {LIGHTHOUSE_DATE}.</p>
+              </Reveal>
+            </div>
+          </div>
+        </section>
+
+        {/* ── How we build it (paper) ──────────────────────────────── */}
+        <section className="ks-sheet ks-paper ks-process" aria-labelledby="steps-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">How we build it</p>
+              <h2 id="steps-h" className="ks-h2">You run the business. <em>We handle this.</em></h2>
+            </Reveal>
+            <div className="ks-flow-wrap">
+            <span className="ks-flow-line" aria-hidden="true"><span className="ks-flow-fill" /></span>
+            <ol className="ks-flow">
+              {STEPS.map((s, i) => (
+                <li className="ks-flow-step" key={s.n} style={{ '--i': i }}>
+                  <span className="ks-flow-dot" aria-hidden="true" />
+                  <span className="ks-flow-n">{s.n}</span>
+                  <h3>{s.h}</h3>
+                  <p>{s.p}</p>
+                </li>
+              ))}
+            </ol>
+            </div>
           </div>
         </section>
 
@@ -272,25 +353,6 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ── How it works (paper) ─────────────────────────────────── */}
-        <section className="ks-sheet ks-paper ks-steps-sec" aria-labelledby="steps-h">
-          <div className="ks-wrap">
-            <Reveal className="ks-head">
-              <p className="ks-label">How it works</p>
-              <h2 id="steps-h" className="ks-h2">You run the business. <em>We handle this.</em></h2>
-            </Reveal>
-            <ol className="ks-steps">
-              {STEPS.map((s, i) => (
-                <Reveal as="li" className="ks-step" key={s.n} style={{ '--i': i }}>
-                  <span className="ks-step-n" aria-hidden="true">{s.n}</span>
-                  <h3>{s.h}</h3>
-                  <p>{s.p}</p>
-                </Reveal>
-              ))}
-            </ol>
-          </div>
-        </section>
-
         {/* ── Contact (ink) ────────────────────────────────────────── */}
         <section className="ks-sheet ks-ink ks-contact" id="contact" aria-labelledby="contact-h">
           <div className="ks-wrap ks-contact-grid">
@@ -299,9 +361,9 @@ export default function Landing() {
               <h2 id="contact-h" className="ks-h2 ks-h2--xl">Let's talk about <em>your business.</em></h2>
               <a className="ks-phone-big" href={PHONE_HREF} onClick={cta('contact-number')}>{PHONE_DISPLAY}</a>
               <div className="ks-actions">
-                <a className="ks-btn" href={PHONE_HREF} onClick={cta('contact-call')}>Call</a>
-                <a className="ks-btn ks-btn--ghost" href={smsHref(SMS_HELLO)} onClick={cta('contact-text')}>Text</a>
-                <a className="ks-btn ks-btn--ghost" href={emailHref("Let's talk about my business")} onClick={cta('contact-email')}>Email</a>
+                <a className="ks-btn" data-magnetic href={PHONE_HREF} onClick={cta('contact-call')}>Call</a>
+                <a className="ks-btn ks-btn--ghost" data-magnetic href={smsHref(SMS_HELLO)} onClick={cta('contact-text')}>Text</a>
+                <a className="ks-btn ks-btn--ghost" data-magnetic href={emailHref("Let's talk about my business")} onClick={cta('contact-email')}>Email</a>
               </div>
             </Reveal>
             <Reveal className="ks-contact-form">
@@ -313,7 +375,7 @@ export default function Landing() {
             <Reveal className="ks-refer">
               <div>
                 <p className="ks-label">Know a business owner?</p>
-                <p className="ks-refer-line">Refer them. When they pay, your next month is free. Not on a monthly plan? You get $150.</p>
+                <p className="ks-refer-line">Refer them. When they pay, your next month is free. Not on a monthly plan? You get $150 off.</p>
               </div>
               <a className="ks-btn ks-btn--ghost" href={smsHref(SMS_REFER)} onClick={cta('refer-text')}>Send a referral</a>
             </Reveal>
@@ -323,14 +385,33 @@ export default function Landing() {
 
       <footer className="ks-footer">
         <div className="ks-wrap">
-          <div className="ks-footer-top">
-            <Wordmark />
-            <p>Websites and Google Maps for local businesses. Menands, NY.</p>
+          <div className="ks-footer-cols">
+            <div className="ks-footer-brand">
+              <Wordmark />
+              <p>Websites and Google Maps for local businesses. Based in Menands, NY.</p>
+              <a className="ks-footer-phone" href={PHONE_HREF}>{PHONE_DISPLAY}</a>
+            </div>
+            <nav className="ks-footer-col" aria-label="Recent work">
+              <p className="ks-footer-h">Recent work</p>
+              {WORK.map((w) => (
+                <a key={w.key} href={`https://${w.domain}`} target="_blank" rel="noopener noreferrer">{w.domain}</a>
+              ))}
+            </nav>
+            <div className="ks-footer-col">
+              <p className="ks-footer-h">Where we work</p>
+              <p className="ks-footer-towns">{TOWNS.slice(0, 8).join(', ')} and the rest of the Capital Region.</p>
+            </div>
+            <nav className="ks-footer-col" aria-label="Footer">
+              <p className="ks-footer-h">Reach us</p>
+              <a href={PHONE_HREF}>Call</a>
+              <a href={smsHref(SMS_HELLO)}>Text</a>
+              <a href={emailHref("Let's talk about my business")}>Email</a>
+            </nav>
           </div>
-          <nav className="ks-footer-links" aria-label="Footer">
-            <a href={PHONE_HREF}>Call</a>
-            <a href={smsHref(SMS_HELLO)}>Text</a>
-            <a href={emailHref("Let's talk about my business")}>Email</a>
+        </div>
+        <p className="ks-footer-mark" aria-hidden="true">Kobrossi <em>Systems</em></p>
+        <div className="ks-wrap ks-footer-base">
+          <nav className="ks-footer-links" aria-label="Legal">
             <a href="/login">Client sign in</a>
             <a href="/privacy.html">Privacy</a>
             <a href="/terms.html">Terms</a>

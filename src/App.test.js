@@ -291,6 +291,20 @@ test('homepage no longer claims the Missed Call Check, the QR counter card, or t
   expect(screen.queryByText(/\$500 of Google SEO/i)).not.toBeInTheDocument()
 })
 
+test('homepage referral reward reads $150 off, never a bare $150 cash line', async () => {
+  render(<App />)
+  await screen.findByRole('heading', { level: 1, name: /easy to find on Google/i }, ROUTE_LOAD)
+  expect(screen.getByText(/You get \$150 off\./)).toBeInTheDocument()
+  expect(document.body.textContent).not.toMatch(/You get \$150\.(?! off)/)
+})
+
+test('homepage Lighthouse proof shows the dated SEO scores and the D&K English and Spanish compare', async () => {
+  render(<App />)
+  await screen.findByRole('heading', { level: 1, name: /easy to find on Google/i }, ROUTE_LOAD)
+  expect(screen.getByText(/Lighthouse mobile test of each live homepage, September 25, 2026/)).toBeInTheDocument()
+  expect(screen.getByRole('slider', { name: /English and Español/ })).toBeInTheDocument()
+})
+
 test('storefront pages carry no em or en dashes and none of the banned owner-facing words', async () => {
   for (const path of ['/', '/jp']) {
     goTo(path)
