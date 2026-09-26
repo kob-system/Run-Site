@@ -1,433 +1,344 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
-import './Landing.css'
+import React, { useEffect, useCallback } from 'react'
+import './Storefront.css'
 import { track, trackOnce, EV } from '../utils/analytics'
 import LeadForm from '../components/LeadForm'
+import {
+  PHONE_DISPLAY, PHONE_HREF, emailHref, smsHref, asset,
+  WORK, Devices, Reveal, Wordmark,
+} from './storefront'
 
-// Public landing page at / — what a stranger sees before they have an account.
-// Rendered before the Login screen (App.js) for logged-out visitors.
+// Public homepage at / : what a logged-out stranger sees. Rendered before the
+// Login screen (App.js). The JobTally app itself (OwnerDashboard,
+// WorkerDashboard, Billing, crew invites) is untouched underneath.
 //
-// 2026-09-25 revision (JP's review): written as the business, not in first
-// person. Speaks to one buyer, the local owner-operator who works in the
-// business every day and wants to be found on Google and stop losing
-// customers who call or text when they can't pick up. Removed: the free
-// "Missed Call Check" section and the review QR counter card (not offered).
-// Hero photo is now a Capital Region image (see HeroPhoto below). The hero
-// headline is asserted on by App.test.js, update both together.
+// 2026-09-25 redesign ("The Capitol at dusk"): editorial serif type, one
+// photo, scroll-driven motion that is off under prefers-reduced-motion.
+// Every color in Storefront.css is sampled from the one hero photo below, so
+// if the photo ever changes, the palette has to be reviewed with it.
 //
-// The actual app (OwnerDashboard, WorkerDashboard, Billing, crew invites) is
-// untouched underneath this page and still works exactly as before for any
-// session that already exists — this file only changes what a logged-out
-// stranger hitting the bare root sees.
-const CONTACT_EMAIL = 'kobrossisystems@gmail.com'
-const CONTACT_PHONE_HREF = 'tel:+15186089344'
-const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Let's talk about my business")}`
+// The h1 is asserted on by App.test.js (by role + name), update both together.
 
-const TIERS = [
+// Hero photo: "Empire State Plaza at sunset" by Sashimi-b, 2026-05-29.
+// Source: https://commons.wikimedia.org/wiki/File:Empire_State_Plaza_at_sunset.jpg
+// License: CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/), free
+// for commercial use with attribution. The crops/resizes below are an
+// adaptation and are shared under the same license. Credit is in the footer.
+// Self-hosted webp in public/media/hero/ (CSP img-src is 'self'):
+//   plaza-{1100,1600,2400}.webp  16:9 crop, desktop and tablet
+//   plaza-p-{1000,1400}.webp     4:5 crop on the Capitol and the Egg, desktop (60 / 92 KB)
+//   plaza-s-{700,1000}.webp      square crop, Capitol high in frame, phones
+const HERO = (f) => asset(`/media/hero/${f}`)
+
+const TOWNS = ['Albany', 'Troy', 'Schenectady', 'Menands', 'Colonie', 'Cohoes', 'Watervliet', 'Latham', 'Clifton Park', 'Saratoga Springs', 'Rensselaer', 'Delmar']
+
+const PARTS = [
   {
     n: '01',
-    accent: 'green',
-    name: 'The Online Starter Kit',
-    price: '$1,500',
-    forWho: 'You want a real website and to show up on Google',
-    body: 'A clean, professional website plus your Google profile set up right, so you show up on Google Maps and search when people nearby look for what you do. Local SEO included.',
+    h: 'A website that looks the part',
+    p: 'Fast on a phone, clear about what you do, one tap to call. You own it and keep every login.',
   },
   {
     n: '02',
-    accent: 'orange',
-    name: 'The Follow-Up System',
-    price: '$2,000',
-    step: '+$500 over the Starter Kit',
-    monthly: 'then from $197/mo to keep it running',
-    forWho: "Customers call and text when you can't pick up",
-    body: 'Everything in the Starter Kit, plus every missed call texted back and every customer asked for a review.',
-    link: { href: '#stack', label: "See what's included" },
+    h: 'Show up on Google Maps',
+    p: 'Your Google profile set up right and local search done, so you show up when people nearby look.',
   },
   {
     n: '03',
-    accent: 'amber',
+    h: 'Every missed call, answered back',
+    p: 'Missed calls get a text back and every customer gets asked for a review. Part of the Follow-Up System.',
+  },
+]
+
+const OFFERS = [
+  {
+    key: 'starter',
+    name: 'The Online Starter Kit',
+    price: '$1,500',
+    terms: 'One time',
+    forWho: 'You need a real website and to show up on Google.',
+    items: [
+      'A professional website, built for phones',
+      'Your Google Business Profile set up right',
+      'Local search (SEO) done',
+      'You own it and keep every login',
+    ],
+  },
+  {
+    key: 'followup',
+    featured: true,
+    name: 'The Follow-Up System',
+    price: '$2,000',
+    step: '+$500 over the Starter Kit',
+    terms: 'then from $197/mo, founding rate, month to month',
+    forWho: "Customers call and text when you can't pick up.",
+    items: [
+      'Everything in the Starter Kit',
+      'Every missed call gets a text back',
+      'Every customer asked for a review',
+      'Reviews answered in your voice',
+      'Listed on Yelp, Bing and Apple Maps',
+      'Past customers who opted in get a seasonal check-in',
+      'One text a month: calls, texts back, new reviews',
+    ],
+    bonus: 'Day one: your 3 most recent unanswered reviews, answered.',
+  },
+  {
+    key: 'diagnostic',
     name: 'The Diagnostic',
     price: 'Quoted after we talk',
-    forWho: "Something's off and you want it found",
-    body: 'We walk through how you run, show you where time and money are slipping, then quote the fix.',
+    forWho: "Something's off and you want it found.",
+    items: [
+      'We walk through your business with you',
+      'You see where time and money are slipping',
+      'The real fix, priced before any work starts',
+    ],
   },
 ]
 
-// ── 2026-09-24: Hormozi pass ($100M Offers value stack + $100M Leads magnet
-// and referral ask). Council-checked before shipping: the monthly shows only
-// the founding rate ("from $197/mo") because JP hasn't ruled $200 vs $297 for
-// the full rate; the guarantee covers setup (what he controls), never a
-// result; review asks go to every customer (no gating, no incentive, FTC
-// 16 CFR 465); texts only to customers who opted in (A2P + NY GBL 399-z).
-// Stack values are what comparable services charge, labelled that way on
-// the page, not a promise of results.
-const STACK = [
-  { item: 'Every missed call gets a text back', detail: 'They hear from you right away, while you keep working.', worth: 'Answering services run $300/mo' },
-  { item: 'Every customer asked for a review', detail: 'Sent after every visit, to every customer.', worth: 'Review tools run $299/mo and up' },
-  { item: 'Every review answered', detail: 'Written in your voice, good and bad.', worth: 'Included' },
-  { item: 'The whole Starter Kit', detail: 'Website, Google Maps and local search. You keep the login.', worth: '$1,500 on its own' },
-  { item: 'Yelp, Bing and Apple Maps', detail: 'Listed once, matching your Google profile.', worth: 'Included' },
-  { item: 'Past customers brought back', detail: 'Seasonal check-in texts to customers who opted in.', worth: 'Included' },
-  { item: 'One text a month', detail: 'Calls, texts back and new reviews. Nothing new to learn.', worth: 'Included' },
+const STEPS = [
+  { n: '1', h: 'We talk', p: 'Call, text or email. We learn how you run and what you want.' },
+  { n: '2', h: 'We build it', p: 'Website, Google profile and follow-up, done for you. Nothing new to learn.' },
+  { n: '3', h: 'You go live', p: 'Live in 14 days. You keep every login.' },
 ]
 
-const BONUSES = [
-  'Your 3 most recent unanswered reviews, answered on day one',
-]
-
-const PORTFOLIO = [
-  { name: 'First Class Property Services', domain: '518firstclassservices.com' },
-  { name: 'Troy Mega Laundromat', domain: 'troymegawash.com' },
-  { name: 'Schenectady Marble & Granite', domain: 'schenectadymarble.com' },
-  { name: 'Half Moon Smoke World', domain: 'halfmoonsmokeworld.com' },
-  { name: 'USA Kitchen & Cabinets', domain: 'usakitchencabinets518.com' },
-  { name: 'All Phase Maintenance', domain: 'allphasemaintenance.com' },
-  { name: 'D&K Tax Services', domain: 'dktaxservice.com' },
-  { name: 'Job & Crew Tracker', domain: null, href: '/demo', note: 'Custom build, tap through the demo' },
-]
-
-// Self-select by stage rather than a generic Q&A — JP's own framing ("it
-// depends on what stage you are"). Each answer names the tier so this also
-// works as second navigation to the section above.
-const STAGES = [
-  {
-    n: '1',
-    tier: 'Offer 1: The Online Starter Kit',
-    accent: 'green',
-    q: "I don't have anything online",
-    a: 'Get found first. Everything else comes after.',
-  },
-  {
-    n: '2',
-    tier: 'Offer 2: The Follow-Up System',
-    accent: 'orange',
-    q: "I've got a website, but the phone isn't ringing",
-    a: 'The site is rarely the problem. Customers slipping away after the first call is.',
-  },
-  {
-    n: '3',
-    tier: 'Offer 3: The Diagnostic',
-    accent: 'amber',
-    q: "I just know something's off",
-    a: "Tell us how you run and we'll find it.",
-  },
-]
-
-const PROCESS = [
-  { n: 'STEP 01', h: 'We talk', p: 'What you want, and how you run today.' },
-  { n: 'STEP 02', h: 'We build it', p: 'Website, Google profile and follow-up, done for you.' },
-  { n: 'STEP 03', h: 'You go live', p: 'Live in 14 days. You keep every login.' },
-]
-
-// Construction leans first (JP's own background, BS CET) but the panel next
-// to it is the explicit "not only construction" answer he asked for.
-const INDUSTRIES = ['Home & Property Services', 'Laundromats', 'Retail Shops', 'Kitchen & Cabinet Shops', 'Contractors & Trades', 'Tax & Small Offices']
-
-// First pass pulled each business's real favicon off Google's public proxy —
-// looked fine locally but silently 404'd in production because the site's
-// own CSP (vercel.json img-src) only allows 'self'/data:/blob:/Supabase.
-// Initials avatars instead: zero network dependency, can't ever break.
-const AVATAR_COLORS = ['green', 'orange', 'amber']
-const initials = (name) => name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()
-
-// ── Scroll-reveal ───────────────────────────────────────────────────────
-// One IntersectionObserver per mounted section rather than a shared
-// singleton — the page has ~10 sections, this is not a scale problem, and it
-// keeps each Reveal instance self-contained.
-function Reveal({ as: Tag = 'div', className = '', children, ...rest }) {
-  const ref = useRef(null)
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    if (typeof IntersectionObserver === 'undefined') {
-      setVisible(true) // no observer support (old browser, test env) — just show the content
-      return
-    }
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true)
-          io.disconnect()
-        }
-      },
-      { threshold: 0.15, rootMargin: '0px 0px -60px 0px' }
-    )
-    io.observe(el)
-    return () => io.disconnect()
-  }, [])
-
-  return (
-    <Tag ref={ref} className={`ld-reveal${visible ? ' ld-in' : ''} ${className}`} {...rest}>
-      {children}
-    </Tag>
-  )
-}
-
-// Hero photo (2026-09-25): "Albany, New York" by Quintin Soloviev, an aerial
-// of downtown Albany over the Hudson.
-// Source: https://commons.wikimedia.org/wiki/File:Albany,_New_York.jpg
-// License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), free for
-// commercial use with attribution. Attribution is in the page footer.
-// Resized to 1680w / 960w webp, self-hosted in public/media/hero/ so it serves
-// same-origin under the CSP (img-src 'self'). Passed in as CSS variables so
-// Landing.css can swap to the small file on phones.
-const HERO_IMG = `${process.env.PUBLIC_URL || ''}/media/hero/hero-albany.webp`
-const HERO_IMG_SM = `${process.env.PUBLIC_URL || ''}/media/hero/hero-albany-sm.webp`
-
-function HeroPhoto() {
-  return (
-    <div
-      className="ld-hero-photo-wrap"
-      aria-hidden="true"
-      style={{ '--hero-img': `url(${HERO_IMG})`, '--hero-img-sm': `url(${HERO_IMG_SM})` }}
-    >
-      <div className="ld-hero-photo" />
-      <div className="ld-hero-grade" />
-    </div>
-  )
-}
+const SMS_HELLO = "Hi, I found getjobtally.com. I'd like to talk about my business."
+const SMS_REFER = "Hi, I'd like to refer a business to you. Their name and number: "
 
 export default function Landing() {
   useEffect(() => {
-    document.title = 'Kobrossi Systems, business consultant, Capital Region NY'
+    document.title = 'Kobrossi Systems | Websites and Google Maps, Capital Region NY'
     trackOnce(EV.LANDING_VIEW)
   }, [])
 
   const cta = useCallback((where) => () => track(EV.LANDING_CTA, { where }), [])
 
   return (
-    <div className="ld">
-      {/* Top bar */}
-      <header className="ld-top">
-        <a className="ld-logo" href="/">
-          <span className="ld-logo-mark" aria-hidden="true" />
-          KOBROSSI SYSTEMS
-          <span className="ld-logo-sub">&#47;&#47; capital region, ny</span>
-        </a>
-        <nav>
-          <a className="ld-cta-sm" href={CONTACT_PHONE_HREF} onClick={cta('topbar')}>Call</a>
-        </nav>
-      </header>
-
-      {/* Hero */}
-      <section className="ld-hero">
-        <HeroPhoto />
-        <div className="ld-hero-inner">
-          <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Local businesses &middot; Capital Region, NY</div>
-          <h1>Get found on Google. Get the call. Keep the customer.</h1>
-          <p className="ld-sub">Websites, Google Maps and follow-up for shops, service businesses and small offices that are too busy to chase every call.</p>
-          <div className="ld-cta-row">
-            <a className="ld-cta" href={CONTACT_PHONE_HREF} onClick={cta('hero-call')}>Call</a>
-            <a className="ld-cta ld-cta-call" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email</a>
-          </div>
+    <div className="ks">
+      {/* ── Hero (ink) ─────────────────────────────────────────────── */}
+      <header className="ks-hero">
+        <div className="ks-wrap ks-top">
+          <Wordmark />
+          <nav className="ks-nav" aria-label="Main">
+            <a href="#work">Work</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#contact">Contact</a>
+          </nav>
+          <a className="ks-btn ks-btn--sm" href={PHONE_HREF} onClick={cta('topbar')}>Call</a>
         </div>
-        <div className="ld-scroll-cue"><span className="ld-scroll-cue-line" />Scroll</div>
-      </section>
 
-      {/* How it works */}
-      <Reveal as="section" className="ld-story">
-        <div className="ld-inner">
-          <span className="ld-kicker-label">How it works</span>
-          <h2>You run the business. We get you found.</h2>
-          <div className="ld-process">
-            {PROCESS.map((s) => (
-              <div className="ld-process-step" key={s.n}>
-                <div className="ld-process-num">{s.n}</div>
-                <h3>{s.h}</h3>
-                <p>{s.p}</p>
-              </div>
+        <div className="ks-hero-grid">
+          <div className="ks-hero-copy">
+            <p className="ks-eyebrow ks-rise" style={{ '--d': '0ms' }}>Websites and Google Maps &middot; Capital Region, NY</p>
+            <h1 className="ks-h1">
+              <span className="ks-rise" style={{ '--d': '80ms' }}>Your business,</span>{' '}
+              <span className="ks-rise" style={{ '--d': '160ms' }}><em>easy to find</em></span>{' '}
+              <span className="ks-rise" style={{ '--d': '240ms' }}>on Google.</span>
+            </h1>
+            <p className="ks-lede ks-rise" style={{ '--d': '340ms' }}>
+              We build websites for local businesses and set up their Google listing, so when people
+              nearby search for what you do, they find you.
+            </p>
+            <div className="ks-actions ks-rise" style={{ '--d': '420ms' }}>
+              <a className="ks-btn ks-btn--call" href={PHONE_HREF} onClick={cta('hero-call')}>Call {PHONE_DISPLAY}</a>
+              <a className="ks-btn ks-btn--ghost" href={smsHref(SMS_HELLO)} onClick={cta('hero-text')}>Text</a>
+              <a className="ks-btn ks-btn--ghost" href={emailHref("Let's talk about my business")} onClick={cta('hero-email')}>Email</a>
+            </div>
+          </div>
+
+          <figure className="ks-hero-media">
+            <div className="ks-hero-frame">
+              <picture>
+                {/* Phones: square crop, Capitol high in frame. Desktop: 4:5. Tablets: 16:9. */}
+                <source media="(max-width: 700px)" type="image/webp" srcSet={`${HERO('plaza-s-700.webp')} 700w, ${HERO('plaza-s-1000.webp')} 1000w`} sizes="100vw" />
+                <source media="(min-width: 1000px)" type="image/webp" srcSet={`${HERO('plaza-p-1000.webp')} 1000w, ${HERO('plaza-p-1400.webp')} 1400w`} sizes="50vw" />
+                <img
+                  src={HERO('plaza-1600.webp')}
+                  srcSet={`${HERO('plaza-1100.webp')} 1100w, ${HERO('plaza-1600.webp')} 1600w, ${HERO('plaza-2400.webp')} 2400w`}
+                  sizes="100vw"
+                  alt="The New York State Capitol, the Egg and the Empire State Plaza towers at sunset, Albany"
+                  width="1600"
+                  height="900"
+                  fetchpriority="high"
+                  decoding="async"
+                />
+              </picture>
+              <figcaption className="ks-hero-cap">
+                <span className="ks-hero-cap-dot" aria-hidden="true" />
+                Empire State Plaza, Albany
+              </figcaption>
+            </div>
+          </figure>
+        </div>
+
+        <div className="ks-marquee" aria-label="Where we work">
+          <div className="ks-marquee-track">
+            {[0, 1].map((copy) => (
+              <ul key={copy} aria-hidden={copy === 1 ? 'true' : undefined}>
+                {TOWNS.map((t) => <li key={t}>{t}</li>)}
+              </ul>
             ))}
           </div>
         </div>
-      </Reveal>
+      </header>
 
-      {/* Who it's for: the owner-operator who works in the business every day */}
-      <Reveal as="section" className="ld-niche">
-        <div className="ld-inner ld-niche-grid">
-          <div className="ld-niche-copy">
-            <span className="ld-kicker-label">Who it's for</span>
-            <h2>Owners who are in the business every day.</h2>
-            <p>
-              You're behind the counter or on the job. <strong>We make sure the customers looking
-              for you find you, and hear back.</strong>
-            </p>
-            <ul className="ld-niche-list">
-              <li>A website that looks like a real business</li>
-              <li>Show up on Google Maps when people nearby search</li>
-              <li>Every missed call gets a text back</li>
-            </ul>
-          </div>
-          <div className="ld-niche-panel ld-corners">
-            <div className="ld-niche-panel-label">Who we work with</div>
-            <h3>Local businesses across the Capital Region</h3>
-            <div className="ld-industry-grid">
-              {INDUSTRIES.map((ind) => (
-                <div className="ld-industry-chip" key={ind}>{ind}</div>
+      <main>
+        {/* ── What we do (paper) ───────────────────────────────────── */}
+        <section className="ks-sheet ks-paper ks-what" aria-labelledby="what-h">
+          <div className="ks-wrap">
+            <Reveal>
+              <p className="ks-label">What we do</p>
+              <h2 id="what-h" className="ks-statement">
+                People find a local business on their phone. They search, check the map, look at the
+                website, then call. <em>We make sure every step leads to you.</em>
+              </h2>
+            </Reveal>
+            <div className="ks-parts">
+              {PARTS.map((p, i) => (
+                <Reveal className="ks-part" key={p.n} style={{ '--i': i }}>
+                  <span className="ks-part-n">{p.n}</span>
+                  <h3>{p.h}</h3>
+                  <p>{p.p}</p>
+                </Reveal>
               ))}
             </div>
           </div>
-        </div>
-      </Reveal>
+        </section>
 
-      {/* The three tiers */}
-      <Reveal as="section" className="ld-tiers" id="tiers">
-        <div className="ld-inner">
-          <span className="ld-kicker-label">Pricing</span>
-          <h2>Three ways to start</h2>
-          <p className="ld-kicker">Pick the one that matches where you are.</p>
-          <div className="ld-tier-grid">
-            {TIERS.map((t) => (
-              <div className={`ld-tier-card ld-corners ld-tier-card--${t.accent}`} key={t.n}>
-                <div className="ld-tier-num">{t.n}</div>
-                <h3>{t.name}</h3>
-                <div className="ld-tier-price">{t.price}</div>
-                {t.step && <div className="ld-tier-step">{t.step}</div>}
-                {t.monthly && <div className="ld-tier-monthly">{t.monthly}</div>}
-                <div className="ld-tier-forwho">{t.forWho}</div>
-                <p>{t.body}</p>
-                {t.link && <a className="ld-inline-link ld-tier-link" href={t.link.href}>{t.link.label} &rarr;</a>}
-              </div>
-            ))}
+        {/* ── Recent work (paper) ──────────────────────────────────── */}
+        <section className="ks-paper ks-work" id="work" aria-labelledby="work-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">Recent work</p>
+              <h2 id="work-h" className="ks-h2">Real local businesses. <em>Live sites.</em></h2>
+              <p className="ks-sub">Tap any one and look for yourself.</p>
+            </Reveal>
+            <ol className="ks-cases">
+              {WORK.map((w, i) => (
+                <Reveal as="li" className={`ks-case${i % 2 ? ' ks-case--flip' : ''}`} key={w.key}>
+                  <a className="ks-case-stage" href={`https://${w.domain}`} target="_blank" rel="noopener noreferrer" tabIndex={-1} aria-hidden="true">
+                    <Devices item={w} />
+                  </a>
+                  <div className="ks-case-copy">
+                    <span className="ks-case-n">{String(i + 1).padStart(2, '0')} / {String(WORK.length).padStart(2, '0')} &middot; {w.place}</span>
+                    <h3>{w.name}</h3>
+                    <p>{w.did}</p>
+                    <a className="ks-link" href={`https://${w.domain}`} target="_blank" rel="noopener noreferrer" onClick={cta('work-' + w.key)}>
+                      Visit {w.domain} <span aria-hidden="true">&#8599;</span>
+                    </a>
+                  </div>
+                </Reveal>
+              ))}
+            </ol>
+            <p className="ks-work-more">
+              Need something built around how you run? <a className="ks-link" href="/demo">See a custom job and crew tracker we built</a>
+            </p>
           </div>
-          <p className="ld-tiers-guarantee"><strong>Starter Kit and Follow-Up System: live in 14 days from the day we get your logins, or your setup fee comes back.</strong> Half down, half when it's live.</p>
-          <div className="ld-how-cta">
-            <a className="ld-cta" href={CONTACT_PHONE_HREF} onClick={cta('tiers')}>Get started</a>
-          </div>
-        </div>
-      </Reveal>
+        </section>
 
-      {/* The value stack for offer 2 */}
-      <Reveal as="section" className="ld-stack" id="stack">
-        <div className="ld-inner">
-          <span className="ld-kicker-label">The Follow-Up System</span>
-          <h2>Stop losing customers who call after hours.</h2>
-          <p className="ld-kicker">Done for you. Nothing new to learn.</p>
-          <ul className="ld-stack-list">
-            {STACK.map((s) => (
-              <li className="ld-stack-row" key={s.item}>
-                <div>
-                  <h3>{s.item}</h3>
-                  <p>{s.detail}</p>
-                </div>
-                <div className="ld-stack-worth">{s.worth}</div>
-              </li>
-            ))}
-          </ul>
-          <div className="ld-stack-price ld-corners">
-            <div className="ld-stack-price-label">Your price</div>
-            <div className="ld-stack-price-big">$2,000 setup</div>
-            <div className="ld-stack-price-sub">then from $197/mo, founding rate, month to month</div>
-          </div>
-          <div className="ld-stack-bonus">
-            <div className="ld-stack-price-label">Plus, on day one</div>
-            <ul>
-              {BONUSES.map((b) => <li key={b}>{b}</li>)}
-            </ul>
-          </div>
-          <p className="ld-stack-fine">Prices next to each item are what similar services charge on their own, for comparison. Not a promise of results.</p>
-        </div>
-      </Reveal>
-
-      {/* Portfolio: real client work, named. */}
-      <Reveal as="section" className="ld-portfolio" id="portfolio">
-        <div className="ld-inner">
-          <span className="ld-kicker-label">Portfolio</span>
-          <h2>Recent work</h2>
-          <p className="ld-kicker">Real local businesses, live sites. Tap one and look.</p>
-          <ul className="ld-portfolio-grid">
-            {PORTFOLIO.map((p, i) => {
-              const avatar = (
-                <span className={`ld-portfolio-logo ld-portfolio-logo--${AVATAR_COLORS[i % AVATAR_COLORS.length]}`} aria-hidden="true">
-                  {initials(p.name)}
-                </span>
-              )
-              const num = `PROJECT ${String(i + 1).padStart(2, '0')}`
-              const text = (
-                <span className="ld-portfolio-text">
-                  <span className="ld-portfolio-num">{num}</span>
-                  <span className="ld-portfolio-name">{p.name}</span>
-                  <span className="ld-portfolio-domain">{p.domain || p.note}</span>
-                </span>
-              )
-              return (
-                <li className="ld-portfolio-card" key={p.name}>
-                  {p.href ? (
-                    <a href={p.href}>{avatar}{text}</a>
-                  ) : p.domain ? (
-                    <a href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">{avatar}{text}</a>
-                  ) : (
-                    <div className="ld-portfolio-static">{avatar}{text}</div>
+        {/* ── Pricing (ink) ────────────────────────────────────────── */}
+        <section className="ks-sheet ks-ink ks-pricing" id="pricing" aria-labelledby="pricing-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">Pricing</p>
+              <h2 id="pricing-h" className="ks-h2">Three ways <em>to start.</em></h2>
+              <p className="ks-sub">Flat prices. Pick the one that fits where you are.</p>
+            </Reveal>
+            <div className="ks-offers">
+              {OFFERS.map((o, i) => (
+                <Reveal className={`ks-offer${o.featured ? ' ks-offer--featured' : ''}`} key={o.key} style={{ '--i': i }}>
+                  {o.featured && <span className="ks-offer-badge">Most complete</span>}
+                  <h3 className="ks-offer-name">{o.name}</h3>
+                  <p className="ks-offer-for">{o.forWho}</p>
+                  <div className={`ks-offer-price${o.price.startsWith('$') ? '' : ' ks-offer-price--words'}`}>{o.price}</div>
+                  {o.step && <div className="ks-offer-step">{o.step}</div>}
+                  {o.terms && <div className="ks-offer-terms">{o.terms}</div>}
+                  {o.items && (
+                    <ul className="ks-offer-items">
+                      {o.items.map((it) => <li key={it}>{it}</li>)}
+                    </ul>
                   )}
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      </Reveal>
-
-      {/* Which one's you: each card links to the offers */}
-      <Reveal as="section" className="ld-faq">
-        <div className="ld-inner">
-          <a className="ld-kicker-label ld-kicker-link" href="#tiers">Start here</a>
-          <h2>Which one's you?</h2>
-          <div className="ld-faq-list">
-            {STAGES.map((s) => (
-              <a className={`ld-faq-item ld-faq-item--${s.accent}`} href="#tiers" key={s.q} onClick={cta('faq-' + s.n)}>
-                <div className="ld-faq-num">{s.n}</div>
-                <div>
-                  <span className="ld-faq-tier">{s.tier}</span>
-                  <h3>"{s.q}"</h3>
-                  <p>{s.a}</p>
-                </div>
-              </a>
-            ))}
-          </div>
-        </div>
-      </Reveal>
-
-      {/* Referral ask. Paid on the referred business's first payment only. */}
-      <Reveal as="section" className="ld-refer" id="refer">
-        <div className="ld-inner ld-check-grid">
-          <div>
-            <span className="ld-kicker-label">Know someone?</span>
-            <h2>Refer a business. Get a month free.</h2>
-            <p className="ld-kicker">When a business you refer pays, your next month is free. Not on a monthly plan? You get $150.</p>
-          </div>
-          <div className="ld-check-form">
-            <LeadForm source="referral" ctaLabel="Send the intro" askMessage="Your name, and the business you're referring" />
-          </div>
-        </div>
-      </Reveal>
-
-      {/* Final CTA */}
-      <Reveal as="section" className="ld-final">
-        <div className="ld-final-panel ld-corners">
-          <div className="ld-final-glow" aria-hidden="true" />
-          <h2>Ready to get found?</h2>
-          <p>Tell us about your business. You'll get a straight answer on what's worth doing.</p>
-          <div className="ld-final-split">
-            <div className="ld-final-form">
-              <LeadForm source="homepage-final" ctaLabel="Send" />
+                  {o.body && <p className="ks-offer-body">{o.body}</p>}
+                  {o.bonus && <p className="ks-offer-bonus">{o.bonus}</p>}
+                  <a className={`ks-btn${o.featured ? '' : ' ks-btn--ghost'} ks-offer-cta`} href={PHONE_HREF} onClick={cta('offer-' + o.key)}>
+                    {o.key === 'diagnostic' ? 'Book a conversation' : 'Get started'}
+                  </a>
+                </Reveal>
+              ))}
             </div>
-            <div className="ld-final-or">
-              <span>or</span>
-            </div>
-            <div className="ld-final-direct">
-              <div className="ld-cta-row">
-                <a className="ld-cta" href={CONTACT_PHONE_HREF} onClick={cta('final-call')}>Call</a>
-                <a className="ld-cta ld-cta-call" href={CONTACT_MAILTO} onClick={cta('final')}>Email</a>
+            <Reveal className="ks-guarantee">
+              <strong>Live in 14 days</strong> from the day we get your logins, or your setup fee comes back.
+              Starter Kit and Follow-Up System. Half down, half when it's live.
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ── How it works (paper) ─────────────────────────────────── */}
+        <section className="ks-sheet ks-paper ks-steps-sec" aria-labelledby="steps-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">How it works</p>
+              <h2 id="steps-h" className="ks-h2">You run the business. <em>We handle this.</em></h2>
+            </Reveal>
+            <ol className="ks-steps">
+              {STEPS.map((s, i) => (
+                <Reveal as="li" className="ks-step" key={s.n} style={{ '--i': i }}>
+                  <span className="ks-step-n" aria-hidden="true">{s.n}</span>
+                  <h3>{s.h}</h3>
+                  <p>{s.p}</p>
+                </Reveal>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        {/* ── Contact (ink) ────────────────────────────────────────── */}
+        <section className="ks-sheet ks-ink ks-contact" id="contact" aria-labelledby="contact-h">
+          <div className="ks-wrap ks-contact-grid">
+            <Reveal className="ks-contact-copy">
+              <p className="ks-label">Contact</p>
+              <h2 id="contact-h" className="ks-h2 ks-h2--xl">Let's talk about <em>your business.</em></h2>
+              <a className="ks-phone-big" href={PHONE_HREF} onClick={cta('contact-number')}>{PHONE_DISPLAY}</a>
+              <div className="ks-actions">
+                <a className="ks-btn" href={PHONE_HREF} onClick={cta('contact-call')}>Call</a>
+                <a className="ks-btn ks-btn--ghost" href={smsHref(SMS_HELLO)} onClick={cta('contact-text')}>Text</a>
+                <a className="ks-btn ks-btn--ghost" href={emailHref("Let's talk about my business")} onClick={cta('contact-email')}>Email</a>
               </div>
-            </div>
+            </Reveal>
+            <Reveal className="ks-contact-form">
+              <p className="ks-form-title">Or leave your details and we'll reach out.</p>
+              <LeadForm source="homepage-final" ctaLabel="Send" />
+            </Reveal>
           </div>
-        </div>
-      </Reveal>
+          <div className="ks-wrap">
+            <Reveal className="ks-refer">
+              <div>
+                <p className="ks-label">Know a business owner?</p>
+                <p className="ks-refer-line">Refer them. When they pay, your next month is free. Not on a monthly plan? You get $150.</p>
+              </div>
+              <a className="ks-btn ks-btn--ghost" href={smsHref(SMS_REFER)} onClick={cta('refer-text')}>Send a referral</a>
+            </Reveal>
+          </div>
+        </section>
+      </main>
 
-      <footer className="ld-footer">
-        <a href={CONTACT_MAILTO}>Email</a>&middot;<a href={CONTACT_PHONE_HREF}>Call</a>&middot;<a href="/login">Client sign in</a>&middot;<a href="/privacy.html">Privacy</a>&middot;<a href="/terms.html">Terms</a>
-        <div className="ld-footer-sig">Kobrossi Systems &middot; Menands, NY</div>
-        <div className="ld-footer-credit">
-          Photo: <a href="https://commons.wikimedia.org/wiki/File:Albany,_New_York.jpg" target="_blank" rel="noopener noreferrer">Albany, New York</a> by Quintin Soloviev, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>
+      <footer className="ks-footer">
+        <div className="ks-wrap">
+          <div className="ks-footer-top">
+            <Wordmark />
+            <p>Websites and Google Maps for local businesses. Menands, NY.</p>
+          </div>
+          <nav className="ks-footer-links" aria-label="Footer">
+            <a href={PHONE_HREF}>Call</a>
+            <a href={smsHref(SMS_HELLO)}>Text</a>
+            <a href={emailHref("Let's talk about my business")}>Email</a>
+            <a href="/login">Client sign in</a>
+            <a href="/privacy.html">Privacy</a>
+            <a href="/terms.html">Terms</a>
+          </nav>
+          <p className="ks-credit">
+            Photo: <a href="https://commons.wikimedia.org/wiki/File:Empire_State_Plaza_at_sunset.jpg" target="_blank" rel="noopener noreferrer">Empire State Plaza at sunset</a> by Sashimi-b,{' '}
+            <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>, cropped.
+          </p>
         </div>
       </footer>
     </div>

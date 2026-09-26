@@ -1,165 +1,149 @@
 import React from 'react'
-import './Landing.css'
-import './Meet.css'
+import './Storefront.css'
 import { track, trackOnce, EV } from '../utils/analytics'
+import { PHONE_DISPLAY, PHONE_HREF, emailHref, smsHref, WORK, Devices, Reveal, Wordmark } from './storefront'
 
 // Public page at /jp: the ONE link JP texts past clients and their friends
 // when he asks "do you know a business owner who...?" (2026-09-25).
 //
-// Written for someone opening it cold on a phone, from a text. 2026-09-25:
-// written as the business, not first person (JP's review). The three offers
-// at a glance, real live work they can tap, and Call / Text / Email only. No hero photo, so
-// it loads fast on a phone. Reuses Landing.css's .ld tokens, same as /switch.
-//
-// Proof rules: only sites that were curl-checked live on 2026-09-25, one line
-// each of what was actually built (read off the served sites), no numbers,
-// no results claims, no testimonials. Owner-facing words only: never "AI",
-// "software", "app", "platform", "automation" or "POS" (CLAUDE.md §4).
-const PHONE_DISPLAY = '(518) 608-9344'
-const PHONE_HREF = 'tel:+15186089344'
-const EMAIL_HREF = `mailto:kobrossisystems@gmail.com?subject=${encodeURIComponent('About my business')}`
-const SMS_HREF = `sms:+15186089344?&body=${encodeURIComponent("Hi JP, I got your link. I'd like to talk about my business.")}`
+// Opened cold on a phone from a text, so: no hero photo (fast), the three
+// offers at a glance, the real live work, and exactly three ways to reach us:
+// Call, Text, Email. Same design tokens as the homepage (Storefront.css,
+// "The Capitol at dusk"), written as the business, not first person.
+const SMS = "Hi JP, I got your link. I'd like to talk about my business."
+const MAIL = 'About my business'
 
 const OFFERS = [
   {
-    accent: 'green',
+    key: 'starter',
     name: 'The Online Starter Kit',
     price: '$1,500',
-    line: 'A clean, professional website plus your Google profile set up, so you show up on Google Maps and search when people nearby look for you. Local SEO included.',
+    line: 'A professional website plus your Google profile set up, so you show up on Google Maps and local search when people nearby look.',
   },
   {
-    accent: 'orange',
+    key: 'followup',
+    featured: true,
     name: 'The Follow-Up System',
     price: '$2,000',
     step: '+$500 over the Starter Kit, then from $197/mo',
     line: 'Everything in the Starter Kit, plus every missed call texted back and every customer asked for a review.',
   },
   {
-    accent: 'amber',
+    key: 'diagnostic',
     name: 'The Diagnostic',
     price: 'Quoted after we talk',
-    line: 'We walk your business, show you where time or money is slipping, then quote the fix.',
+    line: 'We walk through your business, show you where time or money is slipping, then price the real fix.',
   },
 ]
 
-const PROOF = [
-  {
-    name: 'D&K Tax Services',
-    domain: 'dktaxservice.com',
-    did: 'English and Spanish website with online booking for both offices, Bronx and Albany.',
-  },
-  {
-    name: 'First Class Property Services',
-    domain: '518firstclassservices.com',
-    did: 'Website with online booking and a quote estimator for a home repair and remodeling company.',
-  },
-  {
-    name: 'Troy Mega Laundromat',
-    domain: 'troymegawash.com',
-    did: 'Website for a Troy laundromat: hours, prices and wash, dry and fold drop-off, all in one place.',
-  },
-  {
-    name: 'Half Moon Smoke World',
-    domain: 'halfmoonsmokeworld.com',
-    did: "Website with the shop's product menu online, so customers can look before they drive over.",
-  },
-]
+function Reach({ where, cta }) {
+  return (
+    <div className="ks-actions">
+      <a className="ks-btn" href={PHONE_HREF} onClick={cta(where + '-call')}>Call</a>
+      <a className="ks-btn ks-btn--ghost" href={smsHref(SMS)} onClick={cta(where + '-text')}>Text</a>
+      <a className="ks-btn ks-btn--ghost" href={emailHref(MAIL)} onClick={cta(where + '-email')}>Email</a>
+    </div>
+  )
+}
 
 export default function Meet() {
   React.useEffect(() => {
-    document.title = 'Kobrossi Systems, Menands NY'
+    document.title = 'Kobrossi Systems | Menands, NY'
     trackOnce(EV.LANDING_VIEW, { page: 'jp' })
   }, [])
 
   const cta = (where) => () => track(EV.LANDING_CTA, { where, page: 'jp' })
 
   return (
-    <div className="ld mt">
-      <header className="ld-top">
-        <a className="ld-logo" href="/">
-          <span className="ld-logo-mark" aria-hidden="true" />
-          KOBROSSI SYSTEMS
-          <span className="ld-logo-sub">&#47;&#47; capital region, ny</span>
-        </a>
-        <nav>
-          <a className="ld-cta-sm" href={PHONE_HREF} onClick={cta('topbar-call')}>Call</a>
-        </nav>
-      </header>
-
-      {/* What the business does + the way to reach it, above the fold on a phone */}
-      <section className="mt-hero">
-        <div className="mt-inner">
-          <div className="ld-eyebrow"><span className="ld-eyebrow-dot" />Local businesses &middot; Capital Region, NY</div>
-          <h1 className="mt-h1">Get found. Get the call.</h1>
-          <p className="mt-sub">
+    <div className="ks ks-jp">
+      <header className="ks-hero ks-hero--plain">
+        <div className="ks-wrap ks-top">
+          <Wordmark />
+          <a className="ks-btn ks-btn--sm" href={PHONE_HREF} onClick={cta('topbar-call')}>Call</a>
+        </div>
+        <div className="ks-wrap ks-hero-copy">
+          <p className="ks-eyebrow ks-rise" style={{ '--d': '0ms' }}>Websites and Google Maps &middot; Capital Region, NY</p>
+          <h1 className="ks-h1 ks-h1--jp">
+            <span className="ks-rise" style={{ '--d': '80ms' }}>Your business,</span>{' '}
+            <span className="ks-rise" style={{ '--d': '160ms' }}><em>easy to find</em> on Google.</span>
+          </h1>
+          <p className="ks-lede ks-rise" style={{ '--d': '300ms' }}>
             Websites, Google Maps and follow-up for local businesses across the Capital Region.
           </p>
-          <div className="ld-cta-row ld-cta-row--center">
-            <a className="ld-cta" href={PHONE_HREF} onClick={cta('hero-call-btn')}>Call</a>
-            <a className="ld-cta ld-cta-call" href={SMS_HREF} onClick={cta('hero-text')}>Text</a>
-            <a className="ld-cta ld-cta-call" href={EMAIL_HREF} onClick={cta("hero-email")}>Email</a>
+          <div className="ks-rise" style={{ '--d': '400ms' }}>
+            <Reach where="hero" cta={cta} />
           </div>
         </div>
-      </section>
+      </header>
 
-      {/* The three offers at a glance */}
-      <section className="mt-section" id="offers">
-        <div className="mt-inner">
-          <span className="ld-kicker-label">What we do</span>
-          <h2>Three ways to start</h2>
-          <ul className="mt-offers">
-            {OFFERS.map((o) => (
-              <li className={`mt-offer mt-offer--${o.accent}`} key={o.name}>
-                <div className="mt-offer-top">
-                  <h3>{o.name}</h3>
-                  <div className="mt-offer-price">{o.price}</div>
-                </div>
-                {o.step && <div className="mt-offer-step">{o.step}</div>}
-                <p>{o.line}</p>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-fine">Full details on <a className="ld-inline-link" href="/#tiers">the main page</a>.</p>
-        </div>
-      </section>
-
-      {/* Proof: live sites, tap and check */}
-      <section className="mt-section" id="work">
-        <div className="mt-inner">
-          <span className="ld-kicker-label">Real work</span>
-          <h2>Recent work</h2>
-          <p className="ld-kicker">All live. Tap one and look.</p>
-          <ul className="mt-proof">
-            {PROOF.map((p) => (
-              <li key={p.domain}>
-                <a className="mt-proof-card" href={`https://${p.domain}`} target="_blank" rel="noopener noreferrer">
-                  <span className="mt-proof-name">{p.name}</span>
-                  <span className="mt-proof-did">{p.did}</span>
-                  <span className="mt-proof-domain">{p.domain} &rarr;</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      {/* One clear way in */}
-      <section className="mt-section" id="reach">
-        <div className="mt-inner mt-reach">
-          <span className="ld-kicker-label">Contact</span>
-          <h2>Tell us about your business.</h2>
-          <p className="ld-kicker">{PHONE_DISPLAY}. Call, text or email.</p>
-          <div className="ld-cta-row ld-cta-row--center">
-            <a className="ld-cta" href={PHONE_HREF} onClick={cta("reach-call")}>Call</a>
-            <a className="ld-cta ld-cta-call" href={SMS_HREF} onClick={cta("reach-text")}>Text</a>
-            <a className="ld-cta ld-cta-call" href={EMAIL_HREF} onClick={cta("reach-email")}>Email</a>
+      <main>
+        <section className="ks-sheet ks-paper" id="offers" aria-labelledby="offers-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">What we do</p>
+              <h2 id="offers-h" className="ks-h2">Three ways <em>to start.</em></h2>
+            </Reveal>
+            <ul className="ks-mini-offers">
+              {OFFERS.map((o) => (
+                <Reveal as="li" className={`ks-mini-offer${o.featured ? ' ks-mini-offer--featured' : ''}`} key={o.key}>
+                  <div className="ks-mini-offer-top">
+                    <h3>{o.name}</h3>
+                    <div className={`ks-mini-offer-price${o.price.startsWith('$') ? '' : ' ks-mini-offer-price--words'}`}>{o.price}</div>
+                  </div>
+                  {o.step && <div className="ks-mini-offer-step">{o.step}</div>}
+                  <p>{o.line}</p>
+                </Reveal>
+              ))}
+            </ul>
+            <p className="ks-fine">Full details on <a className="ks-link" href="/#pricing">the main page</a>.</p>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <footer className="ld-footer">
-        <a href={PHONE_HREF}>Call</a>&middot;<a href="/">Main page</a>&middot;<a href="/privacy.html">Privacy</a>&middot;<a href="/terms.html">Terms</a>
-        <div className="ld-footer-sig">Kobrossi Systems &middot; Menands, NY</div>
+        <section className="ks-paper ks-jp-work" id="work" aria-labelledby="jp-work-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">Recent work</p>
+              <h2 id="jp-work-h" className="ks-h2">All live. <em>Tap one and look.</em></h2>
+            </Reveal>
+            <ul className="ks-jp-grid">
+              {WORK.map((w) => (
+                <Reveal as="li" key={w.key}>
+                  <a className="ks-jp-card" href={`https://${w.domain}`} target="_blank" rel="noopener noreferrer" onClick={cta('work-' + w.key)}>
+                    <Devices item={w} compact />
+                    <span className="ks-jp-card-name">{w.name}</span>
+                    <span className="ks-jp-card-did">{w.did}</span>
+                    <span className="ks-jp-card-domain">{w.domain} <span aria-hidden="true">&#8599;</span></span>
+                  </a>
+                </Reveal>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="ks-sheet ks-ink ks-jp-reach" id="reach" aria-labelledby="reach-h">
+          <div className="ks-wrap">
+            <Reveal>
+              <p className="ks-label">Contact</p>
+              <h2 id="reach-h" className="ks-h2 ks-h2--xl">Tell us about <em>your business.</em></h2>
+              <a className="ks-phone-big" href={PHONE_HREF} onClick={cta('reach-number')}>{PHONE_DISPLAY}</a>
+              <Reach where="reach" cta={cta} />
+            </Reveal>
+          </div>
+        </section>
+      </main>
+
+      <footer className="ks-footer">
+        <div className="ks-wrap">
+          <div className="ks-footer-top">
+            <Wordmark />
+            <p>Kobrossi Systems &middot; Menands, NY</p>
+          </div>
+          <nav className="ks-footer-links" aria-label="Footer">
+            <a href="/">Main page</a>
+            <a href="/privacy.html">Privacy</a>
+            <a href="/terms.html">Terms</a>
+          </nav>
+        </div>
       </footer>
     </div>
   )
