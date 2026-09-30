@@ -31,7 +31,7 @@ const COMPARE = [
   { label: 'Setup', them: 'Locked into whatever they built', us: '$1,000 once, built around how you actually work' },
   { label: 'Monthly', them: '$350/mo and up', us: '$197/mo flat' },
   { label: 'Contract', them: 'Usually 6 to 12 months', us: 'Month to month, cancel anytime' },
-  { label: 'Who answers', them: 'A support queue', us: 'Me, directly, same number you already have' },
+  { label: 'Who answers', them: 'A support queue', us: 'Our team, directly, on a local number' },
 ]
 
 const INCLUDED = [
@@ -69,13 +69,13 @@ export default function Switch() {
           <h1 className="sw-h1">Same missed-call system. $150 less a month.</h1>
           <p className="ld-sub sw-sub">
             If you're already paying an agency $300 to $400/mo for missed-call texting and review
-            requests, I'll take it over, keep it running, and cut the bill to $197/mo. Month to
+            requests, we'll take it over, keep it running, and cut the bill to $197/mo. Month to
             month. Nobody puts you on hold.
           </p>
           <ul className="ld-trust">
             <li>$1,000 to switch it over, no downtime</li>
             <li>$197/mo after that, flat, no contract</li>
-            <li>I only take on 3 of these a month</li>
+            <li>We only take on 3 of these a month</li>
           </ul>
         </div>
       </section>
@@ -122,12 +122,12 @@ export default function Switch() {
             <span className="ld-kicker-label">The offer</span>
             <h2 className="sw-offer-h2">$1,000 to switch. $197/mo after.</h2>
             <p>
-              I move what's already working over, so there's no gap where calls go unanswered
+              We move what's already working over, so there's no gap where calls go unanswered
               during the change. If it's not fully running within 2 weeks of us starting, you
               don't owe the setup fee.
             </p>
             <p className="sw-scarcity">
-              I only take on 3 of these a month so each one actually gets moved over right, not
+              We only take on 3 of these a month so each one actually gets moved over right, not
               rushed. Once those 3 spots are gone this month, the next opening is next month.
             </p>
             <div className="ld-cta-row">

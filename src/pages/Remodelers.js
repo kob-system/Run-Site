@@ -25,7 +25,7 @@ const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Jo
 
 export default function Remodelers() {
   React.useEffect(() => {
-    document.title = 'JobTally, built for your business — Kobrossi Systems'
+    document.title = 'JobTally, built for your business | Kobrossi Systems'
     trackOnce(EV.LANDING_VIEW, { page: 'remodelers' })
   }, [])
 
@@ -46,11 +46,11 @@ export default function Remodelers() {
         <h1>Interested in JobTally for your business?</h1>
         <p className="rl-sub">
           JobTally tracks crew hours, receipts, and per-job profit from a phone. It's not a
-          self-serve signup anymore — I build and customize it for one business at a time, the
-          same way I build everything else. Tell me about your crew and I'll tell you straight
+          self-serve signup anymore. We build and customize it for one business at a time, the
+          same way we build everything else. Tell us about your crew and we'll tell you straight
           whether it's worth doing.
         </p>
-        <a className="rl-cta" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email me</a>
+        <a className="rl-cta" href={CONTACT_MAILTO} onClick={cta('hero-email')}>Email us</a>
         <div className="rl-cta-note">Or call/text {CONTACT_PHONE_DISPLAY}</div>
       </section>
 
@@ -72,18 +72,18 @@ export default function Remodelers() {
             numbers until it was way too late.
           </p>
           <p>
-            <strong>So I built JobTally to kill that.</strong> Now I build a version of it for
+            <strong>So we built JobTally to kill that.</strong> Now we build a version of it for
             whoever actually needs the same fix, priced for that one job, not a monthly plan.
           </p>
         </div>
       </section>
 
       <section className="rl-final-cta" style={{ padding: '48px 20px', textAlign: 'center', background: 'var(--navy)', color: '#fff' }}>
-        <h2 style={{ fontSize: 'clamp(22px, 4vw, 30px)', fontWeight: 800 }}>Tell me about your crew.</h2>
+        <h2 style={{ fontSize: 'clamp(22px, 4vw, 30px)', fontWeight: 800 }}>Tell us about your crew.</h2>
         <p style={{ color: 'rgba(255,255,255,0.72)', marginTop: '8px', maxWidth: '480px', marginInline: 'auto' }}>
           How many guys, what you're tracking now, and what's actually going wrong with it.
         </p>
-        <a className="rl-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email me</a>
+        <a className="rl-cta" href={CONTACT_MAILTO} onClick={cta('final')}>Email us</a>
         <div className="rl-cta-note">Or call/text {CONTACT_PHONE_DISPLAY}</div>
       </section>
 

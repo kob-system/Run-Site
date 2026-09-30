@@ -267,7 +267,7 @@ test('a trailing slash still reaches the root landing page', async () => {
 test('/jp, the referral link, renders with a tap-to-call phone and the new prices', async () => {
   goTo('/jp')
   render(<App />)
-  expect(await screen.findByRole('heading', { name: /Tell us about your business/i }, ROUTE_LOAD)).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: /Tell our team about your business/i }, ROUTE_LOAD)).toBeInTheDocument()
   const callLinks = screen.getAllByRole('link').filter((a) => a.getAttribute('href') === 'tel:+15186089344')
   expect(callLinks.length).toBeGreaterThan(0)
   expect(screen.getByText('$1,500')).toBeInTheDocument()
@@ -322,8 +322,26 @@ test('storefront pages carry no em or en dashes and none of the banned owner-fac
 test('/jp offers exactly three ways to reach us: call, text, email', async () => {
   goTo('/jp')
   render(<App />)
-  await screen.findByRole('heading', { name: /Tell us about your business/i }, ROUTE_LOAD)
+  await screen.findByRole('heading', { name: /Tell our team about your business/i }, ROUTE_LOAD)
   const schemes = new Set(screen.getAllByRole('link').map((a) => (a.getAttribute('href') || '').split(':')[0]).filter((s) => ['tel', 'sms', 'mailto'].includes(s)))
   expect([...schemes].sort()).toEqual(['mailto', 'sms', 'tel'])
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+})
+
+test('storefront speaks as a team: our-team section on the homepage, no founder or first-person lines', async () => {
+  goTo('/')
+  const first = render(<App />)
+  await screen.findByRole('heading', { level: 1, name: /easy to find on Google/i }, ROUTE_LOAD)
+  expect(screen.getByRole('heading', { name: /One local team\. Every part covered\./i })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /^jp$/i })).not.toBeInTheDocument()
+  first.unmount()
+  for (const path of ['/', '/jp']) {
+    goTo(path)
+    const { unmount } = render(<App />)
+    await screen.findByRole('heading', { level: 1, name: /easy to find on Google/i }, ROUTE_LOAD)
+    const text = document.body.textContent
+    expect(text).not.toMatch(/\b(founder|JP|Kobrossi, John|John Paul|I'm|I'll)\b/)
+    expect(text).not.toMatch(/\bI (build|built|take|move|only)\b/)
+    unmount()
+  }
 })

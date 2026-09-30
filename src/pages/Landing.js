@@ -105,6 +105,40 @@ const STEPS = [
   { n: '05', h: 'You own it', p: 'You own it and keep every login. Nothing held back.' },
 ]
 
+// Who does what. Roles, not names: the site speaks as the team. Every line is
+// work the team actually does today; nothing here is a headcount, a title or
+// a years-in-business claim.
+const TEAM = [
+  {
+    n: '01',
+    h: 'Strategy',
+    p: 'Walks through your business with you, finds where customers slip away, and writes the plan and the price before any work starts.',
+  },
+  {
+    n: '02',
+    h: 'Design and build',
+    p: 'Writes and builds your website for your customers, phone first, fast to load and clear about what you do.',
+  },
+  {
+    n: '03',
+    h: 'Local search',
+    p: 'Sets up your Google Business Profile and local search so you show up on Maps when people nearby look.',
+  },
+  {
+    n: '04',
+    h: 'Client success',
+    p: 'Your one point of contact from the first call to launch and after. You always know who to call.',
+  },
+]
+
+// What every client can hold us to. Each one is already true on this page:
+// flat prices (pricing), ownership (steps 05), the 14 day guarantee.
+const PROMISES = [
+  { h: 'Flat prices', p: 'Written down before any work starts. No surprise invoices.' },
+  { h: 'You own it', p: 'Your website, your Google profile, every login. Nothing held back.' },
+  { h: 'Live in 14 days', p: 'From the day we get your logins, or your setup fee comes back.' },
+]
+
 const SMS_HELLO = "Hi, I found getjobtally.com. I'd like to talk about my business."
 const SMS_REFER = "Hi, I'd like to refer a business to you. Their name and number: "
 
@@ -126,6 +160,7 @@ export default function Landing() {
           <Wordmark />
           <nav className="ks-nav" aria-label="Main">
             <a href="#work">Work</a>
+            <a href="#team">Our team</a>
             <a href="#pricing">Pricing</a>
             <a href="#contact">Contact</a>
           </nav>
@@ -134,15 +169,15 @@ export default function Landing() {
 
         <div className="ks-hero-grid">
           <div className="ks-hero-copy">
-            <p className="ks-eyebrow ks-rise" style={{ '--d': '0ms' }}>Websites and Google Maps &middot; Capital Region, NY</p>
+            <p className="ks-eyebrow ks-rise" style={{ '--d': '0ms' }}>Web and local search team &middot; Capital Region, NY</p>
             <h1 className="ks-h1">
               <span className="ks-rise" style={{ '--d': '80ms' }}>Your business,</span>{' '}
               <span className="ks-rise" style={{ '--d': '160ms' }}><em>easy to find</em></span>{' '}
               <span className="ks-rise" style={{ '--d': '240ms' }}>on Google.</span>
             </h1>
             <p className="ks-lede ks-rise" style={{ '--d': '340ms' }}>
-              We build websites for local businesses and set up their Google listing, so when people
-              nearby search for what you do, they find you.
+              Our team builds websites for local businesses and sets up their Google listing, so when
+              people nearby search for what you do, they find you.
             </p>
             <div className="ks-actions ks-rise" style={{ '--d': '420ms' }}>
               <a className="ks-btn ks-btn--call" data-magnetic href={PHONE_HREF} onClick={cta('hero-call')}>Call {PHONE_DISPLAY}</a>
@@ -316,6 +351,37 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* ── Our team (paper) ─────────────────────────────────────── */}
+        <section className="ks-sheet ks-paper ks-team" id="team" aria-labelledby="team-h">
+          <div className="ks-wrap">
+            <Reveal className="ks-head">
+              <p className="ks-label">Our team</p>
+              <h2 id="team-h" className="ks-h2">One local team. <em>Every part covered.</em></h2>
+              <p className="ks-sub">
+                Strategy, design, local search and client success under one roof in Menands, working
+                together on your business. No call center, no hand-offs to strangers.
+              </p>
+            </Reveal>
+            <div className="ks-parts ks-team-grid">
+              {TEAM.map((t, i) => (
+                <Reveal className="ks-part" key={t.n} style={{ '--i': i }}>
+                  <span className="ks-part-n">{t.n}</span>
+                  <h3>{t.h}</h3>
+                  <p>{t.p}</p>
+                </Reveal>
+              ))}
+            </div>
+            <Reveal className="ks-promises">
+              <p className="ks-label">What you can hold us to</p>
+              <ul>
+                {PROMISES.map((x) => (
+                  <li key={x.h}><strong>{x.h}.</strong> {x.p}</li>
+                ))}
+              </ul>
+            </Reveal>
+          </div>
+        </section>
+
         {/* ── Pricing (ink) ────────────────────────────────────────── */}
         <section className="ks-sheet ks-ink ks-pricing" id="pricing" aria-labelledby="pricing-h">
           <div className="ks-wrap">
@@ -358,7 +424,7 @@ export default function Landing() {
           <div className="ks-wrap ks-contact-grid">
             <Reveal className="ks-contact-copy">
               <p className="ks-label">Contact</p>
-              <h2 id="contact-h" className="ks-h2 ks-h2--xl">Let's talk about <em>your business.</em></h2>
+              <h2 id="contact-h" className="ks-h2 ks-h2--xl">Tell our team about <em>your business.</em></h2>
               <a className="ks-phone-big" href={PHONE_HREF} onClick={cta('contact-number')}>{PHONE_DISPLAY}</a>
               <div className="ks-actions">
                 <a className="ks-btn" data-magnetic href={PHONE_HREF} onClick={cta('contact-call')}>Call</a>
@@ -367,7 +433,7 @@ export default function Landing() {
               </div>
             </Reveal>
             <Reveal className="ks-contact-form">
-              <p className="ks-form-title">Or leave your details and we'll reach out.</p>
+              <p className="ks-form-title">Or leave your details and someone from our team will reach out.</p>
               <LeadForm source="homepage-final" ctaLabel="Send" />
             </Reveal>
           </div>
@@ -388,7 +454,7 @@ export default function Landing() {
           <div className="ks-footer-cols">
             <div className="ks-footer-brand">
               <Wordmark />
-              <p>Websites and Google Maps for local businesses. Based in Menands, NY.</p>
+              <p>A web and local search team for local businesses. Based in Menands, NY.</p>
               <a className="ks-footer-phone" href={PHONE_HREF}>{PHONE_DISPLAY}</a>
             </div>
             <nav className="ks-footer-col" aria-label="Recent work">

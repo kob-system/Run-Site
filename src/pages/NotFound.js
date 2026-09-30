@@ -53,11 +53,11 @@ export default function NotFound() {
           <a className="ld-cta" href="/">Go to the home page</a>
           <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginTop: 26, lineHeight: 1.8 }}>
             Looking for something specific?<br />
-            <a href="/#tiers" style={{ color: 'var(--orange)', fontWeight: 700 }}>Pricing</a>
+            <a href="/#pricing" style={{ color: 'var(--orange)', fontWeight: 700 }}>Pricing</a>
             {' · '}
             <a href="/login" style={{ color: 'var(--orange)', fontWeight: 700 }}>Sign in</a>
             {' · '}
-            <a href="mailto:kobrossisystems@gmail.com" style={{ color: 'var(--orange)', fontWeight: 700 }}>Email me</a>
+            <a href="mailto:kobrossisystems@gmail.com" style={{ color: 'var(--orange)', fontWeight: 700 }}>Email us</a>
           </p>
         </div>
       </section>

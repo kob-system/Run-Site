@@ -21,7 +21,7 @@ export default function LeadForm({
   ctaLabel = "Send",
   askMessage = "Tell us about your business",
   compact = false,
-  // When true, the thank-you state offers a one-tap prefilled text to JP.
+  // When true, the thank-you state offers a one-tap prefilled text to the team line.
   // public.leads has no alert on insert (nothing pings JP), so on the pages
   // where speed matters this is the zero-infra way to make sure he sees it:
   // the visitor's own phone sends the text, no key or server involved.
@@ -36,7 +36,7 @@ export default function LeadForm({
 
   const smsHref = () => {
     const body = [
-      'Hi JP, I just filled out your form on getjobtally.com.',
+      'Hi, I just filled out the form on getjobtally.com.',
       name.trim() && `I'm ${name.trim()}.`,
       message.trim(),
     ].filter(Boolean).join(' ').slice(0, 400)

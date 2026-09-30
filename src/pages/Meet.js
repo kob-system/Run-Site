@@ -5,12 +5,14 @@ import { PHONE_DISPLAY, PHONE_HREF, emailHref, smsHref, WORK, Devices, Reveal, W
 
 // Public page at /jp: the ONE link JP texts past clients and their friends
 // when he asks "do you know a business owner who...?" (2026-09-25).
+// 2026-09-30 team voice: the page itself never names a person, and the
+// homepage does not link here. The /jp path stays so links already sent work.
 //
 // Opened cold on a phone from a text, so: no hero photo (fast), the three
 // offers at a glance, the real live work, and exactly three ways to reach us:
 // Call, Text, Email. Same design tokens as the homepage (Storefront.css,
 // "The Capitol at dusk"), written as the business, not first person.
-const SMS = "Hi JP, I got your link. I'd like to talk about my business."
+const SMS = "Hi, I got your link. I'd like to talk about my business."
 const MAIL = 'About my business'
 
 const OFFERS = [
@@ -68,7 +70,8 @@ export default function Meet() {
             <span className="ks-rise" style={{ '--d': '160ms' }}><em>easy to find</em> on Google.</span>
           </h1>
           <p className="ks-lede ks-rise" style={{ '--d': '300ms' }}>
-            Websites, Google Maps and follow-up for local businesses across the Capital Region.
+            Our team builds websites, Google Maps listings and follow-up for local businesses across
+            the Capital Region.
           </p>
           <div className="ks-rise" style={{ '--d': '400ms' }}>
             <Reach where="hero" cta={cta} />
@@ -124,7 +127,7 @@ export default function Meet() {
           <div className="ks-wrap">
             <Reveal>
               <p className="ks-label">Contact</p>
-              <h2 id="reach-h" className="ks-h2 ks-h2--xl">Tell us about <em>your business.</em></h2>
+              <h2 id="reach-h" className="ks-h2 ks-h2--xl">Tell our team about <em>your business.</em></h2>
               <a className="ks-phone-big" href={PHONE_HREF} onClick={cta('reach-number')}>{PHONE_DISPLAY}</a>
               <Reach where="reach" cta={cta} />
             </Reveal>
